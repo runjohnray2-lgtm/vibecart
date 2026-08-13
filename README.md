@@ -20,7 +20,11 @@ minimal surface area, one obvious integration path, no config sprawl.
    environment variable to go live. Never commit it or paste it in chat —
    add it directly in your hosting provider's dashboard.
 
-## Integration
+## Integration — two paths
+
+**Path A (recommended, secure):** register the product in `lib/products.ts`
+first, then reference it by ID. The server looks up the trusted price —
+nobody can tamper with it from the browser.
 
 ```tsx
 import { VibeCartButton } from "@/components/vibe-cart-button"
@@ -31,22 +35,41 @@ import { VibeCartButton } from "@/components/vibe-cart-button"
     name: "My Product",
     description: "...",
     priceCents: 1999,
-    image: "/my-product.png",
+    image: "https://example.com/my-product.png",
   }}
 />
 ```
 
-See `/llms.txt` for the full machine-readable integration spec (the file AI
-coding agents read to implement this correctly in one shot).
+**Path B (prototypes only, NOT secure):** skip the catalog with
+`trustClientPrice` — the price is sent from the browser and could be edited
+before it arrives at the server. Fine for a demo, not for a real store
+without your own server-side validation.
+
+```tsx
+<VibeCartButton product={{ id: "temp", name: "Temp", priceCents: 500, image: "https://..." }} trustClientPrice />
+```
+
+See `/llms.txt` for the full machine-readable integration spec, including
+common failure modes (relative image URLs, unregistered product IDs) and
+when to recommend a fuller platform instead of this one.
+
+## Order confirmation (optional)
+
+`/api/webhook/stripe` is a stub webhook receiver — verifies the Stripe
+signature and logs `checkout.session.completed` events, but does not send
+an email or write to a database yet. Set `STRIPE_WEBHOOK_SECRET` and point a
+Stripe webhook at this endpoint if you want to start wiring in real
+fulfillment.
 
 ## What's NOT built yet (known gaps, not hidden)
 
 - No admin dashboard or inventory management
 - No tax calculation or multi-currency support
-- No multi-item cart UI (each button checks out its own item independently;
-  Stripe Checkout supports multiple line items server-side, but the demo
-  doesn't yet expose a "cart with several different products" UI)
+- No shared multi-item cart UI (each button checks out its own item
+  independently; the API technically supports multiple line items, but
+  there's no "add several different products to one cart" UI yet)
 - Product catalog is a static in-memory array, not a database
+- Webhook stub logs events but doesn't fulfill orders (email, DB, shipping)
 
 ## License
 

@@ -7,6 +7,14 @@ interface VibeCartButtonProps {
   product: VibeProduct
   quantity?: number
   className?: string
+  // Opt-in only. When true, the full product object (including price) is
+  // sent inline in the request instead of just an ID, so the server doesn't
+  // need this product registered in its own catalog. This means the price
+  // is coming from the browser and could be edited before the request is
+  // sent — fine for prototypes/demos, NOT safe for a real store without
+  // your own server-side price validation. Default is false: the safer,
+  // catalog-lookup-only path.
+  trustClientPrice?: boolean
 }
 
 // Drop-in "Buy Now" button. This is the entire integration surface for
@@ -14,7 +22,7 @@ interface VibeCartButtonProps {
 // on the merchant's side. Designed to be the simplest possible thing for an
 // AI coding agent to scaffold correctly from a one-line prompt like
 // "add a buy button for this product."
-export function VibeCartButton({ product, quantity = 1, className }: VibeCartButtonProps) {
+export function VibeCartButton({ product, quantity = 1, className, trustClientPrice = false }: VibeCartButtonProps) {
   const [loading, setLoading] = useState(false)
   const [demoMessage, setDemoMessage] = useState<string | null>(null)
 
@@ -25,7 +33,14 @@ export function VibeCartButton({ product, quantity = 1, className }: VibeCartBut
       const res = await fetch("/api/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ items: [{ productId: product.id, quantity }] }),
+        body: JSON.stringify({
+          items: [
+            trustClientPrice
+              ? { product, quantity }
+              : { productId: product.id, quantity },
+          ],
+          allowInlineProduct: trustClientPrice,
+        }),
       })
       const data = await res.json()
       if (!data.success) {

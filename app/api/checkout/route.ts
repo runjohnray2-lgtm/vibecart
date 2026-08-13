@@ -1,13 +1,36 @@
 import { NextResponse } from "next/server"
 import Stripe from "stripe"
-import { getProduct } from "@/lib/products"
+import { getProduct, VibeProduct } from "@/lib/products"
 
 export const runtime = "nodejs"
 
+interface InlineProduct {
+  id: string
+  name: string
+  description?: string
+  priceCents: number
+  image?: string
+}
+
+interface CheckoutItem {
+  productId?: string
+  product?: InlineProduct
+  quantity: number
+}
+
 interface CheckoutRequestBody {
-  items: { productId: string; quantity: number }[]
+  items: CheckoutItem[]
+  // Explicit opt-in required to trust a client-supplied price. Without this,
+  // inline `product` data is rejected unless it matches a catalog entry —
+  // this exists specifically so a naive integration can't let a visitor set
+  // their own price by editing the request in devtools.
+  allowInlineProduct?: boolean
   successUrl?: string
   cancelUrl?: string
+}
+
+function isAbsoluteUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url)
 }
 
 export async function POST(req: Request) {
@@ -18,11 +41,61 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: "No items provided" }, { status: 400 })
     }
 
-    const resolved = body.items.map(item => {
-      const product = getProduct(item.productId)
-      if (!product) throw new Error(`Unknown productId: ${item.productId}`)
-      return { product, quantity: Math.max(1, item.quantity) }
-    })
+    const resolved: { product: VibeProduct; quantity: number; trusted: boolean }[] = []
+
+    for (const item of body.items) {
+      const quantity = Math.max(1, item.quantity)
+
+      // 1. Prefer a known, server-side catalog product — always trusted,
+      //    price cannot be tampered with by the client.
+      if (item.productId) {
+        const catalogProduct = getProduct(item.productId)
+        if (catalogProduct) {
+          resolved.push({ product: catalogProduct, quantity, trusted: true })
+          continue
+        }
+      }
+
+      // 2. Fall back to client-supplied inline product data — only if the
+      //    caller explicitly opted in. This exists for the common
+      //    "AI agent added a new product but didn't register it in the
+      //    catalog" case, but it means the price came from the browser and
+      //    could have been edited before the request was sent. Fine for
+      //    prototypes/demos. NOT safe for a real store without your own
+      //    server-side price validation.
+      if (item.product && body.allowInlineProduct) {
+        const p = item.product
+        if (!p.id || !p.name || typeof p.priceCents !== "number") {
+          return NextResponse.json(
+            { success: false, error: "Inline product missing required fields (id, name, priceCents)" },
+            { status: 400 }
+          )
+        }
+        if (p.image && !isAbsoluteUrl(p.image)) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: `Product image must be an absolute URL (https://...), got "${p.image}". Stripe cannot use relative paths.`,
+            },
+            { status: 400 }
+          )
+        }
+        resolved.push({
+          product: { id: p.id, name: p.name, description: p.description ?? "", priceCents: p.priceCents, image: p.image ?? "" },
+          quantity,
+          trusted: false,
+        })
+        continue
+      }
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Unknown productId "${item.productId ?? "(none)"}" — either register this product in lib/products.ts, or pass full product data with allowInlineProduct: true (see /llms.txt).`,
+        },
+        { status: 400 }
+      )
+    }
 
     const secretKey = process.env.STRIPE_SECRET_KEY
 
@@ -37,6 +110,7 @@ export async function POST(req: Request) {
         checkoutUrl: null,
         message: `[DEMO MODE — no Stripe key configured] Would charge $${(total / 100).toFixed(2)} for ${resolved.length} item(s). Add STRIPE_SECRET_KEY to go live.`,
         totalCents: total,
+        untrustedPricing: resolved.some(r => !r.trusted),
       })
     }
 
@@ -50,7 +124,7 @@ export async function POST(req: Request) {
           product_data: {
             name: r.product.name,
             description: r.product.description,
-            images: [r.product.image],
+            images: r.product.image ? [r.product.image] : [],
           },
           unit_amount: r.product.priceCents,
         },
