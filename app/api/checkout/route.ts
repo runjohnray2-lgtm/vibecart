@@ -4,6 +4,8 @@ import { getProduct, VibeProduct } from "@/lib/products"
 
 export const runtime = "nodejs"
 
+const MAX_QUANTITY = 99
+
 interface InlineProduct {
   id: string
   name: string
@@ -38,18 +40,51 @@ function displayName(product: VibeProduct): string {
   return product.variant ? `${product.name} (${product.variant})` : product.name
 }
 
+function err(code: string, message: string, status: number) {
+  return NextResponse.json({ success: false, code, error: message }, { status })
+}
+
+function validQuantity(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw)) return null
+  if (raw < 1 || raw > MAX_QUANTITY) return null
+  return raw
+}
+
+// Only allow redirecting back to the same origin the request came from by
+// default. A merchant CAN pass their own successUrl/cancelUrl, but it must
+// be same-origin — this prevents the checkout endpoint from being used as
+// an open redirect to an arbitrary external URL.
+function safeRedirectUrl(candidate: string | undefined, origin: string, fallbackPath: string): string {
+  const fallback = `${origin}${fallbackPath}`
+  if (!candidate) return fallback
+  try {
+    const url = new URL(candidate, origin)
+    if (url.origin !== origin) return fallback
+    return url.toString()
+  } catch {
+    return fallback
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as CheckoutRequestBody
 
     if (!body.items || body.items.length === 0) {
-      return NextResponse.json({ success: false, error: "No items provided" }, { status: 400 })
+      return err("NO_ITEMS", "No items provided", 400)
     }
 
     const resolved: { product: VibeProduct; quantity: number; trusted: boolean }[] = []
 
     for (const item of body.items) {
-      const quantity = Math.max(1, item.quantity)
+      const quantity = validQuantity(item.quantity)
+      if (quantity === null) {
+        return err(
+          "INVALID_QUANTITY",
+          `Quantity must be a whole number between 1 and ${MAX_QUANTITY}, got ${JSON.stringify(item.quantity)}`,
+          400
+        )
+      }
 
       // 1. Prefer a known, server-side catalog product — always trusted,
       //    price cannot be tampered with by the client.
@@ -71,18 +106,13 @@ export async function POST(req: Request) {
       if (item.product && body.allowInlineProduct) {
         const p = item.product
         if (!p.id || !p.name || typeof p.priceCents !== "number") {
-          return NextResponse.json(
-            { success: false, error: "Inline product missing required fields (id, name, priceCents)" },
-            { status: 400 }
-          )
+          return err("INVALID_INLINE_PRODUCT", "Inline product missing required fields (id, name, priceCents)", 400)
         }
         if (p.image && !isAbsoluteUrl(p.image)) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: `Product image must be an absolute URL (https://...), got "${p.image}". Stripe cannot use relative paths.`,
-            },
-            { status: 400 }
+          return err(
+            "RELATIVE_IMAGE_URL",
+            `Product image must be an absolute URL (https://...), got "${p.image}". Stripe cannot use relative paths.`,
+            400
           )
         }
         resolved.push({
@@ -100,14 +130,16 @@ export async function POST(req: Request) {
         continue
       }
 
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Unknown productId "${item.productId ?? "(none)"}" — either register this product in lib/products.ts, or pass full product data with allowInlineProduct: true (see /llms.txt).`,
-        },
-        { status: 400 }
+      return err(
+        "UNKNOWN_PRODUCT",
+        `Unknown productId "${item.productId ?? "(none)"}" — either register this product in lib/products.ts, or pass full product data with allowInlineProduct: true (see /llms.txt).`,
+        400
       )
     }
+
+    const origin = req.headers.get("origin") ?? new URL(req.url).origin
+    const successUrl = safeRedirectUrl(body.successUrl, origin, "/?checkout=success")
+    const cancelUrl = safeRedirectUrl(body.cancelUrl, origin, "/?checkout=cancelled")
 
     const secretKey = process.env.STRIPE_SECRET_KEY
 
@@ -142,8 +174,8 @@ export async function POST(req: Request) {
         },
         quantity: r.quantity,
       })),
-      success_url: body.successUrl ?? `${req.headers.get("origin")}/?checkout=success`,
-      cancel_url: body.cancelUrl ?? `${req.headers.get("origin")}/?checkout=cancelled`,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
     })
 
     return NextResponse.json({
@@ -151,7 +183,7 @@ export async function POST(req: Request) {
       mode: "live",
       checkoutUrl: session.url,
     })
-  } catch (err) {
-    return NextResponse.json({ success: false, error: String(err) }, { status: 500 })
+  } catch (e) {
+    return err("INTERNAL_ERROR", String(e), 500)
   }
 }

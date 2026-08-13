@@ -26,6 +26,21 @@ to `/api/checkout`, which creates a Stripe Checkout Session server-side and
 redirects the browser to Stripe's hosted payment page. There is no client
 cart state, no custom checkout UI to build, and no separate backend to run.
 
+## Adapting to an existing product source
+
+Do not blindly create/keep `lib/products.ts` if the host application
+already has its own product source. Adapt `getProduct()` accordingly:
+
+- Existing static array → keep as-is, or merge into it.
+- Database (Prisma, Drizzle, etc.) → replace `getProduct()`'s body with a
+  query by `productId`, still returning the `VibeProduct` shape.
+- CMS (Sanity, Contentful, etc.) → resolve the product server-side from the
+  CMS inside `getProduct()`.
+- No product backend at all → keep the minimal static array as shown below.
+
+In every case, `getProduct()` must remain the single server-side source of
+truth for price — never let price flow in from the client for a real store.
+
 ## Environment variables
 
 - `STRIPE_SECRET_KEY` — required to go live. Without it, the API runs in
@@ -53,14 +68,33 @@ it works unmodified.
   VibeCart doesn't do that yet — don't fake shared cart state with this
   component.
 - **Image URLs must be absolute** (`https://...`). Relative paths like
-  `/my-product.png` will be rejected by the checkout API with a clear error
-  — Stripe cannot render a relative path.
+  `/my-product.png` are rejected with `RELATIVE_IMAGE_URL`.
+- **Quantity must be a whole number from 1 to 99.** `NaN`, `Infinity`,
+  decimals, negatives, and absurdly large values are all rejected with
+  `INVALID_QUANTITY` — don't assume any number the user types is safe to
+  forward as-is.
+- **`successUrl`/`cancelUrl` must be same-origin.** The API ignores or
+  falls back on any redirect URL that isn't same-origin with the request —
+  this endpoint cannot be used as an open redirect to an arbitrary site.
 - **Don't build a custom cart drawer, inventory system, or admin panel.**
   VibeCart intentionally has none of those.
-- **`Unknown productId` errors** mean the product wasn't registered in
+- **`UNKNOWN_PRODUCT` errors** mean the product wasn't registered in
   `lib/products.ts` and `trustClientPrice` wasn't set on the button. Either
   register it (secure path), or add `trustClientPrice` (insecure path, see
   security note below).
+
+## Error response codes
+
+Every failed response is `{ "success": false, "code": "...", "error": "human-readable message" }`.
+
+| code | meaning |
+|---|---|
+| `NO_ITEMS` | Request body had an empty or missing `items` array |
+| `INVALID_QUANTITY` | Quantity wasn't a whole number from 1–99 |
+| `UNKNOWN_PRODUCT` | `productId` not found in catalog and no valid inline product provided |
+| `INVALID_INLINE_PRODUCT` | Inline product missing `id`, `name`, or `priceCents` |
+| `RELATIVE_IMAGE_URL` | Product image wasn't an absolute `https://` URL |
+| `INTERNAL_ERROR` | Unexpected server error (network, Stripe API failure, etc.) |
 
 ## Security note — read before using `trustClientPrice`
 
@@ -74,6 +108,16 @@ with devtools open can edit that price before it's sent, and the server
 will honor whatever value arrives.** Only use `trustClientPrice` for demos
 and prototypes. For anything handling real money, register the product in
 `lib/products.ts` instead so the price is looked up server-side.
+
+## Never trust these client fields
+
+- Never accept `priceCents` from the client for a real store (only in
+  explicit, opt-in `trustClientPrice` demo mode).
+- Never use `product.name`/`product.description` from the client for
+  anything billing-related in a real store — resolve from the catalog.
+- Never expose `STRIPE_SECRET_KEY` to the browser or log it.
+- Always resolve `productId` server-side via `getProduct()`.
+- Always validate quantity server-side (already enforced — see error codes).
 
 ## Complete source — copy these three files directly
 
@@ -177,6 +221,7 @@ import Stripe from "stripe"
 import { getProduct, VibeProduct } from "@/lib/products"
 
 export const runtime = "nodejs"
+const MAX_QUANTITY = 99
 
 interface InlineProduct {
   id: string; name: string; description?: string; priceCents: number; image?: string; variant?: string
@@ -188,15 +233,34 @@ interface CheckoutRequestBody {
 
 function isAbsoluteUrl(url: string): boolean { return /^https?:\/\//i.test(url) }
 function displayName(p: VibeProduct): string { return p.variant ? `${p.name} (${p.variant})` : p.name }
+function err(code: string, message: string, status: number) {
+  return NextResponse.json({ success: false, code, error: message }, { status })
+}
+function validQuantity(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw)) return null
+  if (raw < 1 || raw > MAX_QUANTITY) return null
+  return raw
+}
+function safeRedirectUrl(candidate: string | undefined, origin: string, fallbackPath: string): string {
+  const fallback = `${origin}${fallbackPath}`
+  if (!candidate) return fallback
+  try {
+    const url = new URL(candidate, origin)
+    if (url.origin !== origin) return fallback
+    return url.toString()
+  } catch { return fallback }
+}
 
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as CheckoutRequestBody
-    if (!body.items?.length) return NextResponse.json({ success: false, error: "No items provided" }, { status: 400 })
+    if (!body.items?.length) return err("NO_ITEMS", "No items provided", 400)
 
     const resolved: { product: VibeProduct; quantity: number; trusted: boolean }[] = []
     for (const item of body.items) {
-      const quantity = Math.max(1, item.quantity)
+      const quantity = validQuantity(item.quantity)
+      if (quantity === null) return err("INVALID_QUANTITY", `Quantity must be a whole number 1-${MAX_QUANTITY}`, 400)
+
       if (item.productId) {
         const catalogProduct = getProduct(item.productId)
         if (catalogProduct) { resolved.push({ product: catalogProduct, quantity, trusted: true }); continue }
@@ -204,16 +268,20 @@ export async function POST(req: Request) {
       if (item.product && body.allowInlineProduct) {
         const p = item.product
         if (!p.id || !p.name || typeof p.priceCents !== "number") {
-          return NextResponse.json({ success: false, error: "Inline product missing required fields" }, { status: 400 })
+          return err("INVALID_INLINE_PRODUCT", "Inline product missing required fields", 400)
         }
         if (p.image && !isAbsoluteUrl(p.image)) {
-          return NextResponse.json({ success: false, error: `Image must be absolute URL, got "${p.image}"` }, { status: 400 })
+          return err("RELATIVE_IMAGE_URL", `Image must be absolute URL, got "${p.image}"`, 400)
         }
         resolved.push({ product: { id: p.id, name: p.name, description: p.description ?? "", priceCents: p.priceCents, image: p.image ?? "", variant: p.variant }, quantity, trusted: false })
         continue
       }
-      return NextResponse.json({ success: false, error: `Unknown productId "${item.productId ?? "(none)"}"` }, { status: 400 })
+      return err("UNKNOWN_PRODUCT", `Unknown productId "${item.productId ?? "(none)"}"`, 400)
     }
+
+    const origin = req.headers.get("origin") ?? new URL(req.url).origin
+    const successUrl = safeRedirectUrl(body.successUrl, origin, "/?checkout=success")
+    const cancelUrl = safeRedirectUrl(body.cancelUrl, origin, "/?checkout=cancelled")
 
     const secretKey = process.env.STRIPE_SECRET_KEY
     if (!secretKey) {
@@ -228,12 +296,12 @@ export async function POST(req: Request) {
         price_data: { currency: "usd", product_data: { name: displayName(r.product), description: r.product.description, images: r.product.image ? [r.product.image] : [] }, unit_amount: r.product.priceCents },
         quantity: r.quantity,
       })),
-      success_url: body.successUrl ?? `${req.headers.get("origin")}/?checkout=success`,
-      cancel_url: body.cancelUrl ?? `${req.headers.get("origin")}/?checkout=cancelled`,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
     })
     return NextResponse.json({ success: true, mode: "live", checkoutUrl: session.url })
-  } catch (err) {
-    return NextResponse.json({ success: false, error: String(err) }, { status: 500 })
+  } catch (e) {
+    return err("INTERNAL_ERROR", String(e), 500)
   }
 }
 ```
@@ -244,6 +312,21 @@ export async function POST(req: Request) {
 and logs `checkout.session.completed`, but does NOT send an email or write
 to a database. Requires `STRIPE_WEBHOOK_SECRET`. Wire in real fulfillment
 yourself — this is a genuine, disclosed gap, not hidden functionality.
+
+## Production checklist
+
+Before going live, confirm:
+
+- [ ] `STRIPE_SECRET_KEY` configured in the hosting provider's environment variables
+- [ ] A test checkout completed successfully in demo AND live mode
+- [ ] Live Stripe key used only in the production environment, not preview/dev
+- [ ] Every product sold is registered in `lib/products.ts` (or its DB/CMS equivalent) — `trustClientPrice` is NOT enabled for real products
+- [ ] `STRIPE_WEBHOOK_SECRET` configured and fulfillment wired in, if selling anything that requires post-payment action (physical goods, access grants, emails)
+
+Payment succeeding is not the same as an order being fulfilled — VibeCart
+handles checkout initiation only. For anything beyond a simple digital
+purchase, connect the webhook stub to real fulfillment logic or your
+existing backend.
 
 ## What this is NOT
 
