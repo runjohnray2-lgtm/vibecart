@@ -10,6 +10,7 @@ interface InlineProduct {
   description?: string
   priceCents: number
   image?: string
+  variant?: string
 }
 
 interface CheckoutItem {
@@ -31,6 +32,10 @@ interface CheckoutRequestBody {
 
 function isAbsoluteUrl(url: string): boolean {
   return /^https?:\/\//i.test(url)
+}
+
+function displayName(product: VibeProduct): string {
+  return product.variant ? `${product.name} (${product.variant})` : product.name
 }
 
 export async function POST(req: Request) {
@@ -81,7 +86,14 @@ export async function POST(req: Request) {
           )
         }
         resolved.push({
-          product: { id: p.id, name: p.name, description: p.description ?? "", priceCents: p.priceCents, image: p.image ?? "" },
+          product: {
+            id: p.id,
+            name: p.name,
+            description: p.description ?? "",
+            priceCents: p.priceCents,
+            image: p.image ?? "",
+            variant: p.variant,
+          },
           quantity,
           trusted: false,
         })
@@ -122,7 +134,7 @@ export async function POST(req: Request) {
         price_data: {
           currency: "usd",
           product_data: {
-            name: r.product.name,
+            name: displayName(r.product),
             description: r.product.description,
             images: r.product.image ? [r.product.image] : [],
           },

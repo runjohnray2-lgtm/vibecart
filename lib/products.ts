@@ -9,6 +9,7 @@ export interface VibeProduct {
   description: string
   priceCents: number
   image: string
+  variant?: string // e.g. "Size: L", "Color: Black" — optional, purely informational
 }
 
 export const PRODUCTS: VibeProduct[] = [
@@ -32,6 +33,7 @@ export const PRODUCTS: VibeProduct[] = [
     description: "Your design, printed direct-to-film, any size S–3XL.",
     priceCents: 2200,
     image: "https://placehold.co/400x400/0f3460/ffffff?text=Custom+Shirt",
+    variant: "Size: L",
   },
 ]
 

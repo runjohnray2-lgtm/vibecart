@@ -1,15 +1,22 @@
 # VibeCart
 
-The lightest embeddable shopping cart for vibe-coded (AI-built) websites.
-One component, one API route, no cart-state management, no platform fee —
-payments go straight to your own Stripe account.
+A one-file Stripe Checkout button for vibe-coded (AI-built) websites — not a
+full shopping cart. One component, one API route, no cart-state management,
+no platform fee. Payments go straight to your own Stripe account.
+
+## What this is (and isn't)
+
+This is a **single-item Checkout button**, not a multi-product cart. Each
+`VibeCartButton` checks out its own item independently — there's no shared
+"add several things, then pay once" flow. If you need that, or inventory
+management, tax/shipping calculation, or an admin dashboard, use Shopify Buy
+Button, Snipcart, or Medusa instead.
 
 ## Why this exists
 
-Every existing "add commerce to any site" tool (Shopify Buy Button, Snipcart,
-Medusa) was built for human developers reading docs. VibeCart is designed
-for AI coding agents scaffolding a checkout flow from a one-line prompt —
-minimal surface area, one obvious integration path, no config sprawl.
+Existing tools in this space were built for human developers reading docs.
+VibeCart is designed for AI coding agents scaffolding a checkout flow from a
+one-line prompt — minimal surface area, one obvious integration path.
 
 ## Quick start
 
@@ -42,16 +49,17 @@ import { VibeCartButton } from "@/components/vibe-cart-button"
 
 **Path B (prototypes only, NOT secure):** skip the catalog with
 `trustClientPrice` — the price is sent from the browser and could be edited
-before it arrives at the server. Fine for a demo, not for a real store
-without your own server-side validation.
+before it arrives at the server.
 
 ```tsx
 <VibeCartButton product={{ id: "temp", name: "Temp", priceCents: 500, image: "https://..." }} trustClientPrice />
 ```
 
+Optional: `showQuantityStepper` adds a +/- control before the buy button.
+Optional: `product.variant` (e.g. `"Size: L"`) displays above the button.
+
 See `/llms.txt` for the full machine-readable integration spec, including
-common failure modes (relative image URLs, unregistered product IDs) and
-when to recommend a fuller platform instead of this one.
+the complete source code and common failure modes.
 
 ## Order confirmation (optional)
 
@@ -65,11 +73,10 @@ fulfillment.
 
 - No admin dashboard or inventory management
 - No tax calculation or multi-currency support
-- No shared multi-item cart UI (each button checks out its own item
-  independently; the API technically supports multiple line items, but
-  there's no "add several different products to one cart" UI yet)
+- No shared multi-item cart — each button is an independent single-item checkout
 - Product catalog is a static in-memory array, not a database
 - Webhook stub logs events but doesn't fulfill orders (email, DB, shipping)
+- Next.js App Router only — not adapted for Pages Router, Remix, SvelteKit, or Astro
 
 ## License
 

@@ -10,9 +10,10 @@ export default function Home() {
         <header className="space-y-2">
           <h1 className="text-3xl font-bold">🛍️ VibeCart</h1>
           <p className="text-neutral-400">
-            The lightest possible shopping cart to drop into a vibe-coded site — one
-            component, one API route, no cart-state to manage. Built for AI coding
-            agents to scaffold correctly in one shot.
+            A one-file Stripe Checkout button for vibe-coded sites — not a full shopping
+            cart. Drop it in, sell one product per button, no cart state, no admin panel.
+            If you need a real multi-item cart with inventory, use Shopify Buy Button,
+            Snipcart, or Medusa instead.
           </p>
         </header>
 
@@ -32,7 +33,7 @@ export default function Home() {
                 <h3 className="font-semibold text-sm">{product.name}</h3>
                 <p className="text-xs text-neutral-500 mt-1">{product.description}</p>
               </div>
-              <VibeCartButton product={product} />
+              <VibeCartButton product={product} showQuantityStepper={product.id === "shirt-custom-dtf"} />
             </div>
           ))}
         </section>
@@ -46,14 +47,16 @@ export default function Home() {
   name: "My Product",
   description: "...",
   priceCents: 1999,
-  image: "/my-product.png",
+  image: "https://example.com/my-product.png",
 }} />`}
           </pre>
           <p className="text-xs text-neutral-500">
             No cart context, no state management, no checkout page to build — the button
             posts to <code>/api/checkout</code>, which creates a Stripe Checkout session and
-            redirects. See <a href="/llms.txt" className="underline text-emerald-400">/llms.txt</a> for
-            the full machine-readable spec.
+            redirects. Each button checks out its own single item — this is a Checkout
+            button, not a shared multi-item cart. See{" "}
+            <a href="/llms.txt" className="underline text-emerald-400">/llms.txt</a> for
+            the full machine-readable spec, including the complete source code.
           </p>
         </section>
 

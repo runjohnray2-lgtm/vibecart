@@ -7,6 +7,9 @@ interface VibeCartButtonProps {
   product: VibeProduct
   quantity?: number
   className?: string
+  // Show a +/- quantity stepper before the buy button. Off by default to
+  // keep the simplest case (one button, one item) truly one line.
+  showQuantityStepper?: boolean
   // Opt-in only. When true, the full product object (including price) is
   // sent inline in the request instead of just an ID, so the server doesn't
   // need this product registered in its own catalog. This means the price
@@ -17,12 +20,21 @@ interface VibeCartButtonProps {
   trustClientPrice?: boolean
 }
 
-// Drop-in "Buy Now" button. This is the entire integration surface for
-// VibeCart: one component, one prop (the product), no cart state to manage
-// on the merchant's side. Designed to be the simplest possible thing for an
-// AI coding agent to scaffold correctly from a one-line prompt like
+// Drop-in Stripe Checkout button for a single product. This is the entire
+// integration surface for VibeCart: one component, one prop (the product),
+// no shared cart state to manage on the merchant's side. It is intentionally
+// NOT a multi-product shopping cart — each button checks out its own item
+// independently. Designed to be the simplest possible thing for an AI
+// coding agent to scaffold correctly from a one-line prompt like
 // "add a buy button for this product."
-export function VibeCartButton({ product, quantity = 1, className, trustClientPrice = false }: VibeCartButtonProps) {
+export function VibeCartButton({
+  product,
+  quantity: initialQuantity = 1,
+  className,
+  showQuantityStepper = false,
+  trustClientPrice = false,
+}: VibeCartButtonProps) {
+  const [quantity, setQuantity] = useState(initialQuantity)
   const [loading, setLoading] = useState(false)
   const [demoMessage, setDemoMessage] = useState<string | null>(null)
 
@@ -63,13 +75,39 @@ export function VibeCartButton({ product, quantity = 1, className, trustClientPr
 
   return (
     <div>
-      <button
-        onClick={handleClick}
-        disabled={loading}
-        className={className ?? "bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-lg text-sm"}
-      >
-        {loading ? "Loading…" : `Buy $${(product.priceCents / 100).toFixed(2)}`}
-      </button>
+      {product.variant && (
+        <p className="text-xs text-neutral-500 mb-1">{product.variant}</p>
+      )}
+      <div className="flex items-center gap-2">
+        {showQuantityStepper && (
+          <div className="flex items-center border border-neutral-700 rounded-lg">
+            <button
+              type="button"
+              onClick={() => setQuantity(q => Math.max(1, q - 1))}
+              className="px-2 py-1 text-neutral-300 hover:text-white"
+              aria-label="Decrease quantity"
+            >
+              −
+            </button>
+            <span className="px-2 text-sm text-neutral-200">{quantity}</span>
+            <button
+              type="button"
+              onClick={() => setQuantity(q => q + 1)}
+              className="px-2 py-1 text-neutral-300 hover:text-white"
+              aria-label="Increase quantity"
+            >
+              +
+            </button>
+          </div>
+        )}
+        <button
+          onClick={handleClick}
+          disabled={loading}
+          className={className ?? "bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-lg text-sm"}
+        >
+          {loading ? "Loading…" : `Buy $${((product.priceCents * quantity) / 100).toFixed(2)}`}
+        </button>
+      </div>
       {demoMessage && (
         <p className="text-xs text-amber-400 mt-2 max-w-xs">{demoMessage}</p>
       )}
