@@ -27,6 +27,16 @@ assert(metadataResponse.ok, `GET /mcp returned HTTP ${metadataResponse.status}`)
 const metadata = await metadataResponse.json()
 assert(metadata.name === "vibecart", "GET /mcp did not identify the VibeCart server")
 
+const healthResponse = await fetch(new URL("/api/health", endpoint))
+assert(healthResponse.ok, `GET /api/health returned HTTP ${healthResponse.status}`)
+const health = await healthResponse.json()
+assert(health.service === "vibecart" && health.ok === true, "health endpoint did not report VibeCart as healthy")
+assert(health.stripeConfigured === false, "CI health check should not report Stripe configured")
+assert(health.webhookConfigured === false, "CI health check should not report a webhook configured")
+
+const ping = await rpc("ping")
+assert(ping && Object.keys(ping).length === 0, "MCP ping did not return an empty result")
+
 const discovery = await rpc("server/discover", {
   protocolVersions: ["2026-07-28"],
   clientInfo: { name: "vibecart-ci", version: "1.0.0" },
@@ -43,6 +53,12 @@ for (const expected of [
   "vibecart.create_checkout",
 ]) {
   assert(toolNames.includes(expected), `Missing MCP tool: ${expected}`)
+}
+assert(toolNames.length === 4, `Expected exactly four commerce tools, found ${toolNames.length}`)
+for (const tool of listed.tools) {
+  assert(tool.title && tool.description, `${tool.name} is missing review metadata`)
+  assert(tool.inputSchema && tool.outputSchema, `${tool.name} is missing an explicit schema`)
+  assert(tool.annotations, `${tool.name} is missing annotations`)
 }
 
 const productsCall = await rpc("tools/call", {
