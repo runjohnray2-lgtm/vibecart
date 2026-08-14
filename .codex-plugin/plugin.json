@@ -1,0 +1,37 @@
+{
+  "name": "vibecart",
+  "version": "0.3.0",
+  "description": "Trusted Stripe Checkout tools and integration guidance for AI-built apps.",
+  "author": {
+    "name": "VibeCart contributors",
+    "url": "https://github.com/runjohnray2-lgtm"
+  },
+  "homepage": "https://vibecart.vercel.app",
+  "repository": "https://github.com/runjohnray2-lgtm/vibecart",
+  "license": "MIT",
+  "keywords": ["stripe", "checkout", "mcp", "commerce"],
+  "skills": "./skills/",
+  "mcpServers": {
+    "vibecart": {
+      "type": "http",
+      "url": "https://vibecart.vercel.app/mcp"
+    }
+  },
+  "interface": {
+    "displayName": "VibeCart",
+    "shortDescription": "Trusted Stripe Checkout for AI-built apps",
+    "longDescription": "Add a single-product Stripe Checkout primitive with trusted server-side pricing. VibeCart is not a cart, inventory, or fulfillment platform.",
+    "developerName": "VibeCart contributors",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Interactive"],
+    "websiteURL": "https://vibecart.vercel.app",
+    "privacyPolicyURL": "https://vibecart.vercel.app/privacy",
+    "termsOfServiceURL": "https://vibecart.vercel.app/terms",
+    "defaultPrompt": [
+      "Show me the trusted VibeCart demo catalog.",
+      "Explain how to add VibeCart securely.",
+      "Create a demo checkout for one catalog product."
+    ],
+    "brandColor": "#10B981"
+  }
+}

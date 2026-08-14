@@ -5,9 +5,10 @@ import { POST as checkoutPost } from "@/app/api/checkout/route"
 export const runtime = "nodejs"
 
 const SERVER_NAME = "vibecart"
-const SERVER_VERSION = "0.2.0"
+const SERVER_VERSION = "0.3.0"
 const MODERN_PROTOCOL = "2026-07-28"
 const LEGACY_PROTOCOL = "2025-11-25"
+const MCP_STANDARD_PROTOCOL = "2025-06-18"
 const MAX_REQUESTS_PER_MINUTE = 60
 
 interface JsonRpcRequest {
@@ -24,87 +25,115 @@ interface RateBucket {
 
 const rateBuckets = new Map<string, RateBucket>()
 
+const productSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string", description: "Stable server-side catalog identifier." },
+    name: { type: "string" },
+    description: { type: "string" },
+    priceCents: { type: "integer", minimum: 0, description: "Trusted unit price in USD cents." },
+    image: { type: "string" },
+    variant: { type: "string" },
+  },
+  required: ["id", "name", "description", "priceCents", "image"],
+  additionalProperties: false,
+} as const
+
+const errorProperties = {
+  success: { type: "boolean", const: false },
+  code: { type: "string" },
+  error: { type: "string" },
+} as const
+
 const tools = [
   {
     name: "vibecart.list_products",
-    title: "List VibeCart Products",
-    description: "List the products registered in VibeCart's trusted server-side catalog. Use this before creating checkout when you do not already know a product ID.",
-    inputSchema: {
+    title: "List trusted catalog products",
+    description: "Lists fictional demonstration products registered in VibeCart's trusted server-side catalog. Use the returned stable IDs for product lookup or checkout.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    outputSchema: {
       type: "object",
+      properties: {
+        success: { type: "boolean", const: true },
+        products: { type: "array", items: productSchema },
+      },
+      required: ["success", "products"],
       additionalProperties: false,
     },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: "vibecart.get_product",
-    title: "Get VibeCart Product",
-    description: "Get one trusted server-side product by ID, including its price in cents.",
+    title: "Get one trusted catalog product",
+    description: "Looks up one product and its trusted USD-cent price from the server-side catalog. Does not access Stripe or create a checkout.",
     inputSchema: {
       type: "object",
-      properties: {
-        productId: {
-          type: "string",
-          description: "The VibeCart product ID returned by vibecart.list_products.",
-        },
-      },
+      properties: { productId: { type: "string", minLength: 1, description: "A stable ID returned by vibecart.list_products." } },
       required: ["productId"],
       additionalProperties: false,
     },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
+    outputSchema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean" },
+        product: productSchema,
+        code: errorProperties.code,
+        error: errorProperties.error,
+      },
+      required: ["success"],
+      additionalProperties: false,
     },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: "vibecart.get_integration_instructions",
-    title: "Get VibeCart Integration Instructions",
-    description: "Return the minimal Next.js App Router integration instructions for adding a VibeCart checkout button to an AI-built site.",
-    inputSchema: {
+    title: "Get secure integration instructions",
+    description: "Returns concise Next.js App Router guidance for installing the VibeCart component and checkout route with server-trusted pricing.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    outputSchema: {
       type: "object",
+      properties: {
+        success: { type: "boolean", const: true }, framework: { type: "string" }, component: { type: "string" },
+        checkoutRoute: { type: "string" }, mcpEndpoint: { type: "string" }, rules: { type: "array", items: { type: "string" } },
+        machineReadableSpec: { type: "string" },
+      },
+      required: ["success", "framework", "component", "checkoutRoute", "mcpEndpoint", "rules", "machineReadableSpec"],
       additionalProperties: false,
     },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
     name: "vibecart.create_checkout",
-    title: "Create VibeCart Checkout",
-    description: "Create a Stripe Checkout session for one trusted VibeCart catalog product. This creates a checkout URL; it does not charge the customer until they complete Stripe Checkout.",
+    title: "Create a hosted Stripe Checkout session",
+    description: "Creates a hosted checkout URL for one trusted server-catalog product and a validated quantity. This can contact Stripe but never charges by itself; the customer must complete Stripe Checkout.",
     inputSchema: {
       type: "object",
       properties: {
-        productId: {
-          type: "string",
-          description: "The trusted VibeCart catalog product ID to purchase.",
-        },
-        quantity: {
-          type: "integer",
-          minimum: 1,
-          maximum: 99,
-          default: 1,
-          description: "Whole-number quantity from 1 to 99.",
-        },
+        productId: { type: "string", minLength: 1, description: "A trusted server-side catalog product ID." },
+        quantity: { type: "integer", minimum: 1, maximum: 99, default: 1, description: "Whole-number quantity from 1 through 99." },
       },
       required: ["productId"],
       additionalProperties: false,
     },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: true,
+    outputSchema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean" },
+        mode: { type: "string", enum: ["demo", "live"] },
+        checkoutUrl: { type: ["string", "null"] },
+        message: { type: "string" },
+        totalCents: { type: "integer" },
+        untrustedPricing: { type: "boolean" },
+        productId: { type: "string" },
+        quantity: { type: "integer", minimum: 1, maximum: 99 },
+        code: errorProperties.code,
+        error: errorProperties.error,
+        details: { type: "object" },
+      },
+      required: ["success"],
+      additionalProperties: false,
     },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
 ] as const
 
@@ -312,7 +341,7 @@ export async function GET(req: Request) {
     name: SERVER_NAME,
     version: SERVER_VERSION,
     endpoint: `${origin}/mcp`,
-    protocols: [MODERN_PROTOCOL, LEGACY_PROTOCOL],
+    protocols: [MODERN_PROTOCOL, LEGACY_PROTOCOL, MCP_STANDARD_PROTOCOL],
     tools: tools.map(tool => tool.name),
     spec: `${origin}/llms.txt`,
   })
@@ -354,6 +383,10 @@ export async function POST(req: Request) {
     return rpcError(message.id, -32600, "Invalid Request", 400)
   }
 
+  if (message.method === "ping") {
+    return rpcResult(message.id, {})
+  }
+
   if (message.method === "notifications/initialized") {
     return new NextResponse(null, { status: 204 })
   }
@@ -361,7 +394,7 @@ export async function POST(req: Request) {
   if (message.method === "server/discover") {
     return rpcResult(message.id, {
       resultType: "complete",
-      supportedVersions: [MODERN_PROTOCOL, LEGACY_PROTOCOL],
+      supportedVersions: [MODERN_PROTOCOL, LEGACY_PROTOCOL, MCP_STANDARD_PROTOCOL],
       capabilities: {
         tools: {},
       },
@@ -369,7 +402,7 @@ export async function POST(req: Request) {
         name: SERVER_NAME,
         version: SERVER_VERSION,
       },
-      instructions: "VibeCart is a minimal commerce layer for AI-built websites. Discover trusted products, inspect a product, get integration instructions, and create a Stripe Checkout session. Prefer trusted product IDs over client-supplied prices.",
+      instructions: "VibeCart is a lightweight Stripe Checkout primitive, not a cart or inventory platform. Its four tools list trusted demo products, inspect one product, explain integration, and create a hosted checkout. Always prefer trusted product IDs; merchants must implement webhook fulfillment.",
     })
   }
 
@@ -377,7 +410,8 @@ export async function POST(req: Request) {
     const requested = typeof message.params?.protocolVersion === "string"
       ? message.params.protocolVersion
       : LEGACY_PROTOCOL
-    const protocolVersion = requested === LEGACY_PROTOCOL ? LEGACY_PROTOCOL : LEGACY_PROTOCOL
+    const supported = [MODERN_PROTOCOL, LEGACY_PROTOCOL, MCP_STANDARD_PROTOCOL]
+    const protocolVersion = supported.includes(requested) ? requested : MCP_STANDARD_PROTOCOL
 
     return rpcResult(message.id, {
       protocolVersion,

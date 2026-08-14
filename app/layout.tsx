@@ -1,15 +1,9 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-});
-
 export const metadata: Metadata = {
-  title: "VibeCart — Agent-Friendly Embeddable Shopping Cart",
-  description: "The lightest shopping cart for vibe-coded sites. One component, one API route, Stripe-backed.",
+  title: "VibeCart — Stripe Checkout for AI-built apps",
+  description: "A lightweight Stripe Checkout primitive for AI-built and vibe-coded apps: one component, one API route, and trusted server-side pricing.",
 };
 
 export default function RootLayout({
@@ -19,7 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} font-sans antialiased`}>
+      <body className="font-sans antialiased">
         {children}
       </body>
     </html>

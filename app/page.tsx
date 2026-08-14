@@ -1,68 +1,100 @@
+import Link from "next/link"
 import { PRODUCTS } from "@/lib/products"
 import { VibeCartButton } from "@/components/vibe-cart-button"
 
+const promises = [
+  "One component + one API route",
+  "Merchant-owned Stripe account",
+  "No platform cut",
+  "Server-side trusted pricing",
+]
+
 export default function Home() {
-  const hasStripeKey = !!process.env.STRIPE_SECRET_KEY
+  const hasStripeKey = Boolean(process.env.STRIPE_SECRET_KEY)
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-neutral-100 p-6 md:p-10">
-      <div className="max-w-4xl mx-auto space-y-8">
-        <header className="space-y-2">
-          <h1 className="text-3xl font-bold">🛍️ VibeCart</h1>
-          <p className="text-neutral-400">
-            A one-file Stripe Checkout button for vibe-coded sites — not a full shopping
-            cart. Drop it in, sell one product per button, no cart state, no admin panel.
-            If you need a real multi-item cart with inventory, use Shopify Buy Button,
-            Snipcart, or Medusa instead.
-          </p>
+    <main className="min-h-screen bg-neutral-950 px-6 py-10 text-neutral-100 md:py-16">
+      <div className="mx-auto max-w-5xl space-y-12">
+        <header className="space-y-6">
+          <p className="font-mono text-sm font-semibold uppercase tracking-[0.2em] text-emerald-400">VibeCart</p>
+          <div className="max-w-4xl space-y-4">
+            <h1 className="text-4xl font-bold leading-tight md:text-6xl">
+              A lightweight Stripe Checkout primitive for AI-built and vibe-coded apps.
+            </h1>
+            <p className="max-w-3xl text-lg leading-8 text-neutral-400">
+              Give an agent one clear integration path: a button component posts a trusted product ID
+              to one server route, then redirects to Stripe&apos;s hosted Checkout in the merchant&apos;s own account.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {promises.map(item => (
+              <div key={item} className="rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-3 text-sm">
+                <span className="mr-2 text-emerald-400">✓</span>{item}
+              </div>
+            ))}
+          </div>
         </header>
 
         {!hasStripeKey && (
-          <div className="bg-amber-500/10 border border-amber-600/40 rounded-xl px-4 py-3 text-sm text-amber-300">
-            🧪 <strong>Demo mode</strong> — no Stripe key configured. Buy buttons below simulate
-            checkout instead of charging a real card. Add <code>STRIPE_SECRET_KEY</code> in your
-            hosting provider&apos;s environment variables to go live.
+          <div className="rounded-xl border border-amber-600/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+            <strong>Demo mode:</strong> no Stripe key is configured. The sample buttons describe a simulated
+            checkout and never create a charge.
           </div>
         )}
 
-        <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {PRODUCTS.map(product => (
-            <div key={product.id} className="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-3">
-              <img src={product.image} alt={product.name} className="w-full rounded-lg" />
-              <div>
-                <h3 className="font-semibold text-sm">{product.name}</h3>
-                <p className="text-xs text-neutral-500 mt-1">{product.description}</p>
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-xl font-semibold">Integration examples</h2>
+            <p className="mt-1 text-sm text-neutral-500">
+              These fictional sample catalog entries demonstrate the component only. They are not merchandise offered for fulfillment.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {PRODUCTS.map(product => (
+              <div key={product.id} className="space-y-3 rounded-xl border border-neutral-800 bg-neutral-900 p-4">
+                <img src={product.image} alt="" className="w-full rounded-lg" />
+                <div>
+                  <h3 className="text-sm font-semibold">{product.name}</h3>
+                  <p className="mt-1 text-xs text-neutral-500">{product.description}</p>
+                </div>
+                <VibeCartButton product={product} showQuantityStepper={product.id === "shirt-custom-dtf"} />
               </div>
-              <VibeCartButton product={product} showQuantityStepper={product.id === "shirt-custom-dtf"} />
-            </div>
-          ))}
+            ))}
+          </div>
         </section>
 
-        <section className="bg-neutral-900 border border-neutral-800 rounded-xl p-5 space-y-3">
-          <h2 className="font-semibold text-sm">Integration — the entire thing</h2>
-          <pre className="bg-neutral-950 border border-neutral-800 rounded-lg p-3 text-xs overflow-x-auto text-neutral-300">
-{String.raw`// components/vibe-cart-button usage
-<VibeCartButton product={{
-  id: "my-product",
-  name: "My Product",
-  description: "...",
-  priceCents: 1999,
-  image: "https://example.com/my-product.png",
-}} />`}
-          </pre>
-          <p className="text-xs text-neutral-500">
-            No cart context, no state management, no checkout page to build — the button
-            posts to <code>/api/checkout</code>, which creates a Stripe Checkout session and
-            redirects. Each button checks out its own single item — this is a Checkout
-            button, not a shared multi-item cart. See{" "}
-            <a href="/llms.txt" className="underline text-emerald-400">/llms.txt</a> for
-            the full machine-readable spec, including the complete source code.
-          </p>
+        <section className="grid gap-6 md:grid-cols-2">
+          <div className="space-y-3 rounded-xl border border-neutral-800 bg-neutral-900 p-5">
+            <h2 className="font-semibold">The entire app-facing API</h2>
+            <pre className="overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-950 p-3 text-xs text-neutral-300">
+{String.raw`<VibeCartButton product={product} />
+
+POST /api/checkout
+{ items: [{ productId, quantity }] }`}
+            </pre>
+            <p className="text-sm leading-6 text-neutral-400">
+              Production catalog prices are resolved on the server. Client-supplied prices are an explicitly unsafe demo-only escape hatch.
+            </p>
+          </div>
+          <div className="space-y-3 rounded-xl border border-neutral-800 bg-neutral-900 p-5">
+            <h2 className="font-semibold">Deliberately not a commerce platform</h2>
+            <p className="text-sm leading-6 text-neutral-400">
+              VibeCart is not a Shopify or Snipcart replacement. It has no shared multi-item cart,
+              inventory system, order fulfillment, or platform payment account. The merchant must
+              implement authenticated business logic and webhook fulfillment for their own app.
+            </p>
+            <p className="text-sm leading-6 text-neutral-400">
+              VibeCart currently takes no platform cut. Stripe&apos;s fees and the merchant&apos;s Stripe terms still apply.
+            </p>
+          </div>
         </section>
 
-        <footer className="text-xs text-neutral-600 text-center pt-4">
-          VibeCart is an MVP. Payments run through your own Stripe account — you keep 100% of
-          revenue minus Stripe&apos;s standard processing fees. No platform cut.
+        <footer className="flex flex-wrap gap-x-5 gap-y-2 border-t border-neutral-800 pt-6 text-sm text-neutral-500">
+          <Link className="hover:text-neutral-200" href="/privacy">Privacy</Link>
+          <Link className="hover:text-neutral-200" href="/terms">Terms</Link>
+          <Link className="hover:text-neutral-200" href="/support">Support</Link>
+          <Link className="hover:text-neutral-200" href="/llms.txt">LLM instructions</Link>
+          <Link className="hover:text-neutral-200" href="/mcp">MCP endpoint</Link>
         </footer>
       </div>
     </main>

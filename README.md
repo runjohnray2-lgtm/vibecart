@@ -1,6 +1,6 @@
 # VibeCart
 
-A one-file Stripe Checkout button for vibe-coded (AI-built) websites — not a
+A lightweight Stripe Checkout primitive for AI-built and vibe-coded apps — not a
 full shopping cart. One component, one API route, no cart-state management,
 no platform fee. Payments go straight to your own Stripe account. Also
 includes optional subscription-management pieces (customer billing portal +
@@ -96,6 +96,12 @@ subscription directly, it needs the same fix.
 
 See `/llms.txt` for the full machine-readable integration spec, including
 the complete source code and common failure modes.
+
+Agent clients can also discover the four production MCP tools at `/mcp`.
+`GET /api/health` reports service readiness and Stripe/webhook configuration
+as booleans without exposing credentials. Public policies and help are at
+`/privacy`, `/terms`, and `/support`; submission test prompts are documented
+in `docs/submission-evaluation.md`.
 
 ## Order confirmation (optional)
 

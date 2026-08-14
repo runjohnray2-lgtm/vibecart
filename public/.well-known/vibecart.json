@@ -1,11 +1,15 @@
 {
   "name": "VibeCart",
-  "version": "0.2.0",
-  "description": "Minimal Stripe-backed commerce tools for AI-built websites.",
+  "version": "0.3.0",
+  "description": "A lightweight Stripe Checkout primitive for AI-built and vibe-coded apps.",
   "homepage": "https://vibecart.vercel.app",
   "mcp": {
     "endpoint": "https://vibecart.vercel.app/mcp",
-    "protocols": ["2026-07-28", "2025-11-25"],
+    "protocols": [
+      "2026-07-28",
+      "2025-11-25",
+      "2025-06-18"
+    ],
     "transport": "streamable-http-json"
   },
   "documentation": {
@@ -22,5 +26,16 @@
     "provider": "stripe",
     "merchant_of_record": false,
     "platform_fee": false
-  }
+  },
+  "health": "https://vibecart.vercel.app/api/health",
+  "legal": {
+    "privacy": "https://vibecart.vercel.app/privacy",
+    "terms": "https://vibecart.vercel.app/terms",
+    "support": "https://vibecart.vercel.app/support"
+  },
+  "limitations": [
+    "single product per checkout flow",
+    "no shared cart or inventory",
+    "merchant implements webhook fulfillment"
+  ]
 }
