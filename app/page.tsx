@@ -89,7 +89,23 @@ POST /api/checkout
           </div>
         </section>
 
+        <section className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-7 md:flex md:items-center md:justify-between md:gap-8 md:p-9">
+          <div>
+            <h2 className="text-2xl font-bold">Want us to host and manage it?</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-300">
+              Skip deployment and ongoing maintenance with managed hosting, updates, monitoring, and support.
+            </p>
+          </div>
+          <Link
+            href="/cloud"
+            className="mt-5 inline-flex shrink-0 rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-neutral-950 transition hover:bg-emerald-400 md:mt-0"
+          >
+            Explore VibeCart Cloud
+          </Link>
+        </section>
+
         <footer className="flex flex-wrap gap-x-5 gap-y-2 border-t border-neutral-800 pt-6 text-sm text-neutral-500">
+          <Link className="hover:text-neutral-200" href="/cloud">Cloud</Link>
           <Link className="hover:text-neutral-200" href="/privacy">Privacy</Link>
           <Link className="hover:text-neutral-200" href="/terms">Terms</Link>
           <Link className="hover:text-neutral-200" href="/support">Support</Link>
