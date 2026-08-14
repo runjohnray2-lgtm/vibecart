@@ -3,7 +3,7 @@ name: VibeCart CI
 on:
   push:
     branches:
-      - agent/production-commerce-core
+      - "agent/**"
   pull_request:
     branches:
       - main
@@ -27,3 +27,23 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Start production server
+        run: |
+          npm start -- -p 3000 > /tmp/vibecart-next.log 2>&1 &
+          echo $! > /tmp/vibecart-next.pid
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/mcp > /tmp/vibecart-mcp.json; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/vibecart-next.log
+          exit 1
+
+      - name: Smoke test MCP commerce flow
+        run: node scripts/smoke-mcp.mjs
+
+      - name: Show server log on failure
+        if: failure()
+        run: cat /tmp/vibecart-next.log || true
