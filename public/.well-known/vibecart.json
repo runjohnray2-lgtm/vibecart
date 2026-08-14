@@ -1,0 +1,26 @@
+{
+  "name": "VibeCart",
+  "version": "0.2.0",
+  "description": "Minimal Stripe-backed commerce tools for AI-built websites.",
+  "homepage": "https://vibecart.vercel.app",
+  "mcp": {
+    "endpoint": "https://vibecart.vercel.app/mcp",
+    "protocols": ["2026-07-28", "2025-11-25"],
+    "transport": "streamable-http-json"
+  },
+  "documentation": {
+    "llms": "https://vibecart.vercel.app/llms.txt",
+    "repository": "https://github.com/runjohnray2-lgtm/vibecart"
+  },
+  "capabilities": [
+    "list_products",
+    "get_product",
+    "get_integration_instructions",
+    "create_checkout"
+  ],
+  "payments": {
+    "provider": "stripe",
+    "merchant_of_record": false,
+    "platform_fee": false
+  }
+}
