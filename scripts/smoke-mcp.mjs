@@ -60,6 +60,11 @@ for (const tool of listed.tools) {
   assert(tool.inputSchema && tool.outputSchema, `${tool.name} is missing an explicit schema`)
   assert(tool.annotations, `${tool.name} is missing annotations`)
 }
+for (const name of ["vibecart.get_product", "vibecart.create_checkout"]) {
+  const tool = listed.tools.find(candidate => candidate.name === name)
+  assert(tool.outputSchema.type === "object", `${name} outputSchema must have top-level object type`)
+  assert(!tool.outputSchema.oneOf && !tool.outputSchema.anyOf, `${name} outputSchema must not use a top-level union`)
+}
 
 const productsCall = await rpc("tools/call", {
   name: "vibecart.list_products",

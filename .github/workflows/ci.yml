@@ -54,7 +54,7 @@ jobs:
         run: node scripts/smoke-mcp.mjs
 
       - name: Inspect MCP production transport
-        run: npx --yes @modelcontextprotocol/inspector --cli http://127.0.0.1:3000/mcp --transport http --method tools/list
+        run: npx --yes @modelcontextprotocol/inspector@latest --cli http://127.0.0.1:3000/mcp --transport http --method tools/list
 
       - name: Show server log on failure
         if: failure()
