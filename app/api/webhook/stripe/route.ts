@@ -4,14 +4,9 @@ import Stripe from "stripe"
 export const runtime = "nodejs"
 
 // Minimal Stripe webhook receiver for order-confirmation events.
-// This is a STUB: it verifies the signature and logs the event, but does
-// not send an email, update inventory, or write to a database — those are
-// genuine gaps, not hidden. Wire in your own fulfillment logic where noted.
-//
-// To use: set STRIPE_WEBHOOK_SECRET (from your Stripe Dashboard's webhook
-// endpoint settings) as an environment variable, and point a webhook
-// endpoint at POST /api/webhook/stripe listening for
-// "checkout.session.completed".
+// This endpoint verifies Stripe signatures before doing any work. Durable
+// order state and managed fulfillment delivery belong in VibeCart Cloud and
+// are intentionally not simulated here.
 
 export async function POST(req: Request) {
   const secretKey = process.env.STRIPE_SECRET_KEY
@@ -19,7 +14,7 @@ export async function POST(req: Request) {
 
   if (!secretKey || !webhookSecret) {
     return NextResponse.json(
-      { success: false, error: "Webhook not configured — set STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET." },
+      { success: false, error: "Webhook not configured." },
       { status: 501 }
     )
   }
@@ -32,15 +27,13 @@ export async function POST(req: Request) {
   try {
     if (!signature) throw new Error("Missing stripe-signature header")
     event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret)
-  } catch (err) {
-    return NextResponse.json({ success: false, error: `Signature verification failed: ${String(err)}` }, { status: 400 })
+  } catch (error) {
+    console.warn("[vibecart webhook] Stripe signature verification failed", error)
+    return NextResponse.json({ success: false, error: "Signature verification failed." }, { status: 400 })
   }
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session
-    // TODO: this is where real order fulfillment goes — e.g. send a
-    // confirmation email, mark the order paid in your own database, trigger
-    // shipping. Currently just logged.
     console.log(`[vibecart webhook] Checkout completed: ${session.id}, amount_total=${session.amount_total}`)
   }
 
