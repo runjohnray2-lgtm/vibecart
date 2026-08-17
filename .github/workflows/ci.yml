@@ -11,11 +11,18 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Checkout released UCP 2026-04-08 schemas
+        uses: actions/checkout@v4
+        with:
+          repository: Universal-Commerce-Protocol/ucp
+          ref: v2026-04-08
+          path: .ucp-spec
 
       - name: Use Node.js 20
         uses: actions/setup-node@v4
@@ -53,8 +60,22 @@ jobs:
       - name: Smoke test MCP commerce flow
         run: node scripts/smoke-mcp.mjs
 
-      - name: Validate UCP catalog schemas
+      - name: Capture live UCP payloads
         run: node scripts/smoke-ucp-schema.mjs
+
+      - name: Install Rust toolchain for official UCP validator
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build official UCP schema validator 1.4.1
+        run: cargo install ucp-schema --version 1.4.1 --locked
+
+      - name: Validate UCP 2026-04-08 discovery and catalog payloads
+        run: |
+          set -euo pipefail
+          ucp-schema validate /tmp/vibecart-ucp-payloads/discovery.json --schema .ucp-spec/source/discovery/profile_schema.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
+          ucp-schema validate /tmp/vibecart-ucp-payloads/search.json --schema .ucp-spec/source/schemas/shopping/catalog_search.json --response --op search --def search_response --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
+          ucp-schema validate /tmp/vibecart-ucp-payloads/lookup.json --schema .ucp-spec/source/schemas/shopping/catalog_lookup.json --response --op lookup --def lookup_response --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
+          ucp-schema validate /tmp/vibecart-ucp-payloads/get-product.json --schema .ucp-spec/source/schemas/shopping/catalog_lookup.json --response --op get_product --def get_product_response --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
 
       - name: Inspect MCP production transport
         run: npx --yes @modelcontextprotocol/inspector@latest --cli http://127.0.0.1:3000/mcp --transport http --method tools/list
