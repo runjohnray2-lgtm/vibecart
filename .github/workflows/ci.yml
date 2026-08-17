@@ -63,16 +63,43 @@ jobs:
       - name: Capture live UCP payloads
         run: node scripts/smoke-ucp-schema.mjs
 
+      - name: Validate released UCP discovery profile
+        run: |
+          python -m pip install --disable-pip-version-check 'jsonschema>=4,<5'
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import Draft202012Validator, RefResolver
+
+          root = Path('.ucp-spec').resolve()
+          schema_path = root / 'source/discovery/profile_schema.json'
+          schema = json.loads(schema_path.read_text())
+          instance = json.loads(Path('/tmp/vibecart-ucp-payloads/discovery.json').read_text())
+
+          store = {}
+          for path in root.rglob('*.json'):
+              try:
+                  document = json.loads(path.read_text())
+              except Exception:
+                  continue
+              store[path.resolve().as_uri()] = document
+              if isinstance(document, dict) and isinstance(document.get('$id'), str):
+                  store[document['$id']] = document
+
+          resolver = RefResolver(base_uri=schema_path.resolve().as_uri(), referrer=schema, store=store)
+          Draft202012Validator(schema, resolver=resolver).validate(instance)
+          print('UCP discovery profile validates against official v2026-04-08 profile_schema.json')
+          PY
+
       - name: Install Rust toolchain for official UCP validator
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build official UCP schema validator 1.4.1
         run: cargo install ucp-schema --version 1.4.1 --locked
 
-      - name: Validate UCP 2026-04-08 discovery and catalog payloads
+      - name: Validate UCP 2026-04-08 catalog payloads
         run: |
           set -euo pipefail
-          ucp-schema validate /tmp/vibecart-ucp-payloads/discovery.json --schema .ucp-spec/source/discovery/profile_schema.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
           ucp-schema validate /tmp/vibecart-ucp-payloads/search.json --schema .ucp-spec/source/schemas/shopping/catalog_search.json --response --op search --def search_response --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
           ucp-schema validate /tmp/vibecart-ucp-payloads/lookup.json --schema .ucp-spec/source/schemas/shopping/catalog_lookup.json --response --op lookup --def lookup_response --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
           ucp-schema validate /tmp/vibecart-ucp-payloads/get-product.json --schema .ucp-spec/source/schemas/shopping/catalog_lookup.json --response --op get_product --def get_product_response --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
