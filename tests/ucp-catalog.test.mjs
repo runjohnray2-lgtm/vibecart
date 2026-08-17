@@ -11,19 +11,35 @@ test("UCP discovery advertises only implemented catalog capabilities", async () 
   assert.doesNotMatch(source, /dev\.ucp\.shopping\.checkout/)
 })
 
-test("UCP MCP catalog validates and negotiates agent profiles", async () => {
+test("UCP MCP catalog uses UCP negotiation errors and capability outcomes", async () => {
   const source = await readFile("app/ucp/mcp/route.ts", "utf8")
-  assert.match(source, /meta\.ucp-agent\.profile is required/)
   assert.match(source, /fetchPlatformProfile/)
+  assert.match(source, /invalid_profile_url/)
+  assert.match(source, /profile_unreachable/)
+  assert.match(source, /profile_malformed/)
   assert.match(source, /version_unsupported/)
-  assert.match(source, /capability_not_negotiated/)
+  assert.match(source, /capabilities_incompatible/)
+  assert.match(source, /rpcError\(message\.id, -32001/)
   assert.match(source, /PROFILE_CACHE_MS/)
   assert.match(source, /redirect: "manual"/)
   assert.match(source, /AbortSignal\.timeout/)
   assert.match(source, /isPrivateIp/)
-  assert.match(source, /search_catalog/)
-  assert.match(source, /lookup_catalog/)
-  assert.match(source, /get_product/)
+})
+
+test("UCP search implements cursor pagination with default limit 10", async () => {
+  const source = await readFile("app/ucp/mcp/route.ts", "utf8")
+  assert.match(source, /DEFAULT_SEARCH_LIMIT = 10/)
+  assert.match(source, /decodeCursor/)
+  assert.match(source, /encodeCursor/)
+  assert.match(source, /has_next_page/)
+  assert.match(source, /total_count/)
+})
+
+test("UCP lookup enforces a batch limit with Invalid params", async () => {
+  const source = await readFile("app/ucp/mcp/route.ts", "utf8")
+  assert.match(source, /MAX_LOOKUP_IDS = 100/)
+  assert.match(source, /catalog\.ids cannot exceed/)
+  assert.match(source, /-32602/)
 })
 
 test("UCP catalog prices come from trusted server products", async () => {
