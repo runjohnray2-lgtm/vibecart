@@ -72,6 +72,7 @@ jobs:
           from jsonschema import Draft202012Validator, RefResolver
 
           root = Path('.ucp-spec').resolve()
+          schemas_root = root / 'source/schemas'
           schema_path = root / 'source/discovery/profile_schema.json'
           schema = json.loads(schema_path.read_text())
           instance = json.loads(Path('/tmp/vibecart-ucp-payloads/discovery.json').read_text())
@@ -85,7 +86,15 @@ jobs:
               store[path.resolve().as_uri()] = document
               if isinstance(document, dict) and isinstance(document.get('$id'), str):
                   store[document['$id']] = document
+              if path.is_relative_to(schemas_root):
+                  rel = path.relative_to(schemas_root).as_posix()
+                  store[f'https://ucp.dev/schemas/{rel}'] = document
+                  store[f'https://ucp.dev/schemas/schemas/{rel}'] = document
 
+          # The released discovery file uses a repository-relative reference while
+          # also declaring a public $id. Give the validator a local base URI so
+          # every nested reference is resolved from the checked-out release tag.
+          schema['$id'] = schema_path.resolve().as_uri()
           resolver = RefResolver(base_uri=schema_path.resolve().as_uri(), referrer=schema, store=store)
           Draft202012Validator(schema, resolver=resolver).validate(instance)
           print('UCP discovery profile validates against official v2026-04-08 profile_schema.json')
