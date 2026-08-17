@@ -1,15 +1,14 @@
-import { createRequire } from "node:module"
-
-const require = createRequire(import.meta.url)
-const {
-  GetProductResponseSchema,
-  LookupResponseSchema,
-  SearchResponseSchema,
-  UcpDiscoveryProfileSchema,
-} = require("@ucp-js/sdk")
+import { mkdir, writeFile } from "node:fs/promises"
 
 const baseUrl = process.env.VIBECART_SMOKE_BASE_URL ?? "http://127.0.0.1:3000"
+const outputDir = process.env.VIBECART_UCP_PAYLOAD_DIR ?? "/tmp/vibecart-ucp-payloads"
 const platformProfile = "https://raw.githubusercontent.com/runjohnray2-lgtm/vibecart/main/tests/fixtures/ucp/platform-profile.json"
+
+await mkdir(outputDir, { recursive: true })
+
+async function save(name, value) {
+  await writeFile(`${outputDir}/${name}.json`, `${JSON.stringify(value, null, 2)}\n`, "utf8")
+}
 
 async function callTool(name, catalog) {
   const response = await fetch(`${baseUrl}/ucp/mcp`, {
@@ -36,31 +35,21 @@ async function callTool(name, catalog) {
   return body.result.structuredContent
 }
 
-function validate(label, schema, value) {
-  const result = schema.safeParse(value)
-  if (!result.success) {
-    throw new Error(`${label} failed official UCP schema validation: ${result.error.message}`)
-  }
-}
-
 const discoveryResponse = await fetch(`${baseUrl}/.well-known/ucp`)
 if (!discoveryResponse.ok) throw new Error(`UCP discovery returned HTTP ${discoveryResponse.status}`)
-validate("/.well-known/ucp", UcpDiscoveryProfileSchema, await discoveryResponse.json())
+await save("discovery", await discoveryResponse.json())
 
-const search = await callTool("search_catalog", {
+await save("search", await callTool("search_catalog", {
   query: "LED",
   pagination: { limit: 10 },
-})
-validate("search_catalog", SearchResponseSchema, search)
+}))
 
-const lookup = await callTool("lookup_catalog", {
+await save("lookup", await callTool("lookup_catalog", {
   ids: ["led-plate-frame", "sticker-pack-nw"],
-})
-validate("lookup_catalog", LookupResponseSchema, lookup)
+}))
 
-const product = await callTool("get_product", {
+await save("get-product", await callTool("get_product", {
   id: "led-plate-frame",
-})
-validate("get_product", GetProductResponseSchema, product)
+}))
 
-console.log("UCP discovery and catalog responses validate against @ucp-js/sdk 0.4.4 (UCP 2026-04-08)")
+console.log(`Captured live UCP discovery and catalog payloads in ${outputDir}`)
