@@ -78,7 +78,7 @@ async function validateProfileUrl(value: string) {
   if (isIP(url.hostname)) {
     if (isPrivateIp(url.hostname)) throw new UcpNegotiationError("invalid_profile_url", 400)
   } else {
-    let addresses: Awaited<ReturnType<typeof lookup>>
+    let addresses: { address: string; family: number }[]
     try { addresses = await lookup(url.hostname, { all: true, verbatim: true }) } catch { throw new UcpNegotiationError("invalid_profile_url", 400) }
     if (addresses.length === 0 || addresses.some(entry => isPrivateIp(entry.address))) throw new UcpNegotiationError("invalid_profile_url", 400)
   }
