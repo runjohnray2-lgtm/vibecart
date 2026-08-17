@@ -5,6 +5,7 @@ const {
   GetProductResponseSchema,
   LookupResponseSchema,
   SearchResponseSchema,
+  UcpDiscoveryProfileSchema,
 } = require("@ucp-js/sdk")
 
 const baseUrl = process.env.VIBECART_SMOKE_BASE_URL ?? "http://127.0.0.1:3000"
@@ -42,6 +43,10 @@ function validate(label, schema, value) {
   }
 }
 
+const discoveryResponse = await fetch(`${baseUrl}/.well-known/ucp`)
+if (!discoveryResponse.ok) throw new Error(`UCP discovery returned HTTP ${discoveryResponse.status}`)
+validate("/.well-known/ucp", UcpDiscoveryProfileSchema, await discoveryResponse.json())
+
 const search = await callTool("search_catalog", {
   query: "LED",
   pagination: { limit: 10 },
@@ -58,4 +63,4 @@ const product = await callTool("get_product", {
 })
 validate("get_product", GetProductResponseSchema, product)
 
-console.log("UCP catalog responses validate against @ucp-js/sdk 0.4.4 (UCP 2026-04-08)")
+console.log("UCP discovery and catalog responses validate against @ucp-js/sdk 0.4.4 (UCP 2026-04-08)")
