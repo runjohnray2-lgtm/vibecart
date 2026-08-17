@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server"
 import Stripe from "stripe"
+import { forwardVerifiedCheckoutEvent } from "@/lib/cloud-events"
 
 export const runtime = "nodejs"
 
-// Minimal Stripe webhook receiver for order-confirmation events.
-// This endpoint verifies Stripe signatures before doing any work. Durable
-// order state and managed fulfillment delivery belong in VibeCart Cloud and
-// are intentionally not simulated here.
+const FORWARDABLE_EVENTS = new Set([
+  "checkout.session.completed",
+  "checkout.session.async_payment_succeeded",
+])
+
+function paymentReady(event: Stripe.Event, session: Stripe.Checkout.Session): boolean {
+  if (event.type === "checkout.session.async_payment_succeeded") return true
+  return session.payment_status === "paid" || session.payment_status === "no_payment_required"
+}
 
 export async function POST(req: Request) {
   const secretKey = process.env.STRIPE_SECRET_KEY
@@ -32,9 +38,28 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: "Signature verification failed." }, { status: 400 })
   }
 
-  if (event.type === "checkout.session.completed") {
+  if (FORWARDABLE_EVENTS.has(event.type)) {
     const session = event.data.object as Stripe.Checkout.Session
-    console.log(`[vibecart webhook] Checkout completed: ${session.id}, amount_total=${session.amount_total}`)
+
+    if (paymentReady(event, session)) {
+      const cloud = await forwardVerifiedCheckoutEvent(event, session)
+
+      if (cloud.configured && !cloud.delivered && cloud.retryable) {
+        // A non-2xx response asks Stripe to retry this exact event. Cloud uses
+        // Stripe's stable event.id as its idempotency key, so a retry cannot
+        // intentionally create a second durable commerce event.
+        return NextResponse.json(
+          { received: false, retry: true, error: "Durable event delivery temporarily unavailable." },
+          { status: 503 }
+        )
+      }
+
+      console.log(
+        `[vibecart webhook] Verified payment event ${event.id}: session=${session.id}, amount_total=${session.amount_total}, cloud=${cloud.delivered ? "delivered" : cloud.configured ? "not-delivered" : "not-configured"}`
+      )
+    } else {
+      console.log(`[vibecart webhook] Checkout ${session.id} completed before payment settled; waiting for payment-success event`)
+    }
   }
 
   return NextResponse.json({ received: true })
