@@ -43,7 +43,7 @@ test("fixtures cover every UCP catalog MCP tool advertised by the implementation
   assert.deepEqual(names.sort(), ["get_product", "lookup_catalog", "search_catalog"])
 
   const source = await readFile("app/ucp/mcp/route.ts", "utf8")
-  for (const name of names) assert.match(source, new RegExp(`name: \\"${name}\\"`))
+  for (const name of names) assert.match(source, new RegExp(`name: "${name}"`))
 })
 
 test("compatibility guide keeps one backend and does not claim remote MCP equals native UCP", async () => {
