@@ -32,7 +32,7 @@ class UcpNegotiationError extends Error {
 
 function rpc(id: RpcRequest["id"], result: unknown) { return NextResponse.json({ jsonrpc: "2.0", id: id ?? null, result }) }
 function rpcError(id: RpcRequest["id"], code: number, message: string, status = 400) { return NextResponse.json({ jsonrpc: "2.0", id: id ?? null, error: { code, message } }, { status }) }
-function ucp(capability: string, status?: "success" | "error") { return { version: UCP_VERSION, ...(status ? { status } : {}), capabilities: { [capability]: [{ version: UCP_VERSION }] } } }
+function ucp(capability: string, status?: "success" | "error") { return { version: UCP_VERSION, ...(status ? { status } : {}), capabilities: { [capability]: [{ name: capability, version: UCP_VERSION }] } } }
 function structured(content: unknown) { return { structuredContent: content, content: [{ type: "text", text: JSON.stringify(content) }] } }
 function incompatibleCapabilities(capability: string) { return structured({ ucp: { version: UCP_VERSION, status: "error", capabilities: {} }, messages: [{ type: "error", code: "capabilities_incompatible", content: `Platform profile does not negotiate ${capability} at ${UCP_VERSION}`, severity: "unrecoverable" }] }) }
 
