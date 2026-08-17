@@ -38,10 +38,25 @@ function incompatibleCapabilities(capability: string) { return structured({ ucp:
 
 function asUcpProduct(product: VibeProduct) {
   return {
-    id: product.id, handle: product.id, title: product.name, description: { plain: product.description },
-    price_range: { min: { amount: product.priceCents, currency: "USD" }, max: { amount: product.priceCents, currency: "USD" } },
+    id: product.id,
+    handle: product.id,
+    title: product.name,
+    description: { plain: product.description },
+    price_range: {
+      min: { amount: product.priceCents, currency: "USD" },
+      max: { amount: product.priceCents, currency: "USD" },
+    },
     media: product.image ? [{ type: "image", url: product.image, alt_text: product.name }] : [],
-    variants: [{ id: product.id, sku: product.id, title: product.variant ?? product.name, description: { plain: product.description }, price: { amount: product.priceCents, currency: "USD" }, availability: { available: true }, seller: { name: "VibeCart Demo Merchant" } }],
+    variants: [{
+      id: product.id,
+      sku: product.id,
+      title: product.variant ?? product.name,
+      description: { plain: product.description },
+      price: { amount: product.priceCents, currency: "USD" },
+      availability: { available: true },
+      seller: { name: "VibeCart Demo Merchant" },
+      inputs: [{ id: product.id }],
+    }],
   }
 }
 
@@ -119,7 +134,8 @@ function capabilityEntryIsValid(capability: string, value: unknown) {
     const record = entry as Record<string, unknown>
     if (record.version !== UCP_VERSION || typeof record.spec !== "string" || typeof record.schema !== "string") return false
     try {
-      const spec = new URL(record.spec); const schema = new URL(record.schema)
+      const spec = new URL(record.spec)
+      const schema = new URL(record.schema)
       if (capability.startsWith("dev.ucp.") && (spec.hostname !== "ucp.dev" || schema.hostname !== "ucp.dev")) return false
       return spec.protocol === "https:" && schema.protocol === "https:"
     } catch { return false }
@@ -143,7 +159,9 @@ function decodeCursor(value: unknown) {
     return offset
   } catch { throw new Error("invalid cursor") }
 }
+
 function encodeCursor(offset: number) { return Buffer.from(String(offset), "utf8").toString("base64url") }
+
 function searchPage(value: unknown) {
   if (value === undefined) return { offset: 0, limit: DEFAULT_SEARCH_LIMIT }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("catalog.pagination must be an object")
@@ -157,6 +175,7 @@ function searchPage(value: unknown) {
 }
 
 const metaSchema = { type: "object", required: ["ucp-agent"], properties: { "ucp-agent": { type: "object", required: ["profile"], properties: { profile: { type: "string", format: "uri" } }, additionalProperties: true } }, additionalProperties: true }
+
 const tools = [
   { name: "search_catalog", description: "Search the merchant catalog using the UCP Catalog Search capability.", inputSchema: { type: "object", required: ["meta", "catalog"], properties: { meta: metaSchema, catalog: { type: "object", properties: { query: { type: "string" }, context: { type: "object" }, signals: { type: "object" }, attribution: { type: "object" }, filters: { type: "object" }, pagination: { type: "object", properties: { limit: { type: "integer", minimum: 1 }, cursor: { type: "string" } }, additionalProperties: true } }, additionalProperties: true } }, additionalProperties: false } },
   { name: "lookup_catalog", description: "Look up one or more merchant catalog products by stable identifier.", inputSchema: { type: "object", required: ["meta", "catalog"], properties: { meta: metaSchema, catalog: { type: "object", required: ["ids"], properties: { ids: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1, maxItems: MAX_LOOKUP_IDS } }, additionalProperties: true } }, additionalProperties: false } },
@@ -182,6 +201,7 @@ export async function POST(req: Request) {
   const args = message.params?.arguments ?? {}
   const capability = name === "search_catalog" ? SEARCH_CAPABILITY : (name === "lookup_catalog" || name === "get_product") ? LOOKUP_CAPABILITY : null
   if (!capability) return rpcError(message.id, -32602, `Unknown tool: ${String(name)}`)
+
   let negotiated: boolean
   try { negotiated = await negotiateCapability(args, capability) } catch (error) {
     if (error instanceof UcpNegotiationError) return rpcError(message.id, -32001, error.ucpCode, error.httpStatus)
@@ -201,7 +221,8 @@ export async function POST(req: Request) {
     const query = typeof input.query === "string" ? input.query.trim().toLowerCase() : ""
     const matches = PRODUCTS.filter(p => !query || `${p.name} ${p.description} ${p.variant ?? ""}`.toLowerCase().includes(query))
     const products = matches.slice(page.offset, page.offset + page.limit)
-    const nextOffset = page.offset + products.length; const hasNextPage = nextOffset < matches.length
+    const nextOffset = page.offset + products.length
+    const hasNextPage = nextOffset < matches.length
     return rpc(message.id, structured({ ucp: ucp(SEARCH_CAPABILITY), products: products.map(asUcpProduct), pagination: { ...(hasNextPage ? { cursor: encodeCursor(nextOffset) } : {}), has_next_page: hasNextPage, total_count: matches.length } }))
   }
 
@@ -209,12 +230,15 @@ export async function POST(req: Request) {
     if (!Array.isArray(input.ids) || input.ids.length === 0) return rpcError(message.id, -32602, "catalog.ids must contain at least one identifier")
     if (input.ids.length > MAX_LOOKUP_IDS) return rpcError(message.id, -32602, `catalog.ids cannot exceed ${MAX_LOOKUP_IDS} identifiers`)
     if (input.ids.some(id => typeof id !== "string" || id.trim().length === 0)) return rpcError(message.id, -32602, "catalog.ids must contain only non-empty strings")
-    const ids = input.ids as string[]; const found = ids.map(getProduct).filter((p): p is VibeProduct => Boolean(p)); const missing = ids.filter(id => !getProduct(id))
+    const ids = input.ids as string[]
+    const found = ids.map(getProduct).filter((p): p is VibeProduct => Boolean(p))
+    const missing = ids.filter(id => !getProduct(id))
     return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY), products: found.map(asUcpProduct), ...(missing.length ? { messages: missing.map(id => ({ type: "info", code: "not_found", content: id })) } : {}) }))
   }
 
   if (typeof input.id !== "string" || input.id.trim().length === 0) return rpcError(message.id, -32602, "catalog.id must be a non-empty string")
-  const id = input.id; const product = getProduct(id)
+  const id = input.id
+  const product = getProduct(id)
   if (!product) return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY, "error"), messages: [{ type: "error", code: "not_found", content: `Product not found: ${id}`, severity: "unrecoverable" }] }))
   return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY), product: asUcpProduct(product) }))
 }
