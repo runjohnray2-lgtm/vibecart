@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": "product-1",
+  "method": "tools/call",
+  "params": {
+    "name": "get_product",
+    "arguments": {
+      "meta": {
+        "ucp-agent": {
+          "profile": "https://platform.example.com/.well-known/ucp"
+        }
+      },
+      "catalog": {
+        "id": "led-motorcycle-plate-frame"
+      }
+    }
+  }
+}
