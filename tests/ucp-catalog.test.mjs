@@ -11,9 +11,16 @@ test("UCP discovery advertises only implemented catalog capabilities", async () 
   assert.doesNotMatch(source, /dev\.ucp\.shopping\.checkout/)
 })
 
-test("UCP MCP catalog requires agent profile metadata", async () => {
+test("UCP MCP catalog validates and negotiates agent profiles", async () => {
   const source = await readFile("app/ucp/mcp/route.ts", "utf8")
   assert.match(source, /meta\.ucp-agent\.profile is required/)
+  assert.match(source, /fetchPlatformProfile/)
+  assert.match(source, /version_unsupported/)
+  assert.match(source, /capability_not_negotiated/)
+  assert.match(source, /PROFILE_CACHE_MS/)
+  assert.match(source, /redirect: "manual"/)
+  assert.match(source, /AbortSignal\.timeout/)
+  assert.match(source, /isPrivateIp/)
   assert.match(source, /search_catalog/)
   assert.match(source, /lookup_catalog/)
   assert.match(source, /get_product/)
