@@ -3,6 +3,7 @@ import { getProduct } from "@/lib/products"
 
 const CART_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_QUANTITY = 99
+const MAX_IDEMPOTENCY_KEY_LENGTH = 200
 
 export interface CartItemInput {
   productId: string
@@ -79,6 +80,16 @@ function mapRow(row: CartRow): VibeCart {
   }
 }
 
+function normalizeIdempotencyKey(value?: string): string | undefined {
+  if (value === undefined) return undefined
+  const key = value.trim()
+  if (!key) return undefined
+  if (key.length > MAX_IDEMPOTENCY_KEY_LENGTH) {
+    throw new Error(`Idempotency key cannot exceed ${MAX_IDEMPOTENCY_KEY_LENGTH} characters`)
+  }
+  return key
+}
+
 export function resolveCartItems(input: CartItemInput[]): CartLine[] {
   if (!Array.isArray(input) || input.length === 0) throw new Error("Cart requires at least one item")
 
@@ -113,20 +124,34 @@ export function resolveCartItems(input: CartItemInput[]): CartLine[] {
 
 export async function createCart(itemsInput: CartItemInput[], idempotencyKey?: string, merchantId = "default"): Promise<VibeCart> {
   const db = sql()
-  if (idempotencyKey) {
-    const existing = await db`SELECT * FROM vibecart_carts WHERE merchant_id = ${merchantId} AND idempotency_key = ${idempotencyKey} LIMIT 1`
-    if (existing[0]) return mapRow(existing[0] as CartRow)
-  }
-
   const items = resolveCartItems(itemsInput)
   const subtotal = items.reduce((sum, item) => sum + item.lineTotalCents, 0)
   const id = crypto.randomUUID()
   const expiresAt = new Date(Date.now() + CART_TTL_MS).toISOString()
   const itemsJson = JSON.stringify(items)
+  const key = normalizeIdempotencyKey(idempotencyKey)
+
+  if (key) {
+    const rows = await db`
+      INSERT INTO vibecart_carts (id, merchant_id, status, currency, items, subtotal_cents, version, idempotency_key, expires_at)
+      VALUES (${id}, ${merchantId}, 'active', 'usd', ${itemsJson}::jsonb, ${subtotal}, 1, ${key}, ${expiresAt})
+      ON CONFLICT (merchant_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+      RETURNING *
+    `
+    if (rows[0]) return mapRow(rows[0] as CartRow)
+
+    const existing = await db`
+      SELECT * FROM vibecart_carts
+      WHERE merchant_id = ${merchantId} AND idempotency_key = ${key}
+      LIMIT 1
+    `
+    if (existing[0]) return mapRow(existing[0] as CartRow)
+    throw new Error("Cart could not be created")
+  }
 
   const rows = await db`
-    INSERT INTO vibecart_carts (id, merchant_id, status, currency, items, subtotal_cents, version, idempotency_key, expires_at)
-    VALUES (${id}, ${merchantId}, 'active', 'usd', ${itemsJson}::jsonb, ${subtotal}, 1, ${idempotencyKey ?? null}, ${expiresAt})
+    INSERT INTO vibecart_carts (id, merchant_id, status, currency, items, subtotal_cents, version, expires_at)
+    VALUES (${id}, ${merchantId}, 'active', 'usd', ${itemsJson}::jsonb, ${subtotal}, 1, ${expiresAt})
     RETURNING *
   `
   return mapRow(rows[0] as CartRow)
@@ -138,8 +163,16 @@ export async function getCart(id: string): Promise<VibeCart | null> {
   if (!rows[0]) return null
   const cart = mapRow(rows[0] as CartRow)
   if (cart.status === "active" && Date.parse(cart.expiresAt) <= Date.now()) {
-    const expired = await db`UPDATE vibecart_carts SET status = 'expired', version = version + 1, updated_at = now() WHERE id = ${id} AND status = 'active' RETURNING *`
+    const expired = await db`
+      UPDATE vibecart_carts
+      SET status = 'expired', version = version + 1, updated_at = now()
+      WHERE id = ${id} AND status = 'active'
+      RETURNING *
+    `
     if (expired[0]) return mapRow(expired[0] as CartRow)
+
+    const current = await db`SELECT * FROM vibecart_carts WHERE id = ${id} LIMIT 1`
+    return current[0] ? mapRow(current[0] as CartRow) : null
   }
   return cart
 }
@@ -177,7 +210,7 @@ export async function cancelCart(id: string): Promise<VibeCart | null> {
   const rows = await db`
     UPDATE vibecart_carts
     SET status = 'cancelled', version = version + 1, updated_at = now()
-    WHERE id = ${id} AND status = 'active'
+    WHERE id = ${id} AND status = 'active' AND expires_at > now()
     RETURNING *
   `
   if (rows[0]) return mapRow(rows[0] as CartRow)
@@ -189,7 +222,7 @@ export async function markCartConverted(id: string, checkoutSessionId: string): 
   const rows = await db`
     UPDATE vibecart_carts
     SET status = 'converted', checkout_session_id = ${checkoutSessionId}, version = version + 1, updated_at = now()
-    WHERE id = ${id} AND status = 'active'
+    WHERE id = ${id} AND status = 'active' AND expires_at > now()
     RETURNING *
   `
   if (rows[0]) return mapRow(rows[0] as CartRow)
