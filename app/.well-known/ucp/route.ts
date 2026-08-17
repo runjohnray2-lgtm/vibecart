@@ -12,29 +12,33 @@ export async function GET(req: Request) {
       ucp: {
         version: UCP_VERSION,
         services: {
-          "dev.ucp.shopping": {
-            version: UCP_VERSION,
-            spec: `https://ucp.dev/${UCP_VERSION}/specification/overview`,
-            mcp: {
+          "dev.ucp.shopping": [
+            {
+              version: UCP_VERSION,
+              spec: `https://ucp.dev/${UCP_VERSION}/specification/overview`,
+              transport: "mcp",
               endpoint: `${origin}/ucp/mcp`,
               schema: `https://ucp.dev/${UCP_VERSION}/services/shopping/mcp.openrpc.json`,
             },
-          },
+          ],
         },
-        capabilities: [
-          {
-            name: "dev.ucp.shopping.catalog.search",
-            version: UCP_VERSION,
-            spec: `https://ucp.dev/${UCP_VERSION}/specification/catalog/search`,
-            schema: `https://ucp.dev/${UCP_VERSION}/schemas/shopping/catalog_search.json`,
-          },
-          {
-            name: "dev.ucp.shopping.catalog.lookup",
-            version: UCP_VERSION,
-            spec: `https://ucp.dev/${UCP_VERSION}/specification/catalog/lookup`,
-            schema: `https://ucp.dev/${UCP_VERSION}/schemas/shopping/catalog_lookup.json`,
-          },
-        ],
+        capabilities: {
+          "dev.ucp.shopping.catalog.search": [
+            {
+              version: UCP_VERSION,
+              spec: `https://ucp.dev/${UCP_VERSION}/specification/catalog/search`,
+              schema: `https://ucp.dev/${UCP_VERSION}/schemas/shopping/catalog_search.json`,
+            },
+          ],
+          "dev.ucp.shopping.catalog.lookup": [
+            {
+              version: UCP_VERSION,
+              spec: `https://ucp.dev/${UCP_VERSION}/specification/catalog/lookup`,
+              schema: `https://ucp.dev/${UCP_VERSION}/schemas/shopping/catalog_lookup.json`,
+            },
+          ],
+        },
+        payment_handlers: {},
       },
     },
     {
