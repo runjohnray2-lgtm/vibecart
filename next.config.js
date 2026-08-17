@@ -6,4 +6,8 @@ const nextConfig = {
   },
 };
 
+if (process.env.VERCEL) {
+  console.log(`[vibecart config] durable cart database: ${process.env.DATABASE_URL || process.env.POSTGRES_URL ? "configured" : "missing"}`);
+}
+
 module.exports = nextConfig;
