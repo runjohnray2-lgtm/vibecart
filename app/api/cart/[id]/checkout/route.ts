@@ -26,6 +26,9 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     return checkoutPost(checkoutRequest)
   } catch (error) {
     console.error("[vibecart cart] checkout handoff failed", error)
+    if (error instanceof Error && error.message.includes("storage is not configured")) {
+      return NextResponse.json({ success: false, code: "CART_STORAGE_NOT_CONFIGURED", error: "Cart storage is not configured." }, { status: 503 })
+    }
     return NextResponse.json({ success: false, code: "CART_CHECKOUT_FAILED", error: "Cart checkout could not be created." }, { status: 500 })
   }
 }
