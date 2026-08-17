@@ -10,66 +10,38 @@ const SEARCH_CAPABILITY = "dev.ucp.shopping.catalog.search"
 const LOOKUP_CAPABILITY = "dev.ucp.shopping.catalog.lookup"
 const PROFILE_CACHE_MS = 5 * 60 * 1000
 const PROFILE_MAX_BYTES = 256 * 1024
+const DEFAULT_SEARCH_LIMIT = 10
+const MAX_SEARCH_LIMIT = 50
+const MAX_LOOKUP_IDS = 100
 
 interface RpcRequest {
   jsonrpc?: string
   id?: string | number | null
   method?: string
-  params?: {
-    name?: string
-    arguments?: Record<string, unknown>
-    protocolVersion?: string
-  }
+  params?: { name?: string; arguments?: Record<string, unknown>; protocolVersion?: string }
 }
 
-interface PlatformProfile {
-  ucp: {
-    version: string
-    capabilities: Record<string, unknown>
-  }
-}
-
+interface PlatformProfile { ucp: { version: string; capabilities: Record<string, unknown> } }
+type NegotiationCode = "invalid_profile_url" | "profile_unreachable" | "profile_malformed" | "version_unsupported"
 type CachedProfile = { expiresAt: number; profile: PlatformProfile }
 const profileCache = new Map<string, CachedProfile>()
 
-function rpc(id: RpcRequest["id"], result: unknown) {
-  return NextResponse.json({ jsonrpc: "2.0", id: id ?? null, result })
+class UcpNegotiationError extends Error {
+  constructor(public readonly ucpCode: NegotiationCode, public readonly httpStatus: number) { super(ucpCode) }
 }
 
-function rpcError(id: RpcRequest["id"], code: number, message: string, status = 400) {
-  return NextResponse.json({ jsonrpc: "2.0", id: id ?? null, error: { code, message } }, { status })
-}
-
-function ucp(capability: string, status?: "success" | "error") {
-  return {
-    version: UCP_VERSION,
-    ...(status ? { status } : {}),
-    capabilities: { [capability]: [{ version: UCP_VERSION }] },
-  }
-}
+function rpc(id: RpcRequest["id"], result: unknown) { return NextResponse.json({ jsonrpc: "2.0", id: id ?? null, result }) }
+function rpcError(id: RpcRequest["id"], code: number, message: string, status = 400) { return NextResponse.json({ jsonrpc: "2.0", id: id ?? null, error: { code, message } }, { status }) }
+function ucp(capability: string, status?: "success" | "error") { return { version: UCP_VERSION, ...(status ? { status } : {}), capabilities: { [capability]: [{ version: UCP_VERSION }] } } }
+function structured(content: unknown) { return { structuredContent: content, content: [{ type: "text", text: JSON.stringify(content) }] } }
+function incompatibleCapabilities(capability: string) { return structured({ ucp: { version: UCP_VERSION, status: "error", capabilities: {} }, messages: [{ type: "error", code: "capabilities_incompatible", content: `Platform profile does not negotiate ${capability} at ${UCP_VERSION}`, severity: "unrecoverable" }] }) }
 
 function asUcpProduct(product: VibeProduct) {
   return {
-    id: product.id,
-    handle: product.id,
-    title: product.name,
-    description: { plain: product.description },
-    price_range: {
-      min: { amount: product.priceCents, currency: "USD" },
-      max: { amount: product.priceCents, currency: "USD" },
-    },
+    id: product.id, handle: product.id, title: product.name, description: { plain: product.description },
+    price_range: { min: { amount: product.priceCents, currency: "USD" }, max: { amount: product.priceCents, currency: "USD" } },
     media: product.image ? [{ type: "image", url: product.image, alt_text: product.name }] : [],
-    variants: [
-      {
-        id: product.id,
-        sku: product.id,
-        title: product.variant ?? product.name,
-        description: { plain: product.description },
-        price: { amount: product.priceCents, currency: "USD" },
-        availability: { available: true },
-        seller: { name: "VibeCart Demo Merchant" },
-      },
-    ],
+    variants: [{ id: product.id, sku: product.id, title: product.variant ?? product.name, description: { plain: product.description }, price: { amount: product.priceCents, currency: "USD" }, availability: { available: true }, seller: { name: "VibeCart Demo Merchant" } }],
   }
 }
 
@@ -101,60 +73,40 @@ function isPrivateIp(address: string) {
 
 async function validateProfileUrl(value: string) {
   let url: URL
-  try {
-    url = new URL(value)
-  } catch {
-    throw new Error("invalid_platform_profile")
-  }
-
-  if (url.protocol !== "https:" || url.username || url.password || (url.port && url.port !== "443")) {
-    throw new Error("invalid_platform_profile")
-  }
-  if (url.hostname === "localhost" || url.hostname.endsWith(".local")) throw new Error("invalid_platform_profile")
-
+  try { url = new URL(value) } catch { throw new UcpNegotiationError("invalid_profile_url", 400) }
+  if (url.protocol !== "https:" || url.username || url.password || (url.port && url.port !== "443") || url.hostname === "localhost" || url.hostname.endsWith(".local")) throw new UcpNegotiationError("invalid_profile_url", 400)
   if (isIP(url.hostname)) {
-    if (isPrivateIp(url.hostname)) throw new Error("invalid_platform_profile")
+    if (isPrivateIp(url.hostname)) throw new UcpNegotiationError("invalid_profile_url", 400)
   } else {
-    const addresses = await lookup(url.hostname, { all: true, verbatim: true })
-    if (addresses.length === 0 || addresses.some(entry => isPrivateIp(entry.address))) throw new Error("invalid_platform_profile")
+    let addresses: Awaited<ReturnType<typeof lookup>>
+    try { addresses = await lookup(url.hostname, { all: true, verbatim: true }) } catch { throw new UcpNegotiationError("invalid_profile_url", 400) }
+    if (addresses.length === 0 || addresses.some(entry => isPrivateIp(entry.address))) throw new UcpNegotiationError("invalid_profile_url", 400)
   }
   return url
 }
 
 function asPlatformProfile(value: unknown): PlatformProfile {
-  if (!value || typeof value !== "object") throw new Error("invalid_platform_profile")
+  if (!value || typeof value !== "object") throw new UcpNegotiationError("profile_malformed", 422)
   const ucpValue = (value as Record<string, unknown>).ucp
-  if (!ucpValue || typeof ucpValue !== "object") throw new Error("invalid_platform_profile")
+  if (!ucpValue || typeof ucpValue !== "object") throw new UcpNegotiationError("profile_malformed", 422)
   const ucpObject = ucpValue as Record<string, unknown>
-  if (typeof ucpObject.version !== "string" || !ucpObject.capabilities || typeof ucpObject.capabilities !== "object") {
-    throw new Error("invalid_platform_profile")
-  }
+  if (typeof ucpObject.version !== "string" || !ucpObject.capabilities || typeof ucpObject.capabilities !== "object" || Array.isArray(ucpObject.capabilities)) throw new UcpNegotiationError("profile_malformed", 422)
   return { ucp: { version: ucpObject.version, capabilities: ucpObject.capabilities as Record<string, unknown> } }
 }
 
 async function fetchPlatformProfile(profileUrl: string) {
   const cached = profileCache.get(profileUrl)
   if (cached && cached.expiresAt > Date.now()) return cached.profile
-
   const url = await validateProfileUrl(profileUrl)
-  const response = await fetch(url, {
-    redirect: "manual",
-    headers: { accept: "application/json" },
-    signal: AbortSignal.timeout(3000),
-  })
-  if (!response.ok || response.status >= 300 && response.status < 400) throw new Error("invalid_platform_profile")
-
+  let response: Response
+  try { response = await fetch(url, { redirect: "manual", headers: { accept: "application/json" }, signal: AbortSignal.timeout(3000) }) } catch { throw new UcpNegotiationError("profile_unreachable", 424) }
+  if (!response.ok || response.status >= 300 && response.status < 400) throw new UcpNegotiationError("profile_unreachable", 424)
   const declaredLength = Number(response.headers.get("content-length") ?? "0")
-  if (declaredLength > PROFILE_MAX_BYTES) throw new Error("invalid_platform_profile")
+  if (declaredLength > PROFILE_MAX_BYTES) throw new UcpNegotiationError("profile_malformed", 422)
   const text = await response.text()
-  if (Buffer.byteLength(text, "utf8") > PROFILE_MAX_BYTES) throw new Error("invalid_platform_profile")
-
+  if (Buffer.byteLength(text, "utf8") > PROFILE_MAX_BYTES) throw new UcpNegotiationError("profile_malformed", 422)
   let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    throw new Error("invalid_platform_profile")
-  }
+  try { parsed = JSON.parse(text) } catch { throw new UcpNegotiationError("profile_malformed", 422) }
   const profile = asPlatformProfile(parsed)
   profileCache.set(profileUrl, { profile, expiresAt: Date.now() + PROFILE_CACHE_MS })
   return profile
@@ -167,68 +119,48 @@ function capabilityEntryIsValid(capability: string, value: unknown) {
     const record = entry as Record<string, unknown>
     if (record.version !== UCP_VERSION || typeof record.spec !== "string" || typeof record.schema !== "string") return false
     try {
-      const spec = new URL(record.spec)
-      const schema = new URL(record.schema)
+      const spec = new URL(record.spec); const schema = new URL(record.schema)
       if (capability.startsWith("dev.ucp.") && (spec.hostname !== "ucp.dev" || schema.hostname !== "ucp.dev")) return false
       return spec.protocol === "https:" && schema.protocol === "https:"
-    } catch {
-      return false
-    }
+    } catch { return false }
   })
 }
 
 async function negotiateCapability(args: Record<string, unknown>, capability: string) {
   const profileUrl = agentProfileUrl(args)
-  if (!profileUrl) throw new Error("meta.ucp-agent.profile is required")
+  if (!profileUrl) throw new UcpNegotiationError("invalid_profile_url", 400)
   const profile = await fetchPlatformProfile(profileUrl)
-  if (profile.ucp.version !== UCP_VERSION) throw new Error("version_unsupported")
-  if (!capabilityEntryIsValid(capability, profile.ucp.capabilities[capability])) throw new Error("capability_not_negotiated")
+  if (profile.ucp.version !== UCP_VERSION) throw new UcpNegotiationError("version_unsupported", 422)
+  return capabilityEntryIsValid(capability, profile.ucp.capabilities[capability])
 }
 
-function structured(content: unknown) {
-  return { structuredContent: content, content: [{ type: "text", text: JSON.stringify(content) }] }
+function decodeCursor(value: unknown) {
+  if (value === undefined) return 0
+  if (typeof value !== "string" || value.length === 0 || value.length > 200) throw new Error("invalid cursor")
+  try {
+    const offset = Number(Buffer.from(value, "base64url").toString("utf8"))
+    if (!Number.isSafeInteger(offset) || offset < 0) throw new Error("invalid cursor")
+    return offset
+  } catch { throw new Error("invalid cursor") }
+}
+function encodeCursor(offset: number) { return Buffer.from(String(offset), "utf8").toString("base64url") }
+function searchPage(value: unknown) {
+  if (value === undefined) return { offset: 0, limit: DEFAULT_SEARCH_LIMIT }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("catalog.pagination must be an object")
+  const pagination = value as Record<string, unknown>
+  let limit = DEFAULT_SEARCH_LIMIT
+  if (pagination.limit !== undefined) {
+    if (typeof pagination.limit !== "number" || !Number.isSafeInteger(pagination.limit) || pagination.limit < 1) throw new Error("catalog.pagination.limit must be a positive whole number")
+    limit = Math.min(pagination.limit, MAX_SEARCH_LIMIT)
+  }
+  return { offset: decodeCursor(pagination.cursor), limit }
 }
 
+const metaSchema = { type: "object", required: ["ucp-agent"], properties: { "ucp-agent": { type: "object", required: ["profile"], properties: { profile: { type: "string", format: "uri" } }, additionalProperties: true } }, additionalProperties: true }
 const tools = [
-  {
-    name: "search_catalog",
-    description: "Search the merchant catalog using the UCP Catalog Search capability.",
-    inputSchema: {
-      type: "object",
-      required: ["meta", "catalog"],
-      properties: {
-        meta: { type: "object" },
-        catalog: { type: "object", properties: { query: { type: "string" } }, additionalProperties: true },
-      },
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "lookup_catalog",
-    description: "Look up one or more merchant catalog products by stable identifier.",
-    inputSchema: {
-      type: "object",
-      required: ["meta", "catalog"],
-      properties: {
-        meta: { type: "object" },
-        catalog: { type: "object", required: ["ids"], properties: { ids: { type: "array", items: { type: "string" }, minItems: 1 } }, additionalProperties: true },
-      },
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "get_product",
-    description: "Get one merchant catalog product by stable identifier.",
-    inputSchema: {
-      type: "object",
-      required: ["meta", "catalog"],
-      properties: {
-        meta: { type: "object" },
-        catalog: { type: "object", required: ["id"], properties: { id: { type: "string" } }, additionalProperties: true },
-      },
-      additionalProperties: false,
-    },
-  },
+  { name: "search_catalog", description: "Search the merchant catalog using the UCP Catalog Search capability.", inputSchema: { type: "object", required: ["meta", "catalog"], properties: { meta: metaSchema, catalog: { type: "object", properties: { query: { type: "string" }, context: { type: "object" }, signals: { type: "object" }, attribution: { type: "object" }, filters: { type: "object" }, pagination: { type: "object", properties: { limit: { type: "integer", minimum: 1 }, cursor: { type: "string" } }, additionalProperties: true } }, additionalProperties: true } }, additionalProperties: false } },
+  { name: "lookup_catalog", description: "Look up one or more merchant catalog products by stable identifier.", inputSchema: { type: "object", required: ["meta", "catalog"], properties: { meta: metaSchema, catalog: { type: "object", required: ["ids"], properties: { ids: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1, maxItems: MAX_LOOKUP_IDS } }, additionalProperties: true } }, additionalProperties: false } },
+  { name: "get_product", description: "Get one merchant catalog product by stable identifier.", inputSchema: { type: "object", required: ["meta", "catalog"], properties: { meta: metaSchema, catalog: { type: "object", required: ["id"], properties: { id: { type: "string", minLength: 1 } }, additionalProperties: true } }, additionalProperties: false } },
 ]
 
 export async function GET(req: Request) {
@@ -238,23 +170,9 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   let message: RpcRequest
-  try {
-    message = await req.json() as RpcRequest
-  } catch {
-    return rpcError(null, -32700, "Parse error")
-  }
-
+  try { message = await req.json() as RpcRequest } catch { return rpcError(null, -32700, "Parse error") }
   if (message.jsonrpc !== "2.0" || !message.method) return rpcError(message.id, -32600, "Invalid Request")
-
-  if (message.method === "initialize") {
-    return rpc(message.id, {
-      protocolVersion: typeof message.params?.protocolVersion === "string" ? message.params.protocolVersion : "2025-06-18",
-      capabilities: { tools: {} },
-      serverInfo: { name: "vibecart-ucp", version: "0.2.0" },
-      instructions: "UCP 2026-04-08 catalog transport. Catalog operations validate meta.ucp-agent.profile and negotiate capabilities.",
-    })
-  }
-
+  if (message.method === "initialize") return rpc(message.id, { protocolVersion: typeof message.params?.protocolVersion === "string" ? message.params.protocolVersion : "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "vibecart-ucp", version: "0.3.0" }, instructions: "UCP 2026-04-08 catalog transport. Catalog operations validate meta.ucp-agent.profile and negotiate capabilities." })
   if (message.method === "notifications/initialized") return new NextResponse(null, { status: 204 })
   if (message.method === "ping") return rpc(message.id, {})
   if (message.method === "tools/list") return rpc(message.id, { tools })
@@ -264,40 +182,39 @@ export async function POST(req: Request) {
   const args = message.params?.arguments ?? {}
   const capability = name === "search_catalog" ? SEARCH_CAPABILITY : (name === "lookup_catalog" || name === "get_product") ? LOOKUP_CAPABILITY : null
   if (!capability) return rpcError(message.id, -32602, `Unknown tool: ${String(name)}`)
-
-  try {
-    await negotiateCapability(args, capability)
-  } catch (error) {
-    const messageText = error instanceof Error ? error.message : "invalid_platform_profile"
-    return rpcError(message.id, -32602, messageText)
+  let negotiated: boolean
+  try { negotiated = await negotiateCapability(args, capability) } catch (error) {
+    if (error instanceof UcpNegotiationError) return rpcError(message.id, -32001, error.ucpCode, error.httpStatus)
+    console.error("[vibecart ucp] Unexpected profile negotiation failure", error)
+    return rpcError(message.id, -32603, "Internal error", 500)
   }
+  if (!negotiated) return rpc(message.id, incompatibleCapabilities(capability))
 
   const catalog = args.catalog
-  if (!catalog || typeof catalog !== "object") return rpcError(message.id, -32602, "catalog is required")
+  if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) return rpcError(message.id, -32602, "catalog is required")
   const input = catalog as Record<string, unknown>
 
   if (name === "search_catalog") {
+    if (input.query !== undefined && typeof input.query !== "string") return rpcError(message.id, -32602, "catalog.query must be a string")
+    let page: { offset: number; limit: number }
+    try { page = searchPage(input.pagination) } catch (error) { return rpcError(message.id, -32602, error instanceof Error ? error.message : "invalid pagination") }
     const query = typeof input.query === "string" ? input.query.trim().toLowerCase() : ""
-    const products = PRODUCTS.filter(p => !query || `${p.name} ${p.description} ${p.variant ?? ""}`.toLowerCase().includes(query))
-    return rpc(message.id, structured({ ucp: ucp(SEARCH_CAPABILITY), products: products.map(asUcpProduct), pagination: { has_next_page: false, total_count: products.length } }))
+    const matches = PRODUCTS.filter(p => !query || `${p.name} ${p.description} ${p.variant ?? ""}`.toLowerCase().includes(query))
+    const products = matches.slice(page.offset, page.offset + page.limit)
+    const nextOffset = page.offset + products.length; const hasNextPage = nextOffset < matches.length
+    return rpc(message.id, structured({ ucp: ucp(SEARCH_CAPABILITY), products: products.map(asUcpProduct), pagination: { ...(hasNextPage ? { cursor: encodeCursor(nextOffset) } : {}), has_next_page: hasNextPage, total_count: matches.length } }))
   }
 
   if (name === "lookup_catalog") {
-    const ids = Array.isArray(input.ids) ? input.ids.filter((id): id is string => typeof id === "string") : []
-    if (ids.length === 0) return rpcError(message.id, -32602, "catalog.ids must contain at least one identifier")
-    const found = ids.map(getProduct).filter((p): p is VibeProduct => Boolean(p))
-    const missing = ids.filter(id => !getProduct(id))
-    return rpc(message.id, structured({
-      ucp: ucp(LOOKUP_CAPABILITY),
-      products: found.map(asUcpProduct),
-      ...(missing.length ? { messages: missing.map(id => ({ type: "info", code: "not_found", content: id })) } : {}),
-    }))
+    if (!Array.isArray(input.ids) || input.ids.length === 0) return rpcError(message.id, -32602, "catalog.ids must contain at least one identifier")
+    if (input.ids.length > MAX_LOOKUP_IDS) return rpcError(message.id, -32602, `catalog.ids cannot exceed ${MAX_LOOKUP_IDS} identifiers`)
+    if (input.ids.some(id => typeof id !== "string" || id.trim().length === 0)) return rpcError(message.id, -32602, "catalog.ids must contain only non-empty strings")
+    const ids = input.ids as string[]; const found = ids.map(getProduct).filter((p): p is VibeProduct => Boolean(p)); const missing = ids.filter(id => !getProduct(id))
+    return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY), products: found.map(asUcpProduct), ...(missing.length ? { messages: missing.map(id => ({ type: "info", code: "not_found", content: id })) } : {}) }))
   }
 
-  const id = typeof input.id === "string" ? input.id : ""
-  const product = id ? getProduct(id) : undefined
-  if (!product) {
-    return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY, "error"), messages: [{ type: "error", code: "not_found", content: id || "missing id" }] }))
-  }
+  if (typeof input.id !== "string" || input.id.trim().length === 0) return rpcError(message.id, -32602, "catalog.id must be a non-empty string")
+  const id = input.id; const product = getProduct(id)
+  if (!product) return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY, "error"), messages: [{ type: "error", code: "not_found", content: `Product not found: ${id}`, severity: "unrecoverable" }] }))
   return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY), product: asUcpProduct(product) }))
 }
