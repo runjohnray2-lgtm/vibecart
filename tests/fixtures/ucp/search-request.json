@@ -1,0 +1,21 @@
+{
+  "jsonrpc": "2.0",
+  "id": "search-1",
+  "method": "tools/call",
+  "params": {
+    "name": "search_catalog",
+    "arguments": {
+      "meta": {
+        "ucp-agent": {
+          "profile": "https://platform.example.com/.well-known/ucp"
+        }
+      },
+      "catalog": {
+        "query": "LED",
+        "pagination": {
+          "limit": 10
+        }
+      }
+    }
+  }
+}
