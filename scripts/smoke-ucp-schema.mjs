@@ -1,8 +1,11 @@
-import {
+import { createRequire } from "node:module"
+
+const require = createRequire(import.meta.url)
+const {
   GetProductResponseSchema,
   LookupResponseSchema,
   SearchResponseSchema,
-} from "@ucp-js/sdk"
+} = require("@ucp-js/sdk")
 
 const baseUrl = process.env.VIBECART_SMOKE_BASE_URL ?? "http://127.0.0.1:3000"
 const platformProfile = "https://raw.githubusercontent.com/runjohnray2-lgtm/vibecart/main/tests/fixtures/ucp/platform-profile.json"
