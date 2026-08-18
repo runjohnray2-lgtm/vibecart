@@ -27,7 +27,9 @@ export function catalogSourceMode(): "reference" | "remote" {
 }
 
 export function configuredMerchantName(): string {
-  return process.env.VIBECART_MERCHANT_NAME?.trim() || "VibeCart Demo Merchant"
+  const configured = process.env.VIBECART_MERCHANT_NAME?.trim()
+  if (configured) return configured
+  return catalogSourceMode() === "remote" ? "VibeCart Merchant" : "VibeCart Demo Merchant"
 }
 
 function isPrivateIpv4(address: string): boolean {
