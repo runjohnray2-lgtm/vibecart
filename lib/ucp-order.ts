@@ -1,6 +1,7 @@
 import type { DurableCloudOrder, DurableCloudOrderLine } from "@/lib/cloud-orders"
 
 export const UCP_ORDER_VERSION = "2026-04-08"
+export const UCP_ORDER_CAPABILITY = "dev.ucp.shopping.order"
 
 export interface UcpOrderTotal {
   type: "subtotal" | "items_discount" | "tax" | "total"
@@ -28,7 +29,9 @@ export interface UcpOrder {
   ucp: {
     version: typeof UCP_ORDER_VERSION
     status: "success"
-    capabilities: Record<string, never[]>
+    capabilities: {
+      [UCP_ORDER_CAPABILITY]: Array<{ version: typeof UCP_ORDER_VERSION }>
+    }
   }
   id: string
   checkout_id: string
@@ -51,7 +54,7 @@ function requireHttpsPermalink(raw: string): string {
 }
 
 function requireMinorUnits(value: number | null, name: string): number {
-  if (!Number.isSafeInteger(value) || value === null || value < 0) {
+  if (value === null || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`${name} must be a nonnegative integer in minor currency units`)
   }
   return value
@@ -124,7 +127,9 @@ export function mapDurableOrderToUcp(order: DurableCloudOrder, permalinkUrl: str
     ucp: {
       version: UCP_ORDER_VERSION,
       status: "success",
-      capabilities: {},
+      capabilities: {
+        [UCP_ORDER_CAPABILITY]: [{ version: UCP_ORDER_VERSION }],
+      },
     },
     id: order.orderId,
     checkout_id: order.checkoutSessionId,

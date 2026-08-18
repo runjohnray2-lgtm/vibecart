@@ -5,9 +5,10 @@ import test from "node:test"
 test("UCP order mapper pins the released 2026-04-08 contract", async () => {
   const source = await readFile("lib/ucp-order.ts", "utf8")
   assert.match(source, /UCP_ORDER_VERSION = "2026-04-08"/)
+  assert.match(source, /UCP_ORDER_CAPABILITY = "dev\.ucp\.shopping\.order"/)
   assert.match(source, /checkout_id:\s*order\.checkoutSessionId/)
   assert.match(source, /permalink_url:\s*permalink/)
-  assert.match(source, /capabilities:\s*\{\}/)
+  assert.match(source, /\[UCP_ORDER_CAPABILITY\]: \[\{ version: UCP_ORDER_VERSION \}\]/)
   assert.match(source, /expectations:\s*\[\]/)
   assert.match(source, /events:\s*\[\]/)
 })
