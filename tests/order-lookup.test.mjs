@@ -6,7 +6,7 @@ test("Core reuses the existing Cloud ingest URL and key for order lookup", async
   const source = await readFile("lib/cloud-orders.ts", "utf8")
   assert.match(source, /VIBECART_CLOUD_INGEST_URL/)
   assert.match(source, /VIBECART_CLOUD_INGEST_KEY/)
-  assert.match(source, /replace\(\/\\\/$\/, ""\)\/order|\/order/)
+  assert.match(source, /\/order/)
   assert.match(source, /"x-vibecart-key": config\.key/)
 })
 
