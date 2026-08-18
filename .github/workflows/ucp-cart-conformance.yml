@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "agent/ucp-cart-mapper"
+      - "agent/ucp-cart-public"
   pull_request:
     branches:
       - "main"
@@ -35,7 +36,7 @@ jobs:
       - name: Unit tests
         run: npm test
 
-      - name: Generate UCP cart through production mapper
+      - name: Generate UCP cart through production helpers
         run: node scripts/smoke-ucp-cart.mjs
 
       - name: Install Rust toolchain for official UCP validator
@@ -46,3 +47,6 @@ jobs:
 
       - name: Validate UCP 2026-04-08 cart payload
         run: ucp-schema validate /tmp/vibecart-ucp-payloads/cart.json --schema .ucp-spec/source/schemas/shopping/cart.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
+
+      - name: Validate UCP 2026-04-08 cart error payload
+        run: ucp-schema validate /tmp/vibecart-ucp-payloads/cart-error.json --schema .ucp-spec/source/schemas/shopping/types/error_response.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
