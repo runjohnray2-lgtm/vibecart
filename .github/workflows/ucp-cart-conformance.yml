@@ -49,4 +49,4 @@ jobs:
         run: ucp-schema validate /tmp/vibecart-ucp-payloads/cart.json --schema .ucp-spec/source/schemas/shopping/cart.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
 
       - name: Validate UCP 2026-04-08 cart error payload
-        run: ucp-schema validate /tmp/vibecart-ucp-payloads/cart-error.json --schema .ucp-spec/source/schemas/shopping/types/error_response.json --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
+        run: ucp-schema validate /tmp/vibecart-ucp-payloads/cart-error.json --schema .ucp-spec/source/schemas/shopping/types/error_response.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
