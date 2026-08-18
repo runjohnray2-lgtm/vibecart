@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server"
+import { ucpOrderRuntimeConfigured } from "@/lib/ucp-order-service"
 
 export const runtime = "nodejs"
 
 const UCP_VERSION = "2026-04-08"
+const ORDER_CAPABILITY = "dev.ucp.shopping.order"
 
 export async function GET(req: Request) {
   const origin = new URL(req.url).origin
+  const orderEnabled = ucpOrderRuntimeConfigured()
 
   return NextResponse.json(
     {
@@ -37,6 +40,15 @@ export async function GET(req: Request) {
               schema: `https://ucp.dev/${UCP_VERSION}/schemas/shopping/catalog_lookup.json`,
             },
           ],
+          ...(orderEnabled ? {
+            [ORDER_CAPABILITY]: [
+              {
+                version: UCP_VERSION,
+                spec: `https://ucp.dev/${UCP_VERSION}/specification/order`,
+                schema: `https://ucp.dev/${UCP_VERSION}/schemas/shopping/order.json`,
+              },
+            ],
+          } : {}),
         },
         payment_handlers: {},
       },
