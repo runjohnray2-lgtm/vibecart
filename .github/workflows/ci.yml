@@ -61,8 +61,11 @@ jobs:
       - name: Smoke test MCP commerce flow
         run: node scripts/smoke-mcp.mjs
 
-      - name: Capture live UCP payloads
+      - name: Capture live UCP catalog payloads
         run: node scripts/smoke-ucp-schema.mjs
+
+      - name: Generate UCP order through production mapper
+        run: node scripts/smoke-ucp-order.mjs
 
       - name: Validate released UCP discovery profile
         run: |
@@ -107,12 +110,13 @@ jobs:
       - name: Build official UCP schema validator 1.4.1
         run: cargo install ucp-schema --version 1.4.1 --locked
 
-      - name: Validate UCP 2026-04-08 catalog payloads
+      - name: Validate UCP 2026-04-08 commerce payloads
         run: |
           set -euo pipefail
           ucp-schema validate /tmp/vibecart-ucp-payloads/search.json --schema .ucp-spec/source/schemas/shopping/catalog_search.json --response --op search --def search_response --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
           ucp-schema validate /tmp/vibecart-ucp-payloads/lookup.json --schema .ucp-spec/source/schemas/shopping/catalog_lookup.json --response --op lookup --def lookup_response --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
           ucp-schema validate /tmp/vibecart-ucp-payloads/get-product.json --schema .ucp-spec/source/schemas/shopping/catalog_lookup.json --response --op get_product --def get_product_response --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
+          ucp-schema validate /tmp/vibecart-ucp-payloads/order.json --schema .ucp-spec/source/schemas/shopping/order.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
 
       - name: Inspect MCP production transport
         run: npx --yes @modelcontextprotocol/inspector@latest --cli http://127.0.0.1:3000/mcp --transport http --method tools/list
