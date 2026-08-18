@@ -12,7 +12,7 @@ const { outputText } = ts.transpileModule(source, {
 })
 
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`
-const { mapDurableCartToUcp } = await import(moduleUrl)
+const { mapDurableCartToUcp, mapCartErrorToUcp } = await import(moduleUrl)
 
 const payload = mapDurableCartToUcp({
   id: "cart_schema_test",
@@ -37,6 +37,9 @@ const payload = mapDurableCartToUcp({
   updatedAt: "2026-08-18T00:00:00.000Z",
 })
 
+const errorPayload = mapCartErrorToUcp("not_found", "Cart not found or has expired", "unrecoverable")
+
 await mkdir("/tmp/vibecart-ucp-payloads", { recursive: true })
 await writeFile("/tmp/vibecart-ucp-payloads/cart.json", `${JSON.stringify(payload, null, 2)}\n`)
-console.log("Generated UCP cart payload through the production cart mapper")
+await writeFile("/tmp/vibecart-ucp-payloads/cart-error.json", `${JSON.stringify(errorPayload, null, 2)}\n`)
+console.log("Generated UCP cart success and error payloads through production helpers")
