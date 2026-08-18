@@ -13,7 +13,7 @@ test("UCP cart discovery and tool listing share the same durable runtime gate", 
 
   assert.match(route, /ucpCartRuntimeConfigured\(\)/)
   assert.match(discovery, /ucpCartRuntimeConfigured\(\)/)
-  assert.match(route, /tools\.push\(\.\.\.cartTools\)/)
+  assert.match(route, /\.\.\.\(ucpCartRuntimeConfigured\(\) \? cartTools : \[\]\)/)
   assert.match(discovery, /cartEnabled \? \{/)
   assert.match(route, /CART_CAPABILITY = "dev\.ucp\.shopping\.cart"/)
   assert.match(discovery, /CART_CAPABILITY = "dev\.ucp\.shopping\.cart"/)
