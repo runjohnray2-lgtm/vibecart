@@ -5,6 +5,7 @@ import test from "node:test"
 test("UCP order runtime is ready only when Cloud lookup and merchant permalink are both valid", async () => {
   const source = await readFile("lib/ucp-order-service.ts", "utf8")
   assert.match(source, /cloudOrderLookupConfigured\(\) && orderPermalinkConfigured\(\)/)
+  assert.match(source, /export async function getUcpOrder/)
 })
 
 test("UCP order service preserves stable not-found and unauthorized outcomes", async () => {
@@ -20,6 +21,7 @@ test("UCP order service never fabricates a permalink or unsafe mapped order", as
   assert.match(source, /merchantOrderPermalink\(lookup\.order\.orderId\)/)
   assert.match(source, /if \(!permalink\) return \{ kind: "unavailable", retryable: false \}/)
   assert.match(source, /mapDurableOrderToUcp\(lookup\.order, permalink\)/)
+  assert.match(source, /kind: "success", order: mapDurableOrderToUcp/)
   assert.match(source, /Durable order cannot be mapped safely/)
 })
 
