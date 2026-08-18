@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server"
 import { ucpOrderRuntimeConfigured } from "@/lib/ucp-order-service"
+import { ucpCartRuntimeConfigured } from "@/lib/ucp-cart-service"
 
 export const runtime = "nodejs"
 
 const UCP_VERSION = "2026-04-08"
 const ORDER_CAPABILITY = "dev.ucp.shopping.order"
+const CART_CAPABILITY = "dev.ucp.shopping.cart"
 
 export async function GET(req: Request) {
   const origin = new URL(req.url).origin
   const orderEnabled = ucpOrderRuntimeConfigured()
+  const cartEnabled = ucpCartRuntimeConfigured()
 
   return NextResponse.json(
     {
@@ -40,6 +43,15 @@ export async function GET(req: Request) {
               schema: `https://ucp.dev/${UCP_VERSION}/schemas/shopping/catalog_lookup.json`,
             },
           ],
+          ...(cartEnabled ? {
+            [CART_CAPABILITY]: [
+              {
+                version: UCP_VERSION,
+                spec: `https://ucp.dev/${UCP_VERSION}/specification/cart`,
+                schema: `https://ucp.dev/${UCP_VERSION}/schemas/shopping/cart.json`,
+              },
+            ],
+          } : {}),
           ...(orderEnabled ? {
             [ORDER_CAPABILITY]: [
               {
