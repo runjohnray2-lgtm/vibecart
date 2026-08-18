@@ -12,21 +12,27 @@ on:
 permissions:
   contents: read
   id-token: write
+  issues: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      SERVER_NAME: io.github.runjohnray2-lgtm/vibecart
+      STATUS_ISSUE: "48"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Verify public remote before publishing metadata
+      - id: remote
+        name: Verify public remote before publishing metadata
         run: |
           response="$(curl --fail --silent --show-error https://vibecart.vercel.app/mcp)"
           node -e 'const value=JSON.parse(process.argv[1]); if(value.name!=="vibecart" || !Array.isArray(value.tools) || !value.tools.includes("vibecart.create_checkout")) process.exit(1)' "$response"
 
-      - name: Install official MCP publisher
+      - id: install
+        name: Install official MCP publisher
         run: |
           curl --fail --location --silent --show-error \
             https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz \
@@ -35,8 +41,69 @@ jobs:
           chmod +x /tmp/mcp-publisher
           /tmp/mcp-publisher --help
 
-      - name: Authenticate to official registry with GitHub OIDC
+      - id: validate
+        name: Validate official Registry metadata
+        run: /tmp/mcp-publisher validate server.json
+
+      - id: auth
+        name: Authenticate to official registry with GitHub OIDC
         run: /tmp/mcp-publisher login github-oidc
 
-      - name: Publish VibeCart remote server metadata
+      - id: publish
+        name: Publish VibeCart remote server metadata
         run: /tmp/mcp-publisher publish server.json
+
+      - id: registry
+        name: Verify VibeCart is visible in the official Registry API
+        run: |
+          response="$(curl --fail --silent --show-error --get \
+            --data-urlencode "search=${SERVER_NAME}" \
+            https://registry.modelcontextprotocol.io/v0.1/servers)"
+          node -e '
+            const body=JSON.parse(process.argv[1]);
+            const expected=process.argv[2];
+            const servers=Array.isArray(body.servers)?body.servers:[];
+            const found=servers.some((entry)=>(entry.server?.name ?? entry.name)===expected);
+            if(!found){
+              console.error(`Official MCP Registry did not return ${expected}`);
+              process.exit(1);
+            }
+          ' "$response" "$SERVER_NAME"
+
+      - name: Record Registry publication result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REMOTE_OUTCOME: ${{ steps.remote.outcome }}
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          VALIDATE_OUTCOME: ${{ steps.validate.outcome }}
+          AUTH_OUTCOME: ${{ steps.auth.outcome }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          REGISTRY_OUTCOME: ${{ steps.registry.outcome }}
+        run: |
+          result="FAILURE"
+          if [ "$REMOTE_OUTCOME" = "success" ] \
+            && [ "$INSTALL_OUTCOME" = "success" ] \
+            && [ "$VALIDATE_OUTCOME" = "success" ] \
+            && [ "$AUTH_OUTCOME" = "success" ] \
+            && [ "$PUBLISH_OUTCOME" = "success" ] \
+            && [ "$REGISTRY_OUTCOME" = "success" ]; then
+            result="SUCCESS"
+          fi
+
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body=$(cat <<EOF
+          **MCP Registry publication: ${result}**
+
+          - Server: \`${SERVER_NAME}\`
+          - Commit: \`${GITHUB_SHA}\`
+          - Remote precheck: ${REMOTE_OUTCOME}
+          - Publisher install: ${INSTALL_OUTCOME}
+          - server.json validation: ${VALIDATE_OUTCOME}
+          - GitHub OIDC auth: ${AUTH_OUTCOME}
+          - Publish: ${PUBLISH_OUTCOME}
+          - Official Registry API verification: ${REGISTRY_OUTCOME}
+          - Actions run: ${run_url}
+          EOF
+          )
+          gh issue comment "$STATUS_ISSUE" --repo "$GITHUB_REPOSITORY" --body "$body"
