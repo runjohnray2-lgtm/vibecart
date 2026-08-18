@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { cancelCart, CartItemInput, getCart, replaceCartItems } from "@/lib/cart-store"
+import { CatalogSourceError } from "@/lib/catalog-source"
 
 export const runtime = "nodejs"
 
@@ -15,6 +16,14 @@ async function cartId(context: { params: Promise<{ id: string }> }) {
 
 function isStorageConfigurationError(error: unknown) {
   return error instanceof Error && error.message.includes("storage is not configured")
+}
+
+function catalogFailure(error: unknown) {
+  if (!(error instanceof CatalogSourceError)) return null
+  return NextResponse.json(
+    { success: false, code: error.code, error: "Trusted merchant catalog is unavailable." },
+    { status: 503 }
+  )
 }
 
 export async function GET(_req: Request, context: { params: Promise<{ id: string }> }) {
@@ -44,6 +53,8 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
     if (isStorageConfigurationError(error)) {
       return NextResponse.json({ success: false, code: "CART_STORAGE_NOT_CONFIGURED", error: "Cart storage is not configured." }, { status: 503 })
     }
+    const catalog = catalogFailure(error)
+    if (catalog) return catalog
     const message = error instanceof Error ? error.message : "Cart could not be updated"
     const conflict = message === "Cart version conflict"
     return NextResponse.json(
