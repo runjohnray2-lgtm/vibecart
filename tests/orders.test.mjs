@@ -25,9 +25,8 @@ test("Checkout carries VibeCart cart identity into Stripe", async () => {
 test("trusted catalog product identity survives Stripe Checkout", async () => {
   const checkout = await readFile("app/api/checkout/route.ts", "utf8")
   const orders = await readFile("lib/orders.ts", "utf8")
-  assert.match(checkout, /vibecart_product_id:\s*r\.product\.id/)
-  assert.match(checkout, /vibecart_catalog_source:\s*"trusted"/)
-  assert.match(checkout, /vibecart_catalog_source:\s*"inline_untrusted"/)
+  assert.match(checkout, /vibecart_product_id:\s*r\.trusted \? r\.product\.id : ""/)
+  assert.match(checkout, /vibecart_catalog_source:\s*r\.trusted \? "trusted" : "inline_untrusted"/)
   assert.match(orders, /product\.metadata\?\.vibecart_catalog_source === "trusted"/)
   assert.match(orders, /product\.metadata\.vibecart_product_id/)
   assert.match(orders, /return product\.id/)
