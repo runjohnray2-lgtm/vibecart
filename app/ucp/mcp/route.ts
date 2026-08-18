@@ -2,12 +2,14 @@ import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
 import { NextResponse } from "next/server"
 import { PRODUCTS, VibeProduct, getProduct } from "@/lib/products"
+import { getUcpOrder, ucpOrderRuntimeConfigured } from "@/lib/ucp-order-service"
 
 export const runtime = "nodejs"
 
 const UCP_VERSION = "2026-04-08"
 const SEARCH_CAPABILITY = "dev.ucp.shopping.catalog.search"
 const LOOKUP_CAPABILITY = "dev.ucp.shopping.catalog.lookup"
+const ORDER_CAPABILITY = "dev.ucp.shopping.order"
 const PROFILE_CACHE_MS = 5 * 60 * 1000
 const PROFILE_MAX_BYTES = 256 * 1024
 const DEFAULT_SEARCH_LIMIT = 10
@@ -35,6 +37,13 @@ function rpcError(id: RpcRequest["id"], code: number, message: string, status = 
 function ucp(capability: string, status?: "success" | "error") { return { version: UCP_VERSION, ...(status ? { status } : {}), capabilities: { [capability]: [{ name: capability, version: UCP_VERSION }] } } }
 function structured(content: unknown) { return { structuredContent: content, content: [{ type: "text", text: JSON.stringify(content) }] } }
 function incompatibleCapabilities(capability: string) { return structured({ ucp: { version: UCP_VERSION, status: "error", capabilities: {} }, messages: [{ type: "error", code: "capabilities_incompatible", content: `Platform profile does not negotiate ${capability} at ${UCP_VERSION}`, severity: "unrecoverable" }] }) }
+function orderError(code: string, content: string, severity: "recoverable" | "unrecoverable") {
+  const payload = {
+    ucp: { version: UCP_VERSION, status: "error", capabilities: { [ORDER_CAPABILITY]: [{ version: UCP_VERSION }] } },
+    messages: [{ type: "error", code, severity, content }],
+  }
+  return { structuredContent: payload, content: [{ type: "text", text: content }] }
+}
 
 function asUcpProduct(product: VibeProduct) {
   return {
@@ -176,14 +185,33 @@ function searchPage(value: unknown) {
 
 const metaSchema = { type: "object", required: ["ucp-agent"], properties: { "ucp-agent": { type: "object", required: ["profile"], properties: { profile: { type: "string", format: "uri" } }, additionalProperties: true } }, additionalProperties: true }
 
-const tools = [
+const catalogTools = [
   { name: "search_catalog", description: "Search the merchant catalog using the UCP Catalog Search capability.", inputSchema: { type: "object", required: ["meta", "catalog"], properties: { meta: metaSchema, catalog: { type: "object", properties: { query: { type: "string" }, context: { type: "object" }, signals: { type: "object" }, attribution: { type: "object" }, filters: { type: "object" }, pagination: { type: "object", properties: { limit: { type: "integer", minimum: 1 }, cursor: { type: "string" } }, additionalProperties: true } }, additionalProperties: true } }, additionalProperties: false } },
   { name: "lookup_catalog", description: "Look up one or more merchant catalog products by stable identifier.", inputSchema: { type: "object", required: ["meta", "catalog"], properties: { meta: metaSchema, catalog: { type: "object", required: ["ids"], properties: { ids: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1, maxItems: MAX_LOOKUP_IDS } }, additionalProperties: true } }, additionalProperties: false } },
   { name: "get_product", description: "Get one merchant catalog product by stable identifier.", inputSchema: { type: "object", required: ["meta", "catalog"], properties: { meta: metaSchema, catalog: { type: "object", required: ["id"], properties: { id: { type: "string", minLength: 1 } }, additionalProperties: true } }, additionalProperties: false } },
 ]
 
+const orderTool = {
+  name: "get_order",
+  description: "Get the current state of a paid order using the UCP Order capability.",
+  inputSchema: {
+    type: "object",
+    required: ["meta", "id"],
+    properties: {
+      meta: metaSchema,
+      id: { type: "string", minLength: 1, maxLength: 200 },
+    },
+    additionalProperties: false,
+  },
+}
+
+function activeTools() {
+  return ucpOrderRuntimeConfigured() ? [...catalogTools, orderTool] : catalogTools
+}
+
 export async function GET(req: Request) {
   const origin = new URL(req.url).origin
+  const tools = activeTools()
   return NextResponse.json({ name: "vibecart-ucp", version: UCP_VERSION, endpoint: `${origin}/ucp/mcp`, tools: tools.map(t => t.name) })
 }
 
@@ -191,15 +219,22 @@ export async function POST(req: Request) {
   let message: RpcRequest
   try { message = await req.json() as RpcRequest } catch { return rpcError(null, -32700, "Parse error") }
   if (message.jsonrpc !== "2.0" || !message.method) return rpcError(message.id, -32600, "Invalid Request")
-  if (message.method === "initialize") return rpc(message.id, { protocolVersion: typeof message.params?.protocolVersion === "string" ? message.params.protocolVersion : "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "vibecart-ucp", version: "0.3.0" }, instructions: "UCP 2026-04-08 catalog transport. Catalog operations validate meta.ucp-agent.profile and negotiate capabilities." })
+  if (message.method === "initialize") return rpc(message.id, { protocolVersion: typeof message.params?.protocolVersion === "string" ? message.params.protocolVersion : "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "vibecart-ucp", version: "0.3.0" }, instructions: "UCP 2026-04-08 commerce transport. Catalog operations validate meta.ucp-agent.profile and negotiate capabilities. Order lookup is exposed only when durable Cloud order state and a merchant permalink are configured." })
   if (message.method === "notifications/initialized") return new NextResponse(null, { status: 204 })
   if (message.method === "ping") return rpc(message.id, {})
-  if (message.method === "tools/list") return rpc(message.id, { tools })
+  if (message.method === "tools/list") return rpc(message.id, { tools: activeTools() })
   if (message.method !== "tools/call") return rpcError(message.id, -32601, "Method not found")
 
   const name = message.params?.name
   const args = message.params?.arguments ?? {}
-  const capability = name === "search_catalog" ? SEARCH_CAPABILITY : (name === "lookup_catalog" || name === "get_product") ? LOOKUP_CAPABILITY : null
+  const orderEnabled = ucpOrderRuntimeConfigured()
+  const capability = name === "search_catalog"
+    ? SEARCH_CAPABILITY
+    : (name === "lookup_catalog" || name === "get_product")
+      ? LOOKUP_CAPABILITY
+      : name === "get_order" && orderEnabled
+        ? ORDER_CAPABILITY
+        : null
   if (!capability) return rpcError(message.id, -32602, `Unknown tool: ${String(name)}`)
 
   let negotiated: boolean
@@ -209,6 +244,16 @@ export async function POST(req: Request) {
     return rpcError(message.id, -32603, "Internal error", 500)
   }
   if (!negotiated) return rpc(message.id, incompatibleCapabilities(capability))
+
+  if (name === "get_order") {
+    if (typeof args.id !== "string" || args.id.trim().length === 0 || args.id.length > 200) return rpcError(message.id, -32602, "id must be a non-empty string no longer than 200 characters")
+    const result = await getUcpOrder(args.id)
+    if (result.kind === "success") return rpc(message.id, structured(result.order))
+    if (result.kind === "not_found") return rpc(message.id, orderError("not_found", "Order not found.", "unrecoverable"))
+    if (result.kind === "unauthorized") return rpc(message.id, orderError("unauthorized", "Not authorized to access this order.", "unrecoverable"))
+    if (result.kind === "invalid_id") return rpcError(message.id, -32602, "id is invalid")
+    return rpc(message.id, orderError("service_unavailable", result.retryable ? "Order service is temporarily unavailable." : "Order service is not configured for this merchant.", result.retryable ? "recoverable" : "unrecoverable"))
+  }
 
   const catalog = args.catalog
   if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) return rpcError(message.id, -32602, "catalog is required")

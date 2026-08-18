@@ -12,7 +12,7 @@ const { outputText } = ts.transpileModule(source, {
 })
 
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`
-const { mapDurableOrderToUcp } = await import(moduleUrl)
+const { mapDurableOrderToUcp, UCP_ORDER_CAPABILITY, UCP_ORDER_VERSION } = await import(moduleUrl)
 
 const checkoutSessionId = "cs_test_ucp_order"
 const payload = mapDurableOrderToUcp(
@@ -48,6 +48,26 @@ const payload = mapDurableOrderToUcp(
   `https://merchant.example/orders/${checkoutSessionId}`
 )
 
+function errorPayload(code, content, severity) {
+  return {
+    ucp: {
+      version: UCP_ORDER_VERSION,
+      status: "error",
+      capabilities: { [UCP_ORDER_CAPABILITY]: [{ version: UCP_ORDER_VERSION }] },
+    },
+    messages: [{ type: "error", code, severity, content }],
+  }
+}
+
+const notFound = errorPayload("not_found", "Order not found.", "unrecoverable")
+const unauthorized = errorPayload("unauthorized", "Not authorized to access this order.", "unrecoverable")
+const unavailable = errorPayload("service_unavailable", "Order service is temporarily unavailable.", "recoverable")
+
 await mkdir("/tmp/vibecart-ucp-payloads", { recursive: true })
-await writeFile("/tmp/vibecart-ucp-payloads/order.json", `${JSON.stringify(payload, null, 2)}\n`)
-console.log("Generated UCP order payload through the production mapper")
+await Promise.all([
+  writeFile("/tmp/vibecart-ucp-payloads/order.json", `${JSON.stringify(payload, null, 2)}\n`),
+  writeFile("/tmp/vibecart-ucp-payloads/order-not-found.json", `${JSON.stringify(notFound, null, 2)}\n`),
+  writeFile("/tmp/vibecart-ucp-payloads/order-unauthorized.json", `${JSON.stringify(unauthorized, null, 2)}\n`),
+  writeFile("/tmp/vibecart-ucp-payloads/order-unavailable.json", `${JSON.stringify(unavailable, null, 2)}\n`),
+])
+console.log("Generated UCP order success/error payloads through released contract metadata")
