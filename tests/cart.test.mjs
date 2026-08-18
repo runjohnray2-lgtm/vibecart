@@ -39,17 +39,17 @@ test("cart API exposes create read update cancel and checkout", async () => {
   assert.match(checkout, /checkoutPost/)
 })
 
-test("all cart routes fail closed with 503 when durable storage or trusted catalog is unavailable", async () => {
+test("cart routes fail closed when durable storage or the trusted merchant catalog is unavailable", async () => {
   const create = await readFile("app/api/cart/route.ts", "utf8")
   const mutate = await readFile("app/api/cart/[id]/route.ts", "utf8")
   const checkout = await readFile("app/api/cart/[id]/checkout/route.ts", "utf8")
 
   assert.match(create, /CART_STORAGE_NOT_CONFIGURED/)
-  assert.match(create, /CATALOG_UNAVAILABLE/)
-  assert.match(create, /503/)
+  assert.match(create, /CatalogSourceError/)
+  assert.match(create, /Trusted merchant catalog is unavailable/)
   assert.match(mutate, /CART_STORAGE_NOT_CONFIGURED/)
-  assert.match(mutate, /CATALOG_UNAVAILABLE/)
-  assert.match(mutate, /503/)
+  assert.match(mutate, /CatalogSourceError/)
+  assert.match(mutate, /status: 503/)
   assert.match(checkout, /CART_STORAGE_NOT_CONFIGURED/)
   assert.match(checkout, /503/)
 })
