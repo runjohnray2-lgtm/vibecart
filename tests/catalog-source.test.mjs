@@ -6,9 +6,14 @@ const sourcePath = "lib/catalog-source.ts"
 
 test("reference products are demo-only and remote mode has no silent fallback", async () => {
   const source = await readFile(sourcePath, "utf8")
-  assert.match(source, /if \(!rawUrl\) return PRODUCTS/)
-  assert.match(source, /const products = await fetchRemoteCatalog\(rawUrl\)/)
-  assert.doesNotMatch(source, /catch[\s\S]{0,300}return PRODUCTS/)
+  const start = source.indexOf("export async function listCatalogProducts")
+  const end = source.indexOf("export async function getCatalogProduct", start)
+  assert.ok(start >= 0 && end > start)
+  const listFn = source.slice(start, end)
+
+  assert.match(listFn, /if \(!rawUrl\) return PRODUCTS/)
+  assert.match(listFn, /const products = await fetchRemoteCatalog\(rawUrl\)/)
+  assert.doesNotMatch(listFn, /\bcatch\b/)
 })
 
 test("remote merchant catalogs are HTTPS-only, bounded, timeout protected and redirect resistant", async () => {
