@@ -62,6 +62,11 @@ function cloudOrderConfig(): CloudOrderConfig | null | "invalid" {
   }
 }
 
+export function cloudOrderLookupConfigured(): boolean {
+  const config = cloudOrderConfig()
+  return config !== null && config !== "invalid"
+}
+
 function validCheckoutSessionId(raw: string): string | null {
   const value = raw.trim()
   return value.length >= 1 && value.length <= 200 ? value : null
