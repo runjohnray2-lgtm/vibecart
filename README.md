@@ -138,4 +138,4 @@ CI pins the released UCP `v2026-04-08` source and executes VibeCart's real mappe
 
 ## License
 
-MIT-style — free to use and adapt.
+[MIT](LICENSE) — free to use, modify, distribute, sublicense, and sell under the license terms.
