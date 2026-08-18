@@ -8,7 +8,7 @@ const promises = [
   "One backend for every agent",
   "Durable multi-item cart",
   "Merchant-owned Stripe account",
-  "Released MCP + UCP surfaces",
+  "Official MCP Registry + released UCP",
 ]
 
 const surfaces = [
@@ -39,6 +39,7 @@ export default function Home() {
           <div className="flex flex-wrap items-center justify-between gap-4">
             <p className="font-mono text-sm font-semibold uppercase tracking-[0.2em] text-emerald-400">VibeCart</p>
             <div className="flex flex-wrap gap-3 text-sm">
+              <Link href="/start" className="text-neutral-300 hover:text-white">Quickstart</Link>
               <a href="/agents.md" className="text-neutral-300 hover:text-white">Agent guide</a>
               <Link href="/cloud" className="text-neutral-300 hover:text-white">Cloud</Link>
             </div>
@@ -60,12 +61,12 @@ export default function Home() {
             >
               Start VibeCart Cloud — $29/month
             </a>
-            <a
-              href="/agents.md"
+            <Link
+              href="/start"
               className="rounded-lg border border-neutral-700 px-5 py-3 font-semibold text-neutral-100 transition hover:border-neutral-500"
             >
-              Integrate VibeCart Core
-            </a>
+              Connect VibeCart Core
+            </Link>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -173,6 +174,7 @@ export default function Home() {
         </section>
 
         <footer className="flex flex-wrap gap-x-5 gap-y-2 border-t border-neutral-800 pt-6 text-sm text-neutral-500">
+          <Link className="hover:text-neutral-200" href="/start">Quickstart</Link>
           <Link className="hover:text-neutral-200" href="/cloud">Cloud</Link>
           <Link className="hover:text-neutral-200" href="/privacy">Privacy</Link>
           <Link className="hover:text-neutral-200" href="/terms">Terms</Link>
