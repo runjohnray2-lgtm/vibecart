@@ -72,21 +72,42 @@ const productsCall = await rpc("tools/call", {
 })
 assert(productsCall.resultType === "complete", "list_products did not complete")
 assert(Array.isArray(productsCall.structuredContent?.products), "list_products returned no product list")
-assert(productsCall.structuredContent.products.length > 0, "trusted product catalog is empty")
+assert(productsCall.structuredContent.products.length >= 2, "trusted product catalog needs at least two products for multi-item smoke coverage")
 
 const productId = productsCall.structuredContent.products[0].id
+const secondProductId = productsCall.structuredContent.products[1].id
 const productCall = await rpc("tools/call", {
   name: "vibecart.get_product",
   arguments: { productId },
 })
 assert(productCall.structuredContent?.product?.id === productId, "get_product returned the wrong product")
 
-const checkoutCall = await rpc("tools/call", {
+const legacyCheckoutCall = await rpc("tools/call", {
   name: "vibecart.create_checkout",
   arguments: { productId, quantity: 1 },
 })
-assert(checkoutCall.resultType === "complete", "create_checkout did not complete")
-assert(checkoutCall.structuredContent?.success === true, "create_checkout was not successful")
-assert(checkoutCall.structuredContent?.mode === "demo", "CI checkout should run in demo mode without a Stripe secret")
+assert(legacyCheckoutCall.resultType === "complete", "legacy create_checkout did not complete")
+assert(legacyCheckoutCall.structuredContent?.success === true, "legacy create_checkout was not successful")
+assert(legacyCheckoutCall.structuredContent?.mode === "demo", "CI legacy checkout should run in demo mode without a Stripe secret")
+assert(legacyCheckoutCall.structuredContent?.productId === productId, "legacy create_checkout did not preserve productId output")
+assert(legacyCheckoutCall.structuredContent?.quantity === 1, "legacy create_checkout did not preserve quantity output")
 
-console.log(`MCP smoke test passed for ${toolNames.length} tools and product ${productId}`)
+const multiCheckoutCall = await rpc("tools/call", {
+  name: "vibecart.create_checkout",
+  arguments: {
+    items: [
+      { productId, quantity: 2 },
+      { productId: secondProductId, quantity: 1 },
+    ],
+  },
+})
+assert(multiCheckoutCall.resultType === "complete", "multi-item create_checkout did not complete")
+assert(multiCheckoutCall.structuredContent?.success === true, "multi-item create_checkout was not successful")
+assert(multiCheckoutCall.structuredContent?.mode === "demo", "CI multi-item checkout should run in demo mode without a Stripe secret")
+assert(Array.isArray(multiCheckoutCall.structuredContent?.items), "multi-item create_checkout did not return normalized items")
+assert(multiCheckoutCall.structuredContent.items.length === 2, "multi-item create_checkout returned the wrong number of normalized lines")
+assert(multiCheckoutCall.structuredContent.items[0].productId === productId && multiCheckoutCall.structuredContent.items[0].quantity === 2, "multi-item create_checkout returned the wrong first line")
+assert(multiCheckoutCall.structuredContent.items[1].productId === secondProductId && multiCheckoutCall.structuredContent.items[1].quantity === 1, "multi-item create_checkout returned the wrong second line")
+assert(multiCheckoutCall.structuredContent.productId === undefined, "multi-item create_checkout should not emit legacy productId output")
+
+console.log(`MCP smoke test passed for ${toolNames.length} tools, legacy checkout, and trusted multi-item checkout`)
