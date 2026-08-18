@@ -278,10 +278,11 @@ const cartTools = [
 ]
 
 function activeTools() {
-  const tools = [...catalogTools]
-  if (ucpCartRuntimeConfigured()) tools.push(...cartTools)
-  if (ucpOrderRuntimeConfigured()) tools.push(orderTool)
-  return tools
+  return [
+    ...catalogTools,
+    ...(ucpCartRuntimeConfigured() ? cartTools : []),
+    ...(ucpOrderRuntimeConfigured() ? [orderTool] : []),
+  ]
 }
 
 export async function GET(req: Request) {
