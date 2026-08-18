@@ -65,3 +65,10 @@ test("officially structured fixtures retain their provider transport requirement
   assert.equal(config.clients.vscode.config.servers.vibecart.type, "http")
   assert.equal(config.clients.vscode.config.servers.vibecart.url, GENERIC_ENDPOINT)
 })
+
+test("public mcp-clients.json route serves the canonical fixture instead of duplicating it", async () => {
+  const source = await readFile("app/mcp-clients.json/route.ts", "utf8")
+  assert.match(source, /import manifest from "@\/integrations\/mcp-clients\.json"/)
+  assert.match(source, /NextResponse\.json\(manifest/)
+  assert.doesNotMatch(source, /STRIPE_SECRET_KEY|VIBECART_CLOUD_INGEST_KEY|DATABASE_URL/)
+})
