@@ -24,6 +24,7 @@ interface CheckoutItem {
 
 interface CheckoutRequestBody {
   items: CheckoutItem[]
+  cartId?: string
   // Client-supplied pricing is disabled by default. A caller must opt in in
   // the request AND the server operator must set
   // VIBECART_ALLOW_UNTRUSTED_PRICING=true. This keeps prototype convenience
@@ -56,6 +57,12 @@ function validQuantity(raw: unknown): number | null {
   if (typeof raw !== "number" || !Number.isSafeInteger(raw)) return null
   if (raw < 1 || raw > MAX_QUANTITY) return null
   return raw
+}
+
+function cartReference(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined
+  const value = raw.trim()
+  return value ? value.slice(0, 200) : undefined
 }
 
 function clientKey(req: Request): string {
@@ -181,6 +188,7 @@ export async function POST(req: Request) {
     const origin = req.headers.get("origin") ?? new URL(req.url).origin
     const successUrl = safeRedirectUrl(body.successUrl, origin, "/?checkout=success")
     const cancelUrl = safeRedirectUrl(body.cancelUrl, origin, "/?checkout=cancelled")
+    const cartId = cartReference(body.cartId)
 
     const secretKey = process.env.STRIPE_SECRET_KEY
 
@@ -215,6 +223,7 @@ export async function POST(req: Request) {
         },
         quantity: r.quantity,
       })),
+      ...(cartId ? { client_reference_id: cartId, metadata: { vibecart_cart_id: cartId } } : {}),
       success_url: successUrl,
       cancel_url: cancelUrl,
     })
