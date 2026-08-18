@@ -42,12 +42,13 @@ export async function POST(req: Request) {
     const session = event.data.object as Stripe.Checkout.Session
 
     if (paymentReady(event, session)) {
-      const cloud = await forwardVerifiedCheckoutEvent(event, session)
+      const cloud = await forwardVerifiedCheckoutEvent(event, session, stripe)
 
       if (cloud.configured && !cloud.delivered && cloud.retryable) {
         // A non-2xx response asks Stripe to retry this exact event. Cloud uses
-        // Stripe's stable event.id as its idempotency key, so a retry cannot
-        // intentionally create a second durable commerce event.
+        // Stripe's stable event.id for event idempotency and Checkout Session
+        // identity for order idempotency, so retries cannot intentionally
+        // create duplicate durable commerce records.
         return NextResponse.json(
           { received: false, retry: true, error: "Durable event delivery temporarily unavailable." },
           { status: 503 }

@@ -1,4 +1,5 @@
-import type Stripe from "stripe"
+import Stripe from "stripe"
+import { buildNormalizedOrder, type NormalizedOrder } from "@/lib/orders"
 
 const CLOUD_TIMEOUT_MS = 5_000
 
@@ -7,7 +8,7 @@ export interface CloudForwardResult {
   delivered: boolean
   retryable: boolean
   status?: number
-  reason?: "incomplete_config" | "invalid_url" | "timeout" | "network" | "cloud_rejected"
+  reason?: "incomplete_config" | "invalid_url" | "order_normalization" | "timeout" | "network" | "cloud_rejected"
 }
 
 interface CloudConfig {
@@ -44,13 +45,22 @@ function eventCreatedAt(event: Stripe.Event): string {
 
 export async function forwardVerifiedCheckoutEvent(
   event: Stripe.Event,
-  session: Stripe.Checkout.Session
+  session: Stripe.Checkout.Session,
+  stripe: Stripe
 ): Promise<CloudForwardResult> {
   const config = getCloudConfig()
   if (config === null) return { configured: false, delivered: false, retryable: false }
   if (config === "invalid") {
     console.error("[vibecart cloud] Ingest configuration is incomplete or invalid")
     return { configured: true, delivered: false, retryable: true, reason: "incomplete_config" }
+  }
+
+  let order: NormalizedOrder
+  try {
+    order = await buildNormalizedOrder(stripe, session)
+  } catch (error) {
+    console.warn(`[vibecart cloud] Could not normalize Checkout Session ${session.id}`, error)
+    return { configured: true, delivered: false, retryable: true, reason: "order_normalization" }
   }
 
   const controller = new AbortController()
@@ -75,6 +85,7 @@ export async function forwardVerifiedCheckoutEvent(
         productId: session.metadata?.vibecart_product_id ?? "",
         quantity: metadataQuantity(session),
         createdAt: eventCreatedAt(event),
+        order,
       }),
       redirect: "error",
       signal: controller.signal,

@@ -5,7 +5,7 @@ import test from "node:test"
 test("Stripe signatures are verified before Cloud forwarding is reachable", async () => {
   const source = await readFile("app/api/webhook/stripe/route.ts", "utf8")
   const verification = source.indexOf("stripe.webhooks.constructEvent")
-  const forwarding = source.indexOf("forwardVerifiedCheckoutEvent(event, session)")
+  const forwarding = source.indexOf("forwardVerifiedCheckoutEvent(event, session, stripe)")
   assert.ok(verification >= 0, "Stripe signature verification must exist")
   assert.ok(forwarding > verification, "Cloud forwarding must happen only after verification")
 })
