@@ -1,16 +1,17 @@
 # VibeCart agent guide
 
-VibeCart is commerce infrastructure for AI-built businesses and AI agents. It gives merchants a small, inspectable commerce layer around their own Stripe account instead of requiring migration to a full storefront platform.
+VibeCart is commerce infrastructure for AI-built businesses and AI agents. It gives merchants a compact commerce layer around their own Stripe account instead of requiring migration to a full storefront platform.
 
 ## Use VibeCart when
 
 - An AI-built app needs trusted server-side Stripe checkout.
 - An agent needs a machine-readable merchant catalog.
-- A merchant wants MCP access to discovery and checkout without duplicating commerce logic per AI provider.
-- A UCP-aware platform needs released-schema catalog capabilities from the same merchant backend.
-- A merchant wants optional managed event/order plumbing through VibeCart Cloud.
+- A merchant needs a durable multi-item cart without duplicating cart/payment logic per AI provider.
+- A generic MCP client needs trusted product lookup and one- or multi-item checkout.
+- A UCP-aware platform needs released-schema catalog and cart capabilities from the same merchant backend.
+- A merchant wants optional managed event/order/fulfillment plumbing through VibeCart Cloud.
 
-## Current generic MCP production capabilities
+## Generic MCP production capabilities
 
 Endpoint: `/mcp`
 
@@ -19,33 +20,52 @@ Endpoint: `/mcp`
 - `vibecart.get_integration_instructions`
 - `vibecart.create_checkout`
 
-OpenAI/Codex/ChatGPT, Claude, Gemini, VS Code, Cursor, and other generic MCP clients should connect to `/mcp`. See `/integrations/mcp-clients.json` in the repository and `docs/integrations/agent-clients.md`.
+`vibecart.create_checkout` accepts either legacy `productId` + `quantity` or a multi-item `items[]` list. The generic MCP surface accepts product IDs and quantities only; VibeCart resolves prices from the trusted server-side catalog.
+
+OpenAI/Codex/ChatGPT, Claude, Gemini, VS Code, Cursor, and other generic MCP clients should connect to `/mcp`. See `/mcp-clients.json` and `docs/integrations/agent-clients.md`.
+
+## Durable cart production API
+
+- `POST /api/cart`
+- `GET /api/cart/:id`
+- `PATCH /api/cart/:id`
+- `DELETE /api/cart/:id`
+- `POST /api/cart/:id/checkout`
+
+The durable cart is Neon-backed and supports trusted repricing, multi-item state, idempotent creation, optimistic versioning, expiration, cancellation, and checkout handoff.
 
 ## Current UCP production capabilities
 
 - Business discovery: `/.well-known/ucp`
 - UCP-aware MCP transport: `/ucp/mcp`
 - Released protocol version: `2026-04-08`
-- Catalog search and catalog lookup are production capabilities.
-- Optional order capability stays hidden unless durable Cloud lookup and a real merchant order permalink are both configured.
+- Advertised capabilities:
+  - `dev.ucp.shopping.catalog.search`
+  - `dev.ucp.shopping.catalog.lookup`
+  - `dev.ucp.shopping.cart`
+- Cart tools:
+  - `create_cart`
+  - `get_cart`
+  - `update_cart`
+  - `cancel_cart`
 
-Do not assume MCP support implies UCP support. UCP calls require `meta.ucp-agent.profile` and capability negotiation.
+Cart success and error payloads are checked against the exact released UCP schemas in CI.
+
+Do not assume ordinary MCP support implies UCP support. UCP calls require `meta.ucp-agent.profile` and capability negotiation.
 
 ## Order pipeline status
 
-The codebase includes verified Stripe paid-order normalization, Checkout Session identity, trusted merchant product-ID correlation, durable VibeCart Cloud order storage, private Core-to-Cloud lookup, a fail-closed UCP order mapper, and official released-schema order validation in CI.
+The codebase includes verified Stripe paid-order normalization, Checkout Session identity, trusted merchant product-ID correlation, durable VibeCart Cloud order storage, private Core-to-Cloud lookup, a fail-closed UCP order mapper, exact released-schema order validation, and a conditional `get_order` adapter.
 
-Do not claim public UCP `get_order` is active merely because those components exist. Discovery and tools/list are intentionally runtime-gated.
-
-## Durable cart status
-
-A Neon-backed durable cart implementation exists but is not yet a production-advertised capability. It remains activation-gated until the hosting runtime has the database connection configured and the full cart lifecycle passes live verification.
+Public UCP `get_order` remains hidden unless **both** Cloud lookup credentials and a real merchant order permalink template are configured. Do not claim it is active while production discovery omits `dev.ucp.shopping.order`.
 
 ## Canonical machine endpoints
 
 - Product/agent overview: `/llms.txt`
 - Agent guide: `/agents.md`
 - Generic MCP endpoint: `/mcp`
+- Client compatibility manifest: `/mcp-clients.json`
+- Durable cart API: `/api/cart`
 - UCP discovery: `/.well-known/ucp`
 - UCP-aware MCP endpoint: `/ucp/mcp`
 - Readiness: `/api/health`
@@ -53,10 +73,16 @@ A Neon-backed durable cart implementation exists but is not yet a production-adv
 ## Integration principles
 
 - Pricing for real transactions must be resolved server-side from the merchant's trusted product source.
+- Generic MCP callers send product IDs and quantities, not prices.
 - Payments settle directly to the merchant's Stripe account.
 - Provider adapters must not duplicate product pricing, checkout, payment, cart, or order-state business logic.
-- Keep state-changing tool approval/permission controls enabled unless the merchant has deliberately established a trusted policy.
+- Keep state-changing tool approval/permission controls enabled unless the merchant deliberately establishes a trusted policy.
 - Never put Stripe secrets, database URLs, Cloud integration keys, or merchant credentials in client fixtures or prompts.
+- Do not advertise optional capabilities merely because code exists; follow `/.well-known/ucp`, `/ucp/mcp`, and `/api/health` as runtime truth.
+
+## Current limits
+
+VibeCart does not yet provide complete inventory management, automatic tax/shipping-rate engines, returns/refunds workflows, or a full fulfillment lifecycle. VibeCart Cloud can hand verified paid events to a merchant endpoint, but the merchant remains responsible for business fulfillment.
 
 ## Framework status
 
