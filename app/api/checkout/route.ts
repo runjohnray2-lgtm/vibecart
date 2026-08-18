@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import Stripe from "stripe"
-import { getProduct, VibeProduct } from "@/lib/products"
+import { CatalogSourceError, getCatalogProduct } from "@/lib/catalog-source"
+import type { VibeProduct } from "@/lib/products"
 
 export const runtime = "nodejs"
 
@@ -129,25 +130,25 @@ export async function POST(req: Request) {
         )
       }
 
-      // 1. Prefer a known, server-side catalog product — always trusted,
-      // price cannot be tampered with by the client.
+      // Prefer a known product from the configured trusted catalog provider.
+      // Prices always come from this server-side source, never the agent/client.
       if (item.productId) {
-        const catalogProduct = getProduct(item.productId)
+        const catalogProduct = await getCatalogProduct(item.productId)
         if (catalogProduct) {
           resolved.push({ product: catalogProduct, quantity, trusted: true })
           continue
         }
       }
 
-      // 2. Client-supplied inline product data is only accepted when both the
+      // Client-supplied inline product data is only accepted when both the
       // request opts in and the server operator explicitly enables it. This is
       // intended for prototypes only; production stores should use a trusted
-      // server-side catalog or database.
+      // server-side catalog provider.
       if (item.product && body.allowInlineProduct) {
         if (!untrustedPricingEnabled()) {
           return err(
             "UNTRUSTED_PRICING_DISABLED",
-            "Client-supplied pricing is disabled on this server. Register the product in the trusted server-side catalog instead.",
+            "Client-supplied pricing is disabled on this server. Register the product in the trusted merchant catalog instead.",
             403
           )
         }
@@ -180,7 +181,7 @@ export async function POST(req: Request) {
 
       return err(
         "UNKNOWN_PRODUCT",
-        `Unknown productId "${item.productId ?? "(none)"}" — register this product in lib/products.ts before checkout.`,
+        `Unknown productId "${item.productId ?? "(none)"}" — add it to the configured trusted merchant catalog before checkout.`,
         400
       )
     }
@@ -238,6 +239,10 @@ export async function POST(req: Request) {
       checkoutUrl: session.url,
     })
   } catch (error) {
+    if (error instanceof CatalogSourceError) {
+      console.error(`[vibecart checkout] ${error.code}`, error.message)
+      return err(error.code, "Trusted merchant catalog is unavailable. Retry after the merchant catalog is healthy.", 503)
+    }
     console.error("[vibecart checkout] Internal checkout error", error)
     return err("INTERNAL_ERROR", "Checkout could not be created. Check server logs for details.", 500)
   }
