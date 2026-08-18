@@ -2,11 +2,31 @@ import Link from "next/link"
 import { PRODUCTS } from "@/lib/products"
 import { VibeCartButton } from "@/components/vibe-cart-button"
 
+const cloudUrl = "https://vibecart-cloud-uupzkh.v2.appdeploy.ai/"
+
 const promises = [
-  "One component + one API route",
+  "One backend for every agent",
+  "Durable multi-item cart",
   "Merchant-owned Stripe account",
-  "No platform cut",
-  "Server-side trusted pricing",
+  "Released MCP + UCP surfaces",
+]
+
+const surfaces = [
+  {
+    title: "Generic MCP",
+    detail: "Four compact tools for trusted catalog lookup and one- or multi-item hosted checkout.",
+    endpoint: "/mcp",
+  },
+  {
+    title: "Durable cart",
+    detail: "Neon-backed cart state with trusted repricing, idempotency, version checks, expiration, and checkout handoff.",
+    endpoint: "/api/cart",
+  },
+  {
+    title: "Released UCP",
+    detail: "UCP 2026-04-08 catalog and cart capabilities with runtime negotiation and exact schema validation.",
+    endpoint: "/ucp/mcp",
+  },
 ]
 
 export default function Home() {
@@ -14,18 +34,40 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-neutral-950 px-6 py-10 text-neutral-100 md:py-16">
-      <div className="mx-auto max-w-5xl space-y-12">
-        <header className="space-y-6">
-          <p className="font-mono text-sm font-semibold uppercase tracking-[0.2em] text-emerald-400">VibeCart</p>
-          <div className="max-w-4xl space-y-4">
-            <h1 className="text-4xl font-bold leading-tight md:text-6xl">
-              A lightweight Stripe Checkout primitive for AI-built and vibe-coded apps.
+      <div className="mx-auto max-w-6xl space-y-16">
+        <header className="space-y-7">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <p className="font-mono text-sm font-semibold uppercase tracking-[0.2em] text-emerald-400">VibeCart</p>
+            <div className="flex flex-wrap gap-3 text-sm">
+              <a href="/agents.md" className="text-neutral-300 hover:text-white">Agent guide</a>
+              <Link href="/cloud" className="text-neutral-300 hover:text-white">Cloud</Link>
+            </div>
+          </div>
+
+          <div className="max-w-5xl space-y-5">
+            <h1 className="text-5xl font-bold leading-[1.02] md:text-7xl">
+              Commerce infrastructure for AI-built apps and the agents that use them.
             </h1>
-            <p className="max-w-3xl text-lg leading-8 text-neutral-400">
-              Give an agent one clear integration path: a button component posts a trusted product ID
-              to one server route, then redirects to Stripe&apos;s hosted Checkout in the merchant&apos;s own account.
+            <p className="max-w-3xl text-lg leading-8 text-neutral-400 md:text-xl">
+              Give every AI client one trusted commerce backend for catalog, cart, and checkout—without moving the merchant off their existing app or Stripe account.
             </p>
           </div>
+
+          <div className="flex flex-wrap gap-3">
+            <a
+              href={cloudUrl}
+              className="rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-neutral-950 transition hover:bg-emerald-400"
+            >
+              Start VibeCart Cloud — $29/month
+            </a>
+            <a
+              href="/agents.md"
+              className="rounded-lg border border-neutral-700 px-5 py-3 font-semibold text-neutral-100 transition hover:border-neutral-500"
+            >
+              Integrate VibeCart Core
+            </a>
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {promises.map(item => (
               <div key={item} className="rounded-lg border border-neutral-800 bg-neutral-900 px-4 py-3 text-sm">
@@ -37,16 +79,34 @@ export default function Home() {
 
         {!hasStripeKey && (
           <div className="rounded-xl border border-amber-600/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
-            <strong>Demo mode:</strong> no Stripe key is configured. The sample buttons describe a simulated
-            checkout and never create a charge.
+            <strong>Reference demo:</strong> the public sample catalog is running without a Stripe secret, so its sample checkout buttons simulate checkout and never create a charge.
           </div>
         )}
 
+        <section className="space-y-6">
+          <div className="max-w-3xl">
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-400">One commerce core</p>
+            <h2 className="mt-2 text-3xl font-bold">Use the right transport without rebuilding the business logic.</h2>
+            <p className="mt-3 leading-7 text-neutral-400">
+              Generic MCP clients and UCP-aware platforms reach the same trusted catalog, cart, checkout, and post-payment foundations.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-3">
+            {surfaces.map(surface => (
+              <article key={surface.title} className="rounded-xl border border-neutral-800 bg-neutral-900 p-6">
+                <h3 className="text-lg font-semibold">{surface.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-neutral-400">{surface.detail}</p>
+                <code className="mt-5 block rounded-md bg-neutral-950 px-3 py-2 text-xs text-emerald-300">{surface.endpoint}</code>
+              </article>
+            ))}
+          </div>
+        </section>
+
         <section className="space-y-4">
           <div>
-            <h2 className="text-xl font-semibold">Integration examples</h2>
+            <h2 className="text-2xl font-semibold">Reference catalog</h2>
             <p className="mt-1 text-sm text-neutral-500">
-              These fictional sample catalog entries demonstrate the component only. They are not merchandise offered for fulfillment.
+              These fictional products demonstrate trusted catalog pricing. They are not merchandise offered for fulfillment.
             </p>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -63,45 +123,53 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="grid gap-6 md:grid-cols-2">
-          <div className="space-y-3 rounded-xl border border-neutral-800 bg-neutral-900 p-5">
-            <h2 className="font-semibold">The entire app-facing API</h2>
-            <pre className="overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-950 p-3 text-xs text-neutral-300">
-{String.raw`<VibeCartButton product={product} />
-
-POST /api/checkout
-{ items: [{ productId, quantity }] }`}
+        <section className="grid gap-6 lg:grid-cols-2">
+          <div className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900 p-6">
+            <h2 className="text-xl font-semibold">Trusted multi-item checkout</h2>
+            <pre className="overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-950 p-4 text-xs leading-6 text-neutral-300">
+{String.raw`vibecart.create_checkout
+{
+  "items": [
+    { "productId": "sku-a", "quantity": 2 },
+    { "productId": "sku-b", "quantity": 1 }
+  ]
+}`}
             </pre>
             <p className="text-sm leading-6 text-neutral-400">
-              Production catalog prices are resolved on the server. Client-supplied prices are an explicitly unsafe demo-only escape hatch.
+              Agents send product IDs and quantities. VibeCart resolves trusted prices on the server before creating hosted Stripe Checkout.
             </p>
           </div>
-          <div className="space-y-3 rounded-xl border border-neutral-800 bg-neutral-900 p-5">
-            <h2 className="font-semibold">Deliberately not a commerce platform</h2>
+
+          <div className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900 p-6">
+            <h2 className="text-xl font-semibold">A real cart, without pretending to be everything.</h2>
             <p className="text-sm leading-6 text-neutral-400">
-              VibeCart is not a Shopify or Snipcart replacement. It has no shared multi-item cart,
-              inventory system, order fulfillment, or platform payment account. The merchant must
-              implement authenticated business logic and webhook fulfillment for their own app.
+              VibeCart now has durable multi-item cart state and released UCP cart operations. It still does not pretend to provide complete inventory, tax, shipping-rate, returns, or fulfillment systems that are not built yet.
             </p>
             <p className="text-sm leading-6 text-neutral-400">
-              VibeCart currently takes no platform cut. Stripe&apos;s fees and the merchant&apos;s Stripe terms still apply.
+              Merchants keep their own Stripe account and VibeCart takes no percentage of merchant sales. Stripe fees and the merchant&apos;s Stripe terms still apply.
             </p>
           </div>
         </section>
 
-        <section className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-7 md:flex md:items-center md:justify-between md:gap-8 md:p-9">
-          <div>
-            <h2 className="text-2xl font-bold">Built your app with AI and don&apos;t want to wire payments yourself?</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-300">
-              We can install VibeCart, connect your Stripe account, configure the webhook, and test the flow for you.
-            </p>
+        <section className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-7 md:p-10">
+          <div className="grid gap-8 lg:grid-cols-[1fr_auto] lg:items-end">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-300">VibeCart Cloud · Early Access</p>
+              <h2 className="mt-3 text-3xl font-bold">Make the infrastructure recurring instead of another thing you babysit.</h2>
+              <p className="mt-3 max-w-3xl leading-7 text-neutral-300">
+                Cloud adds managed event and order history, signed fulfillment-webhook handoff, retries, alerts, monitoring, updates, and support around the free Core.
+              </p>
+              <p className="mt-4 text-3xl font-bold">$29<span className="text-base font-normal text-neutral-400"> / month</span></p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <a href={cloudUrl} className="rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-neutral-950 hover:bg-emerald-400">
+                Open Cloud workspace
+              </a>
+              <Link href="/cloud" className="rounded-lg border border-emerald-500/50 px-5 py-3 font-semibold text-emerald-200 hover:bg-emerald-500/10">
+                Compare options
+              </Link>
+            </div>
           </div>
-          <Link
-            href="/cloud"
-            className="mt-5 inline-flex shrink-0 rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-neutral-950 transition hover:bg-emerald-400 md:mt-0"
-          >
-            Get VibeCart Set Up For Me
-          </Link>
         </section>
 
         <footer className="flex flex-wrap gap-x-5 gap-y-2 border-t border-neutral-800 pt-6 text-sm text-neutral-500">
@@ -109,8 +177,9 @@ POST /api/checkout
           <Link className="hover:text-neutral-200" href="/privacy">Privacy</Link>
           <Link className="hover:text-neutral-200" href="/terms">Terms</Link>
           <Link className="hover:text-neutral-200" href="/support">Support</Link>
-          <Link className="hover:text-neutral-200" href="/llms.txt">LLM instructions</Link>
-          <Link className="hover:text-neutral-200" href="/mcp">MCP endpoint</Link>
+          <a className="hover:text-neutral-200" href="/llms.txt">LLM instructions</a>
+          <a className="hover:text-neutral-200" href="/mcp">MCP endpoint</a>
+          <a className="hover:text-neutral-200" href="/.well-known/ucp">UCP discovery</a>
         </footer>
       </div>
     </main>
