@@ -27,7 +27,16 @@ export interface NormalizedOrder {
 function stripeProductId(line: Stripe.LineItem): string {
   const product = line.price?.product
   if (!product) return ""
-  return typeof product === "string" ? product : product.id
+  if (typeof product === "string") return product
+
+  if (!("deleted" in product)) {
+    const trustedProductId = product.metadata?.vibecart_catalog_source === "trusted"
+      ? product.metadata.vibecart_product_id?.trim()
+      : ""
+    if (trustedProductId) return trustedProductId
+  }
+
+  return product.id
 }
 
 async function listAllLineItems(stripe: Stripe, checkoutSessionId: string): Promise<Stripe.LineItem[]> {
@@ -37,6 +46,7 @@ async function listAllLineItems(stripe: Stripe, checkoutSessionId: string): Prom
   while (true) {
     const page = await stripe.checkout.sessions.listLineItems(checkoutSessionId, {
       limit: 100,
+      expand: ["data.price.product"],
       ...(startingAfter ? { starting_after: startingAfter } : {}),
     })
 
