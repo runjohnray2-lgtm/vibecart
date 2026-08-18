@@ -1,126 +1,131 @@
 # VibeCart
 
-A lightweight Stripe Checkout primitive for AI-built and vibe-coded apps — not a
-full shopping cart. One component, one API route, no cart-state management,
-no platform fee. Payments go straight to your own Stripe account. Also
-includes optional subscription-management pieces (customer billing portal +
-admin subscriber view) for SaaS sites — see below.
+**Commerce infrastructure for AI agents and AI-built businesses.**
 
-## What this is (and isn't)
+VibeCart lets a merchant keep their existing app and Stripe account while exposing a small, inspectable commerce layer that AI agents can discover and use. Payments settle directly to the merchant's Stripe account; VibeCart does not need to become merchant of record.
 
-This is a **single-item Checkout button**, not a multi-product cart. Each
-`VibeCartButton` checks out its own item independently — there's no shared
-"add several things, then pay once" flow. If you need that, or inventory
-management, tax/shipping calculation, or a full admin storefront, use Shopify
-Buy Button, Snipcart, or Medusa instead.
+The architecture is protocol-first: one commerce backend, then thin MCP/UCP/client adapters around it.
 
-## Why this exists
+## Current production surface
 
-Existing tools in this space were built for human developers reading docs.
-VibeCart is designed for AI coding agents scaffolding a checkout flow from a
-one-line prompt — minimal surface area, one obvious integration path.
+### Generic MCP
+
+Endpoint: `https://vibecart.vercel.app/mcp`
+
+Current production tools:
+
+- `vibecart.list_products`
+- `vibecart.get_product`
+- `vibecart.get_integration_instructions`
+- `vibecart.create_checkout`
+
+Generic MCP clients should use `/mcp`.
+
+### UCP
+
+- Discovery: `https://vibecart.vercel.app/.well-known/ucp`
+- UCP MCP transport: `https://vibecart.vercel.app/ucp/mcp`
+- Released protocol target: UCP `2026-04-08`
+- Production currently advertises catalog search/lookup only unless an optional capability's full runtime dependencies are ready.
+
+Do not point an ordinary MCP client at `/ucp/mcp`. UCP calls require `meta.ucp-agent.profile` and capability negotiation.
+
+### Stripe checkout
+
+- Multi-line trusted server-side Checkout creation is supported by the Core checkout API.
+- Catalog prices are resolved on the server rather than accepted from the browser for real transactions.
+- Stripe webhook signatures are verified before paid events enter VibeCart's post-payment pipeline.
+- Delayed-payment success events are handled separately so orders are not created prematurely.
+
+## Agent-client distribution
+
+VibeCart does **not** build a different commerce engine for every model. OpenAI/Codex/ChatGPT, Claude, Gemini, VS Code, Cursor, and other MCP clients connect to the same backend.
+
+See:
+
+- [`docs/integrations/agent-clients.md`](docs/integrations/agent-clients.md)
+- [`integrations/mcp-clients.json`](integrations/mcp-clients.json)
+
+The distribution fixtures are CI-checked to keep provider adapters free of Stripe/database secrets and duplicated product/payment logic.
+
+## VibeCart Cloud
+
+VibeCart Cloud is the optional managed control plane for merchants that want VibeCart to operate the plumbing rather than self-host it. The current Cloud service includes:
+
+- durable verified commerce events
+- durable normalized paid-order records
+- merchant order history
+- integration-key-authenticated server-to-server order lookup
+- signed merchant fulfillment webhooks
+- delivery history and bounded retry scheduling
+- payment/event alerts and support workflows
+
+Core only uses Cloud when the merchant has configured the Cloud integration URL/key. A missing Cloud configuration fails closed and does not change the merchant's Stripe settlement path.
+
+## Order/UCP work
+
+The repository already contains:
+
+- paginated Stripe Checkout line-item normalization
+- stable Checkout Session order identity
+- trusted merchant product-ID correlation through Stripe Product metadata
+- private Core-to-Cloud order lookup
+- a fail-closed UCP `2026-04-08` order mapper
+- CI that executes the production mapper and validates its result with official `ucp-schema` against the released order schema
+- explicit merchant order-permalink configuration with no fake fallback URL
+
+Public UCP `get_order` is being kept fail-closed: it must not be advertised until Cloud order lookup and a real merchant order permalink are both configured and the conditional route passes its release gates.
+
+## Durable cart status
+
+A Neon-backed durable cart implementation exists in PR #11, including trusted repricing, idempotency, optimistic versioning, expiration, update/cancel, and cart-to-checkout handoff. The production Neon schema is prepared, but the feature is intentionally not merged or advertised until Vercel has the database connection environment configured and the full route lifecycle is exercised against that runtime.
+
+This is deliberate: VibeCart does not advertise a capability merely because code exists for it.
 
 ## Quick start
 
-1. `npm install` then `npm run dev`
-2. Visit `/` — three demo products render in **demo mode** (no real charges)
-   until you set a Stripe key.
-3. Add `STRIPE_SECRET_KEY` (your own Stripe secret key, test or live) as an
-   environment variable to go live. Never commit it or paste it in chat —
-   add it directly in your hosting provider's dashboard.
-
-## One-time checkout — two paths
-
-**Path A (recommended, secure):** register the product in `lib/products.ts`
-first, then reference it by ID. The server looks up the trusted price —
-nobody can tamper with it from the browser.
-
-```tsx
-import { VibeCartButton } from "@/components/vibe-cart-button"
-
-<VibeCartButton
-  product={{
-    id: "my-product",
-    name: "My Product",
-    description: "...",
-    priceCents: 1999,
-    image: "https://example.com/my-product.png",
-  }}
-/>
+```bash
+npm install
+npm run dev
 ```
 
-**Path B (prototypes only, NOT secure):** skip the catalog with
-`trustClientPrice` — the price is sent from the browser and could be edited
-before it arrives at the server.
+Without a Stripe secret, checkout runs in clearly labeled demo mode. To use live Stripe Checkout, add `STRIPE_SECRET_KEY` directly in the hosting provider's secret/environment settings. Never commit secret values or paste them into source code.
 
-```tsx
-<VibeCartButton product={{ id: "temp", name: "Temp", priceCents: 500, image: "https://..." }} trustClientPrice />
-```
+Useful endpoints:
 
-Optional: `showQuantityStepper` adds a +/- control before the buy button.
-Optional: `product.variant` (e.g. `"Size: L"`) displays above the button.
+- `/mcp` — generic MCP discovery/transport
+- `/.well-known/ucp` — UCP business discovery
+- `/ucp/mcp` — UCP-aware MCP transport
+- `/llms.txt` — machine-readable integration notes
+- `/agents.md` — agent-facing guide
+- `/api/health` — boolean readiness state without secret values
+- `/privacy`, `/terms`, `/support` — public policy/help surfaces
 
-## Subscriptions — customer dashboard + admin view (new)
+## Security model
 
-For SaaS sites selling recurring plans, Stripe's Checkout in `subscription`
-mode and its hosted Billing Portal handle the actual billing (trials,
-proration, invoices, plan changes, cancellation) — VibeCart doesn't rebuild
-any of that. What it adds is the drop-in wiring:
+- Merchant owns the Stripe account and receives merchant funds directly.
+- Trusted prices come from server-side merchant catalog state.
+- Client-supplied pricing is disabled by default and is prototype-only when explicitly enabled server-side.
+- Stripe webhook signatures are verified before post-payment processing.
+- Cloud integration credentials remain server-side.
+- Public health/discovery endpoints expose readiness booleans/capabilities, not credential values.
+- Optional UCP capabilities are advertised only when their runtime dependencies are valid.
 
-- **`<VibeManageSubscriptionButton />`** — customer-facing button that opens
-  Stripe's own hosted Billing Portal (change plan, update card, view
-  invoices, cancel — all Stripe's UI, not custom-built here).
-- **`<VibeAdminSubscribersTable />`** — read-only admin table of all
-  subscribers, read live from Stripe on every load. No database required to
-  track subscription state.
-- **`lib/vibe-billing.ts`** — the underlying Stripe-wrapping functions
-  (`createBillingPortalSession`, `getSubscriptionStatus`,
-  `listActiveSubscriptions`) if you want to build custom UI instead of using
-  the components directly.
+## Protocol conformance
 
-⚠️ **VibeCart has no auth system of its own.** `app/api/billing-portal/route.ts`
-and `app/api/admin/subscribers/route.ts` are EXAMPLE routes with a stub
-function that intentionally fails closed (`getCurrentUserStripeCustomerId()`
-returns `null`, `isCurrentUserAdmin()` returns `false`) until you replace it
-with your own session/auth lookup. Read the comments in those two files
-before deploying — this is the single most important thing to get right,
-since getting it wrong means one user could view or manage another user's
-billing. See `/dashboard` and `/admin` for live demos of the fail-closed
-behavior.
+CI pins the released UCP `v2026-04-08` repository and uses official `ucp-schema` validation for catalog and order payloads. VibeCart does not treat a locally convenient JSON shape as protocol conformance.
 
-**Real-world note:** as of Stripe's 2025-03-31 API update, subscription
-`current_period_end`/`current_period_start` moved from the subscription
-object to each subscription item — `lib/vibe-billing.ts` already reads them
-from the item. If other code in your project reads them from the
-subscription directly, it needs the same fix.
+## Reference implementation limits
 
-See `/llms.txt` for the full machine-readable integration spec, including
-the complete source code and common failure modes.
+- The current merchant catalog is still a small reference catalog rather than a complete multi-merchant catalog database.
+- Inventory, tax calculation, shipping-rate calculation, returns/refunds, and full fulfillment lifecycle are not complete commerce-platform services yet.
+- Durable cart code is activation-gated as described above.
+- Public UCP order lookup remains activation-gated until its runtime dependencies are configured.
+- Next.js App Router is the reference implementation; other frameworks should use adapters around the same Core protocol surface.
 
-Agent clients can also discover the four production MCP tools at `/mcp`.
-`GET /api/health` reports service readiness and Stripe/webhook configuration
-as booleans without exposing credentials. Public policies and help are at
-`/privacy`, `/terms`, and `/support`; submission test prompts are documented
-in `docs/submission-evaluation.md`.
+## North star
 
-## Order confirmation (optional)
-
-`/api/webhook/stripe` is a stub webhook receiver — verifies the Stripe
-signature and logs `checkout.session.completed` events, but does not send
-an email or write to a database yet. Set `STRIPE_WEBHOOK_SECRET` and point a
-Stripe webhook at this endpoint if you want to start wiring in real
-fulfillment.
-
-## What's NOT built yet (known gaps, not hidden)
-
-- No inventory management or tax calculation
-- No shared multi-item cart — each button is an independent single-item checkout
-- Product catalog is a static in-memory array, not a database
-- Webhook stub logs events but doesn't fulfill orders (email, DB, shipping)
-- No auth system — dashboard/admin routes require you to wire in your own
-- Admin subscriber list reads live from Stripe on every load — fine at small
-  scale, but no pagination/caching built in yet for large subscriber counts
-- Next.js App Router only — not adapted for Pages Router, Remix, SvelteKit, or Astro
+> **VibeCart: commerce infrastructure for every AI agent. Build once. Sell everywhere AI can act.**
 
 ## License
 
