@@ -1,6 +1,6 @@
 # VibeCart agent guide
 
-VibeCart is commerce infrastructure for AI-built businesses and AI agents. Merchants keep their existing app and Stripe account while exposing trusted catalog, cart, checkout, and optional managed order plumbing through common agent protocols.
+VibeCart is commerce infrastructure for AI-built businesses and AI agents. Merchants keep their existing app, product source, and Stripe account while exposing trusted catalog, cart, checkout, and optional managed order plumbing through common agent protocols.
 
 ## Use VibeCart when
 
@@ -25,6 +25,23 @@ Tools:
 `vibecart.create_checkout` supports trusted multi-item `items[]` checkout and the legacy single-product input. Never invent or pass a real transaction price; VibeCart resolves trusted products/prices server-side.
 
 OpenAI/Codex/ChatGPT, Claude, Gemini, VS Code, Cursor, and other generic MCP clients should connect to `/mcp`.
+
+## Merchant catalog source
+
+The built-in `lib/products.ts` catalog is fictional demo/reference data. A real merchant should configure `VIBECART_CATALOG_URL` to a merchant-controlled, public-routable HTTPS JSON feed. Optional server-side settings are `VIBECART_CATALOG_BEARER_TOKEN` and `VIBECART_MERCHANT_NAME`.
+
+Accepted product fields:
+
+- `id` — stable merchant identifier, required
+- `name` — required
+- `priceCents` — trusted non-negative integer USD cents, required
+- `description` — optional
+- `image` — optional HTTPS URL
+- `variant` — optional
+
+The same provider drives generic MCP listing/lookup, UCP catalog operations, durable cart repricing, and Stripe Checkout. Do not create separate prices/catalogs per agent protocol.
+
+If a remote catalog is configured and it is unavailable or invalid, commerce fails closed. Never substitute the fictional demo catalog for a configured merchant source. Healthy remote catalog data is cached briefly so normal price/SKU updates propagate without editing VibeCart TypeScript.
 
 ## Durable cart production surface
 
@@ -65,6 +82,7 @@ Merchant sales still settle directly to the merchant's Stripe account; VibeCart 
 
 ## Canonical machine endpoints
 
+- `/start` — merchant/client quickstart
 - `/mcp` — generic MCP
 - `/api/cart` — durable cart
 - `/.well-known/ucp` — UCP discovery
@@ -76,14 +94,14 @@ Merchant sales still settle directly to the merchant's Stripe account; VibeCart 
 
 ## Integration rules
 
-- Resolve real transaction prices from the merchant's trusted server-side product source.
+- Resolve real transaction prices from the configured trusted merchant catalog provider.
 - Do not duplicate pricing/payment/cart/order business logic in provider-specific adapters.
 - Keep state-changing tool approval/permission controls enabled unless the merchant has established a trusted policy.
-- Never put Stripe secrets, database URLs, Cloud keys, or merchant credentials in client fixtures/prompts.
+- Never put Stripe secrets, database URLs, catalog bearer tokens, Cloud keys, or merchant credentials in client fixtures/prompts.
 - Do not advertise or claim optional UCP capabilities unless `/.well-known/ucp` and `tools/list` actually expose them.
 
 ## Current limits
 
-Do not claim VibeCart currently provides a complete inventory system, automated tax engine, shipping-rate engine, returns/refunds platform, or complete fulfillment lifecycle. Those remain future platform work.
+Do not claim VibeCart currently provides a complete multi-merchant catalog control plane, inventory system, automated tax engine, shipping-rate engine, returns/refunds platform, or complete fulfillment lifecycle. Those remain future platform work.
 
 Canonical source: https://github.com/runjohnray2-lgtm/vibecart
