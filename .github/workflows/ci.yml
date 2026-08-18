@@ -117,9 +117,9 @@ jobs:
           ucp-schema validate /tmp/vibecart-ucp-payloads/lookup.json --schema .ucp-spec/source/schemas/shopping/catalog_lookup.json --response --op lookup --def lookup_response --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
           ucp-schema validate /tmp/vibecart-ucp-payloads/get-product.json --schema .ucp-spec/source/schemas/shopping/catalog_lookup.json --response --op get_product --def get_product_response --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
           ucp-schema validate /tmp/vibecart-ucp-payloads/order.json --schema .ucp-spec/source/schemas/shopping/order.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
-          ucp-schema validate /tmp/vibecart-ucp-payloads/order-not-found.json --schema .ucp-spec/source/schemas/shopping/order.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
-          ucp-schema validate /tmp/vibecart-ucp-payloads/order-unauthorized.json --schema .ucp-spec/source/schemas/shopping/order.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
-          ucp-schema validate /tmp/vibecart-ucp-payloads/order-unavailable.json --schema .ucp-spec/source/schemas/shopping/order.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
+          ucp-schema validate /tmp/vibecart-ucp-payloads/order-not-found.json --schema .ucp-spec/source/schemas/shopping/types/error_response.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
+          ucp-schema validate /tmp/vibecart-ucp-payloads/order-unauthorized.json --schema .ucp-spec/source/schemas/shopping/types/error_response.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
+          ucp-schema validate /tmp/vibecart-ucp-payloads/order-unavailable.json --schema .ucp-spec/source/schemas/shopping/types/error_response.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
 
       - name: Inspect MCP production transport
         run: npx --yes @modelcontextprotocol/inspector@latest --cli http://127.0.0.1:3000/mcp --transport http --method tools/list
