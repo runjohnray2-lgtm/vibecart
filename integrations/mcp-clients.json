@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "genericMcpEndpoint": "https://vibecart.vercel.app/mcp",
+  "ucpEndpoint": "https://vibecart.vercel.app/ucp/mcp",
+  "principle": "One VibeCart commerce backend; provider adapters contain no pricing, checkout, payment, cart, or order-state implementation.",
+  "clients": {
+    "openai_responses": {
+      "kind": "api",
+      "tool": {
+        "type": "mcp",
+        "server_label": "vibecart",
+        "server_url": "https://vibecart.vercel.app/mcp",
+        "require_approval": "always"
+      }
+    },
+    "codex": {
+      "kind": "coding_agent",
+      "transport": "streamable_http",
+      "serverName": "vibecart",
+      "url": "https://vibecart.vercel.app/mcp",
+      "setup": "Add VibeCart as a remote MCP server in Codex and keep tool approvals enabled for commerce actions."
+    },
+    "chatgpt": {
+      "kind": "assistant_app",
+      "transport": "streamable_http",
+      "serverName": "vibecart",
+      "url": "https://vibecart.vercel.app/mcp",
+      "setup": "Use ChatGPT's current custom MCP app/developer flow on an eligible plan and register the VibeCart remote MCP URL."
+    },
+    "claude_code": {
+      "kind": "coding_agent",
+      "command": "claude mcp add --transport http vibecart https://vibecart.vercel.app/mcp",
+      "projectConfig": {
+        "mcpServers": {
+          "vibecart": {
+            "type": "http",
+            "url": "https://vibecart.vercel.app/mcp"
+          }
+        }
+      }
+    },
+    "gemini_interactions": {
+      "kind": "api",
+      "tool": {
+        "type": "mcp_server",
+        "name": "vibecart",
+        "url": "https://vibecart.vercel.app/mcp"
+      },
+      "constraint": "Remote MCP requires Streamable HTTP. Keep the server name hyphen-free."
+    },
+    "vscode": {
+      "kind": "editor",
+      "path": ".vscode/mcp.json",
+      "config": {
+        "servers": {
+          "vibecart": {
+            "type": "http",
+            "url": "https://vibecart.vercel.app/mcp"
+          }
+        }
+      }
+    },
+    "cursor": {
+      "kind": "editor",
+      "transport": "streamable_http",
+      "serverName": "vibecart",
+      "url": "https://vibecart.vercel.app/mcp",
+      "setup": "Add a remote Streamable HTTP MCP server in Cursor's MCP settings."
+    }
+  },
+  "ucpAwareClients": {
+    "endpoint": "https://vibecart.vercel.app/ucp/mcp",
+    "requirement": "Use only from a UCP-aware platform that supplies meta.ucp-agent.profile and negotiates the advertised capability."
+  }
+}
