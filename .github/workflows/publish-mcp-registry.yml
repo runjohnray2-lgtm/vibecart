@@ -1,0 +1,42 @@
+name: Publish MCP Registry
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - server.json
+      - .github/workflows/publish-mcp-registry.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Verify public remote before publishing metadata
+        run: |
+          response="$(curl --fail --silent --show-error https://vibecart.vercel.app/mcp)"
+          node -e 'const value=JSON.parse(process.argv[1]); if(value.name!=="vibecart" || !Array.isArray(value.tools) || !value.tools.includes("vibecart.create_checkout")) process.exit(1)' "$response"
+
+      - name: Install official MCP publisher
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz \
+            --output /tmp/mcp-publisher.tar.gz
+          tar -xzf /tmp/mcp-publisher.tar.gz -C /tmp mcp-publisher
+          chmod +x /tmp/mcp-publisher
+          /tmp/mcp-publisher --help
+
+      - name: Authenticate to official registry with GitHub OIDC
+        run: /tmp/mcp-publisher login github-oidc
+
+      - name: Publish VibeCart remote server metadata
+        run: /tmp/mcp-publisher publish server.json
