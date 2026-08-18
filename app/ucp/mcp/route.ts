@@ -1,7 +1,8 @@
 import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
 import { NextResponse } from "next/server"
-import { PRODUCTS, VibeProduct, getProduct } from "@/lib/products"
+import { CatalogSourceError, configuredMerchantName, listCatalogProducts } from "@/lib/catalog-source"
+import type { VibeProduct } from "@/lib/products"
 import { getUcpOrder, ucpOrderRuntimeConfigured } from "@/lib/ucp-order-service"
 import {
   cancelUcpCart,
@@ -64,6 +65,21 @@ function cartResult(result: UcpCartServiceResult) {
     result.retryable ? "recoverable" : "unrecoverable",
   ))
 }
+function catalogResultError(capability: string, error: CatalogSourceError) {
+  const recoverable = error.code !== "CATALOG_CONFIG_INVALID" && error.code !== "CATALOG_INVALID"
+  console.error(`[vibecart ucp catalog] ${error.code}`, error.message)
+  return structured({
+    ucp: ucp(capability, "error"),
+    messages: [{
+      type: "error",
+      code: "service_unavailable",
+      content: recoverable
+        ? "Merchant catalog is temporarily unavailable."
+        : "Merchant catalog configuration is invalid.",
+      severity: recoverable ? "recoverable" : "unrecoverable",
+    }],
+  })
+}
 
 function asUcpProduct(product: VibeProduct) {
   return {
@@ -83,7 +99,7 @@ function asUcpProduct(product: VibeProduct) {
       description: { plain: product.description },
       price: { amount: product.priceCents, currency: "USD" },
       availability: { available: true },
-      seller: { name: "VibeCart Demo Merchant" },
+      seller: { name: configuredMerchantName() },
       inputs: [{ id: product.id }],
     }],
   }
@@ -295,7 +311,7 @@ export async function POST(req: Request) {
   let message: RpcRequest
   try { message = await req.json() as RpcRequest } catch { return rpcError(null, -32700, "Parse error") }
   if (message.jsonrpc !== "2.0" || !message.method) return rpcError(message.id, -32600, "Invalid Request")
-  if (message.method === "initialize") return rpc(message.id, { protocolVersion: typeof message.params?.protocolVersion === "string" ? message.params.protocolVersion : "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "vibecart-ucp", version: "0.3.0" }, instructions: "UCP 2026-04-08 commerce transport. Catalog and cart operations validate meta.ucp-agent.profile and negotiate capabilities. Durable cart tools are exposed only when database storage is configured. Order lookup is exposed only when durable Cloud order state and a merchant permalink are configured." })
+  if (message.method === "initialize") return rpc(message.id, { protocolVersion: typeof message.params?.protocolVersion === "string" ? message.params.protocolVersion : "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "vibecart-ucp", version: "0.3.0" }, instructions: "UCP 2026-04-08 commerce transport. Catalog and cart operations validate meta.ucp-agent.profile and negotiate capabilities. Catalog, cart and checkout use the same trusted merchant catalog provider. Durable cart tools are exposed only when database storage is configured. Order lookup is exposed only when durable Cloud order state and a merchant permalink are configured." })
   if (message.method === "notifications/initialized") return new NextResponse(null, { status: 204 })
   if (message.method === "ping") return rpc(message.id, {})
   if (message.method === "tools/list") return rpc(message.id, { tools: activeTools() })
@@ -367,12 +383,19 @@ export async function POST(req: Request) {
     if (input.query !== undefined && typeof input.query !== "string") return rpcError(message.id, -32602, "catalog.query must be a string")
     let page: { offset: number; limit: number }
     try { page = searchPage(input.pagination) } catch (error) { return rpcError(message.id, -32602, error instanceof Error ? error.message : "invalid pagination") }
-    const query = typeof input.query === "string" ? input.query.trim().toLowerCase() : ""
-    const matches = PRODUCTS.filter(p => !query || `${p.name} ${p.description} ${p.variant ?? ""}`.toLowerCase().includes(query))
-    const products = matches.slice(page.offset, page.offset + page.limit)
-    const nextOffset = page.offset + products.length
-    const hasNextPage = nextOffset < matches.length
-    return rpc(message.id, structured({ ucp: ucp(SEARCH_CAPABILITY), products: products.map(asUcpProduct), pagination: { ...(hasNextPage ? { cursor: encodeCursor(nextOffset) } : {}), has_next_page: hasNextPage, total_count: matches.length } }))
+    try {
+      const catalogProducts = await listCatalogProducts()
+      const query = typeof input.query === "string" ? input.query.trim().toLowerCase() : ""
+      const matches = catalogProducts.filter(p => !query || `${p.name} ${p.description} ${p.variant ?? ""}`.toLowerCase().includes(query))
+      const products = matches.slice(page.offset, page.offset + page.limit)
+      const nextOffset = page.offset + products.length
+      const hasNextPage = nextOffset < matches.length
+      return rpc(message.id, structured({ ucp: ucp(SEARCH_CAPABILITY), products: products.map(asUcpProduct), pagination: { ...(hasNextPage ? { cursor: encodeCursor(nextOffset) } : {}), has_next_page: hasNextPage, total_count: matches.length } }))
+    } catch (error) {
+      if (error instanceof CatalogSourceError) return rpc(message.id, catalogResultError(SEARCH_CAPABILITY, error))
+      console.error("[vibecart ucp] Unexpected catalog search failure", error)
+      return rpcError(message.id, -32603, "Internal error", 500)
+    }
   }
 
   if (name === "lookup_catalog") {
@@ -380,14 +403,29 @@ export async function POST(req: Request) {
     if (input.ids.length > MAX_LOOKUP_IDS) return rpcError(message.id, -32602, `catalog.ids cannot exceed ${MAX_LOOKUP_IDS} identifiers`)
     if (input.ids.some(id => typeof id !== "string" || id.trim().length === 0)) return rpcError(message.id, -32602, "catalog.ids must contain only non-empty strings")
     const ids = input.ids as string[]
-    const found = ids.map(getProduct).filter((p): p is VibeProduct => Boolean(p))
-    const missing = ids.filter(id => !getProduct(id))
-    return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY), products: found.map(asUcpProduct), ...(missing.length ? { messages: missing.map(id => ({ type: "info", code: "not_found", content: id })) } : {}) }))
+    try {
+      const catalogProducts = await listCatalogProducts()
+      const byId = new Map(catalogProducts.map(product => [product.id, product]))
+      const found = ids.map(id => byId.get(id)).filter((p): p is VibeProduct => Boolean(p))
+      const missing = ids.filter(id => !byId.has(id))
+      return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY), products: found.map(asUcpProduct), ...(missing.length ? { messages: missing.map(id => ({ type: "info", code: "not_found", content: id })) } : {}) }))
+    } catch (error) {
+      if (error instanceof CatalogSourceError) return rpc(message.id, catalogResultError(LOOKUP_CAPABILITY, error))
+      console.error("[vibecart ucp] Unexpected catalog lookup failure", error)
+      return rpcError(message.id, -32603, "Internal error", 500)
+    }
   }
 
   if (typeof input.id !== "string" || input.id.trim().length === 0) return rpcError(message.id, -32602, "catalog.id must be a non-empty string")
   const id = input.id
-  const product = getProduct(id)
-  if (!product) return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY, "error"), messages: [{ type: "error", code: "not_found", content: `Product not found: ${id}`, severity: "unrecoverable" }] }))
-  return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY), product: asUcpProduct(product) }))
+  try {
+    const catalogProducts = await listCatalogProducts()
+    const product = catalogProducts.find(candidate => candidate.id === id)
+    if (!product) return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY, "error"), messages: [{ type: "error", code: "not_found", content: `Product not found: ${id}`, severity: "unrecoverable" }] }))
+    return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY), product: asUcpProduct(product) }))
+  } catch (error) {
+    if (error instanceof CatalogSourceError) return rpc(message.id, catalogResultError(LOOKUP_CAPABILITY, error))
+    console.error("[vibecart ucp] Unexpected product lookup failure", error)
+    return rpcError(message.id, -32603, "Internal error", 500)
+  }
 }
