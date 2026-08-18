@@ -3,6 +3,15 @@ import { isIP } from "node:net"
 import { NextResponse } from "next/server"
 import { PRODUCTS, VibeProduct, getProduct } from "@/lib/products"
 import { getUcpOrder, ucpOrderRuntimeConfigured } from "@/lib/ucp-order-service"
+import {
+  cancelUcpCart,
+  createUcpCart,
+  getUcpCart,
+  updateUcpCart,
+  ucpCartRuntimeConfigured,
+  type UcpCartServiceResult,
+} from "@/lib/ucp-cart-service"
+import { mapCartErrorToUcp } from "@/lib/ucp-cart"
 
 export const runtime = "nodejs"
 
@@ -10,6 +19,7 @@ const UCP_VERSION = "2026-04-08"
 const SEARCH_CAPABILITY = "dev.ucp.shopping.catalog.search"
 const LOOKUP_CAPABILITY = "dev.ucp.shopping.catalog.lookup"
 const ORDER_CAPABILITY = "dev.ucp.shopping.order"
+const CART_CAPABILITY = "dev.ucp.shopping.cart"
 const PROFILE_CACHE_MS = 5 * 60 * 1000
 const PROFILE_MAX_BYTES = 256 * 1024
 const DEFAULT_SEARCH_LIMIT = 10
@@ -44,6 +54,16 @@ function orderError(code: string, content: string, severity: "recoverable" | "un
   }
   return { structuredContent: payload, content: [{ type: "text", text: content }] }
 }
+function cartResult(result: UcpCartServiceResult) {
+  if (result.kind === "success") return structured(result.cart)
+  if (result.kind === "not_found") return structured(mapCartErrorToUcp("not_found", "Cart not found or has expired", "unrecoverable"))
+  if (result.kind === "invalid") return structured(mapCartErrorToUcp("invalid_request", result.message, "unrecoverable"))
+  return structured(mapCartErrorToUcp(
+    "service_unavailable",
+    result.retryable ? "Cart service is temporarily unavailable." : "Cart service is not configured for this merchant.",
+    result.retryable ? "recoverable" : "unrecoverable",
+  ))
+}
 
 function asUcpProduct(product: VibeProduct) {
   return {
@@ -76,6 +96,23 @@ function agentProfileUrl(args: Record<string, unknown>) {
   if (!agent || typeof agent !== "object") return null
   const profile = (agent as Record<string, unknown>).profile
   return typeof profile === "string" ? profile : null
+}
+
+function idempotencyKey(args: Record<string, unknown>, required: boolean) {
+  const meta = args.meta
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
+    if (required) throw new Error("meta.idempotency-key is required")
+    return undefined
+  }
+  const value = (meta as Record<string, unknown>)["idempotency-key"]
+  if (value === undefined) {
+    if (required) throw new Error("meta.idempotency-key is required")
+    return undefined
+  }
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+    throw new Error("meta.idempotency-key must be a UUID")
+  }
+  return value
 }
 
 function isPrivateIpv4(address: string) {
@@ -183,7 +220,38 @@ function searchPage(value: unknown) {
   return { offset: decodeCursor(pagination.cursor), limit }
 }
 
-const metaSchema = { type: "object", required: ["ucp-agent"], properties: { "ucp-agent": { type: "object", required: ["profile"], properties: { profile: { type: "string", format: "uri" } }, additionalProperties: true } }, additionalProperties: true }
+const metaSchema = {
+  type: "object",
+  required: ["ucp-agent"],
+  properties: {
+    "ucp-agent": { type: "object", required: ["profile"], properties: { profile: { type: "string", format: "uri" } }, additionalProperties: true },
+    "idempotency-key": { type: "string", format: "uuid" },
+  },
+  additionalProperties: true,
+}
+
+const cartSchema = {
+  type: "object",
+  required: ["line_items"],
+  properties: {
+    line_items: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        required: ["item", "quantity"],
+        properties: {
+          item: { type: "object", required: ["id"], properties: { id: { type: "string", minLength: 1 } }, additionalProperties: true },
+          quantity: { type: "integer", minimum: 1, maximum: 99 },
+        },
+        additionalProperties: true,
+      },
+    },
+    context: { type: "object" },
+    buyer: { type: "object" },
+  },
+  additionalProperties: true,
+}
 
 const catalogTools = [
   { name: "search_catalog", description: "Search the merchant catalog using the UCP Catalog Search capability.", inputSchema: { type: "object", required: ["meta", "catalog"], properties: { meta: metaSchema, catalog: { type: "object", properties: { query: { type: "string" }, context: { type: "object" }, signals: { type: "object" }, attribution: { type: "object" }, filters: { type: "object" }, pagination: { type: "object", properties: { limit: { type: "integer", minimum: 1 }, cursor: { type: "string" } }, additionalProperties: true } }, additionalProperties: true } }, additionalProperties: false } },
@@ -197,16 +265,24 @@ const orderTool = {
   inputSchema: {
     type: "object",
     required: ["meta", "id"],
-    properties: {
-      meta: metaSchema,
-      id: { type: "string", minLength: 1, maxLength: 200 },
-    },
+    properties: { meta: metaSchema, id: { type: "string", minLength: 1, maxLength: 200 } },
     additionalProperties: false,
   },
 }
 
+const cartTools = [
+  { name: "create_cart", description: "Create a durable UCP cart using trusted merchant catalog pricing.", inputSchema: { type: "object", required: ["meta", "cart"], properties: { meta: metaSchema, cart: cartSchema }, additionalProperties: false } },
+  { name: "get_cart", description: "Get the current state of a durable UCP cart.", inputSchema: { type: "object", required: ["meta", "id"], properties: { meta: metaSchema, id: { type: "string", minLength: 1, maxLength: 200 } }, additionalProperties: false } },
+  { name: "update_cart", description: "Replace the contents of a durable UCP cart.", inputSchema: { type: "object", required: ["meta", "id", "cart"], properties: { meta: metaSchema, id: { type: "string", minLength: 1, maxLength: 200 }, cart: cartSchema }, additionalProperties: false } },
+  { name: "cancel_cart", description: "Cancel a durable UCP cart and return its state before invalidation.", inputSchema: { type: "object", required: ["meta", "id"], properties: { meta: { ...metaSchema, required: ["ucp-agent", "idempotency-key"] }, id: { type: "string", minLength: 1, maxLength: 200 } }, additionalProperties: false } },
+]
+
 function activeTools() {
-  return ucpOrderRuntimeConfigured() ? [...catalogTools, orderTool] : catalogTools
+  return [
+    ...catalogTools,
+    ...(ucpCartRuntimeConfigured() ? cartTools : []),
+    ...(ucpOrderRuntimeConfigured() ? [orderTool] : []),
+  ]
 }
 
 export async function GET(req: Request) {
@@ -219,7 +295,7 @@ export async function POST(req: Request) {
   let message: RpcRequest
   try { message = await req.json() as RpcRequest } catch { return rpcError(null, -32700, "Parse error") }
   if (message.jsonrpc !== "2.0" || !message.method) return rpcError(message.id, -32600, "Invalid Request")
-  if (message.method === "initialize") return rpc(message.id, { protocolVersion: typeof message.params?.protocolVersion === "string" ? message.params.protocolVersion : "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "vibecart-ucp", version: "0.3.0" }, instructions: "UCP 2026-04-08 commerce transport. Catalog operations validate meta.ucp-agent.profile and negotiate capabilities. Order lookup is exposed only when durable Cloud order state and a merchant permalink are configured." })
+  if (message.method === "initialize") return rpc(message.id, { protocolVersion: typeof message.params?.protocolVersion === "string" ? message.params.protocolVersion : "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "vibecart-ucp", version: "0.3.0" }, instructions: "UCP 2026-04-08 commerce transport. Catalog and cart operations validate meta.ucp-agent.profile and negotiate capabilities. Durable cart tools are exposed only when database storage is configured. Order lookup is exposed only when durable Cloud order state and a merchant permalink are configured." })
   if (message.method === "notifications/initialized") return new NextResponse(null, { status: 204 })
   if (message.method === "ping") return rpc(message.id, {})
   if (message.method === "tools/list") return rpc(message.id, { tools: activeTools() })
@@ -228,13 +304,16 @@ export async function POST(req: Request) {
   const name = message.params?.name
   const args = message.params?.arguments ?? {}
   const orderEnabled = ucpOrderRuntimeConfigured()
+  const cartEnabled = ucpCartRuntimeConfigured()
   const capability = name === "search_catalog"
     ? SEARCH_CAPABILITY
     : (name === "lookup_catalog" || name === "get_product")
       ? LOOKUP_CAPABILITY
       : name === "get_order" && orderEnabled
         ? ORDER_CAPABILITY
-        : null
+        : cartEnabled && ["create_cart", "get_cart", "update_cart", "cancel_cart"].includes(String(name))
+          ? CART_CAPABILITY
+          : null
   if (!capability) return rpcError(message.id, -32602, `Unknown tool: ${String(name)}`)
 
   let negotiated: boolean
@@ -253,6 +332,31 @@ export async function POST(req: Request) {
     if (result.kind === "unauthorized") return rpc(message.id, orderError("unauthorized", "Not authorized to access this order.", "unrecoverable"))
     if (result.kind === "invalid_id") return rpcError(message.id, -32602, "id is invalid")
     return rpc(message.id, orderError("service_unavailable", result.retryable ? "Order service is temporarily unavailable." : "Order service is not configured for this merchant.", result.retryable ? "recoverable" : "unrecoverable"))
+  }
+
+  if (name === "create_cart") {
+    if (!args.cart || typeof args.cart !== "object" || Array.isArray(args.cart)) return rpcError(message.id, -32602, "cart is required")
+    let key: string | undefined
+    try { key = idempotencyKey(args, false) } catch (error) { return rpcError(message.id, -32602, error instanceof Error ? error.message : "invalid idempotency key") }
+    return rpc(message.id, cartResult(await createUcpCart(args.cart, key)))
+  }
+
+  if (name === "get_cart") {
+    if (typeof args.id !== "string" || args.id.trim().length === 0 || args.id.length > 200) return rpcError(message.id, -32602, "id must be a non-empty string no longer than 200 characters")
+    return rpc(message.id, cartResult(await getUcpCart(args.id)))
+  }
+
+  if (name === "update_cart") {
+    if (typeof args.id !== "string" || args.id.trim().length === 0 || args.id.length > 200) return rpcError(message.id, -32602, "id must be a non-empty string no longer than 200 characters")
+    if (!args.cart || typeof args.cart !== "object" || Array.isArray(args.cart)) return rpcError(message.id, -32602, "cart is required")
+    if ("id" in (args.cart as Record<string, unknown>)) return rpcError(message.id, -32602, "cart.id must be omitted; use the top-level id parameter")
+    return rpc(message.id, cartResult(await updateUcpCart(args.id, args.cart)))
+  }
+
+  if (name === "cancel_cart") {
+    if (typeof args.id !== "string" || args.id.trim().length === 0 || args.id.length > 200) return rpcError(message.id, -32602, "id must be a non-empty string no longer than 200 characters")
+    try { idempotencyKey(args, true) } catch (error) { return rpcError(message.id, -32602, error instanceof Error ? error.message : "invalid idempotency key") }
+    return rpc(message.id, cartResult(await cancelUcpCart(args.id)))
   }
 
   const catalog = args.catalog

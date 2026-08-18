@@ -34,6 +34,22 @@ export interface UcpCart {
   expires_at: string
 }
 
+export interface UcpCartError {
+  ucp: {
+    version: typeof UCP_CART_VERSION
+    status: "error"
+    capabilities: {
+      [UCP_CART_CAPABILITY]: Array<{ version: typeof UCP_CART_VERSION }>
+    }
+  }
+  messages: Array<{
+    type: "error"
+    code: string
+    content: string
+    severity: "recoverable" | "unrecoverable"
+  }>
+}
+
 function requireMinorUnits(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new Error(`${name} must be a nonnegative integer in minor currency units`)
@@ -96,5 +112,22 @@ export function mapDurableCartToUcp(cart: VibeCart): UcpCart {
       { type: "total", amount: subtotal },
     ],
     expires_at: expiresAt.toISOString(),
+  }
+}
+
+export function mapCartErrorToUcp(
+  code: string,
+  content: string,
+  severity: "recoverable" | "unrecoverable",
+): UcpCartError {
+  return {
+    ucp: {
+      version: UCP_CART_VERSION,
+      status: "error",
+      capabilities: {
+        [UCP_CART_CAPABILITY]: [{ version: UCP_CART_VERSION }],
+      },
+    },
+    messages: [{ type: "error", code, content, severity }],
   }
 }

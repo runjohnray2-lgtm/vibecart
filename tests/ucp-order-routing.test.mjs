@@ -14,7 +14,7 @@ test("UCP discovery advertises order only behind the shared runtime readiness ga
 test("UCP tools list exposes get_order only when the same readiness gate is true", async () => {
   const source = await readFile("app/ucp/mcp/route.ts", "utf8")
   assert.match(source, /function activeTools\(\)/)
-  assert.match(source, /ucpOrderRuntimeConfigured\(\) \? \[\.\.\.catalogTools, orderTool\] : catalogTools/)
+  assert.match(source, /\.\.\.\(ucpOrderRuntimeConfigured\(\) \? \[orderTool\] : \[\]\)/)
   assert.match(source, /name: "get_order"/)
   assert.match(source, /required: \["meta", "id"\]/)
   assert.match(source, /message\.method === "tools\/list".*activeTools\(\)/s)
@@ -37,12 +37,14 @@ test("get_order uses released structured not-found and unauthorized outcomes", a
   assert.match(source, /result\.retryable \? "recoverable" : "unrecoverable"/)
 })
 
-test("catalog parsing happens only after the get_order branch", async () => {
+test("catalog parsing happens only after order and cart branches", async () => {
   const source = await readFile("app/ucp/mcp/route.ts", "utf8")
   const orderBranch = source.indexOf('if (name === "get_order")')
+  const cancelBranch = source.indexOf('if (name === "cancel_cart")')
   const catalogRead = source.indexOf("const catalog = args.catalog")
   assert.ok(orderBranch >= 0)
-  assert.ok(catalogRead > orderBranch)
+  assert.ok(cancelBranch > orderBranch)
+  assert.ok(catalogRead > cancelBranch)
 })
 
 test("public UCP routes never expose Cloud keys or raw environment values", async () => {

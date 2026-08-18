@@ -2,13 +2,16 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 
-test("UCP discovery advertises only implemented catalog capabilities", async () => {
+test("UCP discovery keeps catalog always available and gates additional shipped capabilities", async () => {
   const source = await readFile("app/.well-known/ucp/route.ts", "utf8")
   assert.match(source, /2026-04-08/)
   assert.match(source, /dev\.ucp\.shopping\.catalog\.search/)
   assert.match(source, /dev\.ucp\.shopping\.catalog\.lookup/)
-  assert.doesNotMatch(source, /dev\.ucp\.shopping\.cart/)
+  assert.match(source, /CART_CAPABILITY = "dev\.ucp\.shopping\.cart"/)
+  assert.match(source, /const cartEnabled = ucpCartRuntimeConfigured\(\)/)
+  assert.match(source, /\.\.\.\(cartEnabled \? \{/)
   assert.doesNotMatch(source, /dev\.ucp\.shopping\.checkout/)
+  assert.doesNotMatch(source, /dev\.ucp\.shopping\.payment/)
 })
 
 test("UCP MCP catalog uses UCP negotiation errors and capability outcomes", async () => {
