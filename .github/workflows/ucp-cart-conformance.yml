@@ -1,0 +1,48 @@
+name: UCP Cart Conformance
+
+on:
+  push:
+    branches:
+      - "agent/ucp-cart-mapper"
+  pull_request:
+    branches:
+      - "main"
+
+jobs:
+  cart-schema:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout VibeCart
+        uses: actions/checkout@v6
+
+      - name: Checkout released UCP 2026-04-08 schemas
+        uses: actions/checkout@v6
+        with:
+          repository: Universal-Commerce-Protocol/ucp
+          ref: v2026-04-08
+          path: .ucp-spec
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Generate UCP cart through production mapper
+        run: node scripts/smoke-ucp-cart.mjs
+
+      - name: Install Rust toolchain for official UCP validator
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build official UCP schema validator 1.4.1
+        run: cargo install ucp-schema --version 1.4.1 --locked
+
+      - name: Validate UCP 2026-04-08 cart payload
+        run: ucp-schema validate /tmp/vibecart-ucp-payloads/cart.json --schema .ucp-spec/source/schemas/shopping/cart.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
