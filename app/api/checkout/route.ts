@@ -218,11 +218,9 @@ export async function POST(req: Request) {
             name: displayName(r.product),
             description: r.product.description,
             images: r.product.image ? [r.product.image] : [],
-            metadata: r.trusted ? {
-              vibecart_product_id: r.product.id,
-              vibecart_catalog_source: "trusted",
-            } : {
-              vibecart_catalog_source: "inline_untrusted",
+            metadata: {
+              vibecart_product_id: r.trusted ? r.product.id : "",
+              vibecart_catalog_source: r.trusted ? "trusted" : "inline_untrusted",
             },
           },
           unit_amount: r.product.priceCents,
