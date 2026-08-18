@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { PRODUCTS, getProduct } from "@/lib/products"
+import { PRODUCTS, getProduct, type VibeProduct } from "@/lib/products"
 import { POST as checkoutPost } from "@/app/api/checkout/route"
 
 export const runtime = "nodejs"
@@ -10,6 +10,8 @@ const MODERN_PROTOCOL = "2026-07-28"
 const LEGACY_PROTOCOL = "2025-11-25"
 const MCP_STANDARD_PROTOCOL = "2025-06-18"
 const MAX_REQUESTS_PER_MINUTE = 60
+const MAX_CHECKOUT_LINE_ITEMS = 50
+const MAX_QUANTITY = 99
 
 interface JsonRpcRequest {
   jsonrpc?: string
@@ -21,6 +23,11 @@ interface JsonRpcRequest {
 interface RateBucket {
   count: number
   resetAt: number
+}
+
+interface CheckoutItem {
+  productId: string
+  quantity: number
 }
 
 const rateBuckets = new Map<string, RateBucket>()
@@ -36,6 +43,16 @@ const productSchema = {
     variant: { type: "string" },
   },
   required: ["id", "name", "description", "priceCents", "image"],
+  additionalProperties: false,
+} as const
+
+const checkoutItemSchema = {
+  type: "object",
+  properties: {
+    productId: { type: "string", minLength: 1, description: "A trusted server-side catalog product ID." },
+    quantity: { type: "integer", minimum: 1, maximum: MAX_QUANTITY, default: 1, description: "Whole-number quantity from 1 through 99." },
+  },
+  required: ["productId"],
   additionalProperties: false,
 } as const
 
@@ -88,7 +105,7 @@ const tools = [
   {
     name: "vibecart.get_integration_instructions",
     title: "Get secure integration instructions",
-    description: "Returns concise Next.js App Router guidance for installing the VibeCart component and checkout route with server-trusted pricing.",
+    description: "Returns concise Next.js App Router guidance for installing VibeCart with trusted catalog pricing, multi-item checkout, and the shared MCP endpoint.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     outputSchema: {
       type: "object",
@@ -105,14 +122,18 @@ const tools = [
   {
     name: "vibecart.create_checkout",
     title: "Create a hosted Stripe Checkout session",
-    description: "Creates a hosted checkout URL for one trusted server-catalog product and a validated quantity. This can contact Stripe but never charges by itself; the customer must complete Stripe Checkout.",
+    description: "Creates a hosted checkout URL for one or more trusted server-catalog products. Legacy productId + quantity input remains supported; new integrations should use items[]. VibeCart resolves all prices server-side. This can contact Stripe but never charges by itself; the customer must complete Stripe Checkout.",
     inputSchema: {
       type: "object",
       properties: {
-        productId: { type: "string", minLength: 1, description: "A trusted server-side catalog product ID." },
-        quantity: { type: "integer", minimum: 1, maximum: 99, default: 1, description: "Whole-number quantity from 1 through 99." },
+        productId: { type: "string", minLength: 1, description: "Legacy single-product input. Use either productId or items, not both." },
+        quantity: { type: "integer", minimum: 1, maximum: MAX_QUANTITY, default: 1, description: "Legacy single-product quantity." },
+        items: { type: "array", minItems: 1, maxItems: MAX_CHECKOUT_LINE_ITEMS, items: checkoutItemSchema, description: "Trusted product IDs and quantities for a multi-item checkout." },
       },
-      required: ["productId"],
+      oneOf: [
+        { required: ["productId"] },
+        { required: ["items"] },
+      ],
       additionalProperties: false,
     },
     outputSchema: {
@@ -124,8 +145,9 @@ const tools = [
         message: { type: "string" },
         totalCents: { type: "integer" },
         untrustedPricing: { type: "boolean" },
+        items: { type: "array", items: checkoutItemSchema },
         productId: { type: "string" },
-        quantity: { type: "integer", minimum: 1, maximum: 99 },
+        quantity: { type: "integer", minimum: 1, maximum: MAX_QUANTITY },
         code: errorProperties.code,
         error: errorProperties.error,
         details: { type: "object" },
@@ -238,6 +260,58 @@ function getStringArg(args: Record<string, unknown>, key: string): string | null
   return typeof value === "string" && value.length > 0 ? value : null
 }
 
+function normalizeQuantity(value: unknown, location: string) {
+  const quantity = value ?? 1
+  if (typeof quantity !== "number" || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > MAX_QUANTITY) {
+    throw new Error(`${location} must be a whole number from 1 to ${MAX_QUANTITY}`)
+  }
+  return quantity
+}
+
+function normalizeCheckoutItems(args: Record<string, unknown>): { items: CheckoutItem[]; products: VibeProduct[]; legacy: boolean } {
+  const hasLegacy = args.productId !== undefined || args.quantity !== undefined
+  const hasItems = args.items !== undefined
+  if (hasLegacy && hasItems) throw new Error("Use either productId + quantity or items, not both")
+
+  const rawItems: CheckoutItem[] = []
+  let legacy = false
+
+  if (hasItems) {
+    if (!Array.isArray(args.items) || args.items.length < 1 || args.items.length > MAX_CHECKOUT_LINE_ITEMS) {
+      throw new Error(`items must contain 1 to ${MAX_CHECKOUT_LINE_ITEMS} line items`)
+    }
+    for (let index = 0; index < args.items.length; index += 1) {
+      const raw = args.items[index]
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`items[${index}] must be an object`)
+      const line = raw as Record<string, unknown>
+      const productId = getStringArg(line, "productId")
+      if (!productId) throw new Error(`items[${index}].productId is required`)
+      rawItems.push({ productId, quantity: normalizeQuantity(line.quantity, `items[${index}].quantity`) })
+    }
+  } else {
+    legacy = true
+    const productId = getStringArg(args, "productId")
+    if (!productId) throw new Error("productId is required")
+    rawItems.push({ productId, quantity: normalizeQuantity(args.quantity, "quantity") })
+  }
+
+  const combined = new Map<string, number>()
+  for (const line of rawItems) {
+    const next = (combined.get(line.productId) ?? 0) + line.quantity
+    if (next > MAX_QUANTITY) throw new Error(`Combined quantity for ${line.productId} exceeds ${MAX_QUANTITY}`)
+    combined.set(line.productId, next)
+  }
+
+  const items = [...combined.entries()].map(([productId, quantity]) => ({ productId, quantity }))
+  const products = items.map(line => {
+    const product = getProduct(line.productId)
+    if (!product) throw new Error(`Unknown productId \"${line.productId}\". Call vibecart.list_products and retry with a returned ID.`)
+    return product
+  })
+
+  return { items, products, legacy }
+}
+
 async function callTool(req: Request, name: string, args: Record<string, unknown>) {
   if (name === "vibecart.list_products") {
     return completeToolResult(
@@ -273,9 +347,10 @@ async function callTool(req: Request, name: string, args: Record<string, unknown
       mcpEndpoint: "/mcp",
       rules: [
         "Keep prices server-side for production stores.",
-        "Use a productId registered in lib/products.ts for trusted checkout.",
+        "Use product IDs registered in the merchant catalog for trusted checkout.",
+        "vibecart.create_checkout accepts legacy productId + quantity or a multi-item items[] list.",
         "Never expose STRIPE_SECRET_KEY in client code.",
-        "Use trustClientPrice only for prototypes where tamperable browser pricing is acceptable.",
+        "Never send prices through the generic MCP checkout tool; VibeCart resolves trusted prices server-side.",
       ],
       machineReadableSpec: "/llms.txt",
     }
@@ -283,20 +358,12 @@ async function callTool(req: Request, name: string, args: Record<string, unknown
   }
 
   if (name === "vibecart.create_checkout") {
-    const productId = getStringArg(args, "productId")
-    if (!productId) return toolError("productId is required", "INVALID_ARGUMENT")
-
-    const product = getProduct(productId)
-    if (!product) {
-      return toolError(
-        `Unknown productId \"${productId}\". Call vibecart.list_products and retry with a returned ID.`,
-        "UNKNOWN_PRODUCT"
-      )
-    }
-
-    const rawQuantity = args.quantity ?? 1
-    if (typeof rawQuantity !== "number" || !Number.isSafeInteger(rawQuantity) || rawQuantity < 1 || rawQuantity > 99) {
-      return toolError("quantity must be a whole number from 1 to 99", "INVALID_QUANTITY")
+    let checkout: { items: CheckoutItem[]; products: VibeProduct[]; legacy: boolean }
+    try {
+      checkout = normalizeCheckoutItems(args)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Invalid checkout items"
+      return toolError(message, message.startsWith("Unknown productId") ? "UNKNOWN_PRODUCT" : "INVALID_ARGUMENT")
     }
 
     const origin = new URL(req.url).origin
@@ -306,9 +373,7 @@ async function callTool(req: Request, name: string, args: Record<string, unknown
         "content-type": "application/json",
         origin,
       },
-      body: JSON.stringify({
-        items: [{ productId, quantity: rawQuantity }],
-      }),
+      body: JSON.stringify({ items: checkout.items }),
     })
 
     const checkoutResponse = await checkoutPost(checkoutRequest)
@@ -320,15 +385,21 @@ async function callTool(req: Request, name: string, args: Record<string, unknown
       return toolError(message, code, checkoutData)
     }
 
+    const legacyFields = checkout.legacy
+      ? { productId: checkout.items[0].productId, quantity: checkout.items[0].quantity }
+      : {}
+    const itemCount = checkout.items.reduce((sum, line) => sum + line.quantity, 0)
+    const productNames = checkout.products.map(product => product.name).join(", ")
+
     return completeToolResult(
       {
         ...checkoutData,
-        productId,
-        quantity: rawQuantity,
+        items: checkout.items,
+        ...legacyFields,
       },
       checkoutData.mode === "demo"
         ? String(checkoutData.message ?? "VibeCart is running in demo mode.")
-        : `Checkout created for ${product.name}. Open ${String(checkoutData.checkoutUrl)} to complete payment.`
+        : `Checkout created for ${itemCount} item${itemCount === 1 ? "" : "s"} (${productNames}). Open ${String(checkoutData.checkoutUrl)} to complete payment.`
     )
   }
 
@@ -402,7 +473,7 @@ export async function POST(req: Request) {
         name: SERVER_NAME,
         version: SERVER_VERSION,
       },
-      instructions: "VibeCart is a lightweight Stripe Checkout primitive, not a cart or inventory platform. Its four tools list trusted demo products, inspect one product, explain integration, and create a hosted checkout. Always prefer trusted product IDs; merchants must implement webhook fulfillment.",
+      instructions: "VibeCart is agent-friendly commerce infrastructure with a trusted catalog and hosted multi-item checkout on the generic MCP surface. Durable cart and released UCP commerce capabilities are available through VibeCart's dedicated UCP transport. Always use trusted product IDs; merchants own their Stripe account and fulfillment workflow.",
     })
   }
 
@@ -422,7 +493,7 @@ export async function POST(req: Request) {
         name: SERVER_NAME,
         version: SERVER_VERSION,
       },
-      instructions: "VibeCart exposes a deliberately small commerce toolset optimized for AI coding agents.",
+      instructions: "VibeCart exposes a compact trusted-catalog and multi-item checkout toolset for generic MCP clients; UCP-aware clients use /ucp/mcp for durable cart/order protocol capabilities.",
     })
   }
 
