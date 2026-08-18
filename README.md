@@ -1,41 +1,64 @@
 # VibeCart
 
-**Commerce infrastructure for AI agents and AI-built businesses.**
+**Commerce infrastructure for AI-built apps and AI agents.**
 
-VibeCart lets a merchant keep their existing app and Stripe account while exposing a small, inspectable commerce layer that AI agents can discover and use. Payments settle directly to the merchant's Stripe account; VibeCart does not need to become merchant of record.
+VibeCart lets a merchant keep their existing app and Stripe account while adding a small, inspectable commerce layer that AI agents can discover and use. Payments settle directly to the merchant's Stripe account; VibeCart does not need to become merchant of record.
 
-The architecture is protocol-first: one commerce backend, then thin MCP/UCP/client adapters around it.
+The architecture is protocol-first: one trusted commerce backend, then thin MCP/UCP/client adapters around it.
 
-## Current production surface
+## Live production surface
 
 ### Generic MCP
 
 Endpoint: `https://vibecart.vercel.app/mcp`
 
-Current production tools:
+Tools:
 
 - `vibecart.list_products`
 - `vibecart.get_product`
 - `vibecart.get_integration_instructions`
 - `vibecart.create_checkout`
 
+`vibecart.create_checkout` supports both the legacy single-product input and a trusted multi-item `items[]` input. Product prices are resolved on the server; callers do not supply real transaction prices.
+
 Generic MCP clients should use `/mcp`.
+
+### Durable cart
+
+VibeCart's Neon-backed cart is live in production:
+
+- `POST /api/cart`
+- `GET /api/cart/:id`
+- `PATCH /api/cart/:id`
+- `DELETE /api/cart/:id`
+- `POST /api/cart/:id/checkout`
+
+The cart uses trusted server-side repricing, idempotent creation, optimistic version checks, expiration, multi-item state, and cart-to-Stripe Checkout handoff.
 
 ### UCP
 
 - Discovery: `https://vibecart.vercel.app/.well-known/ucp`
-- UCP MCP transport: `https://vibecart.vercel.app/ucp/mcp`
+- UCP-aware MCP transport: `https://vibecart.vercel.app/ucp/mcp`
 - Released protocol target: UCP `2026-04-08`
-- Production currently advertises catalog search/lookup only unless an optional capability's full runtime dependencies are ready.
 
-Do not point an ordinary MCP client at `/ucp/mcp`. UCP calls require `meta.ucp-agent.profile` and capability negotiation.
+Production advertises released catalog and cart capabilities. Current cart tools are:
 
-### Stripe checkout
+- `create_cart`
+- `get_cart`
+- `update_cart`
+- `cancel_cart`
 
-- Multi-line trusted server-side Checkout creation is supported by the Core checkout API.
-- Catalog prices are resolved on the server rather than accepted from the browser for real transactions.
-- Stripe webhook signatures are verified before paid events enter VibeCart's post-payment pipeline.
-- Delayed-payment success events are handled separately so orders are not created prematurely.
+UCP calls require `meta.ucp-agent.profile` and capability negotiation. Do not point an ordinary MCP client at `/ucp/mcp`.
+
+The order pipeline and released-schema `get_order` adapter also exist, but `get_order` remains hidden until its VibeCart Cloud lookup and real merchant permalink dependencies are configured. VibeCart does not advertise optional capabilities before their runtime dependencies are ready.
+
+### Stripe checkout and orders
+
+- Trusted multi-line Stripe Checkout creation is supported.
+- Stripe webhook signatures are verified before paid events enter the post-payment pipeline.
+- Delayed-payment completion is handled separately so orders are not created prematurely.
+- Paid Checkout line items are normalized into durable order records when VibeCart Cloud forwarding is configured.
+- Trusted merchant product IDs survive Checkout through Stripe Product metadata.
 
 ## Agent-client distribution
 
@@ -45,42 +68,26 @@ See:
 
 - [`docs/integrations/agent-clients.md`](docs/integrations/agent-clients.md)
 - [`integrations/mcp-clients.json`](integrations/mcp-clients.json)
+- `https://vibecart.vercel.app/mcp-clients.json`
 
-The distribution fixtures are CI-checked to keep provider adapters free of Stripe/database secrets and duplicated product/payment logic.
+Provider adapters are CI-checked to keep Stripe/database secrets and duplicated commerce logic out of client configuration.
 
 ## VibeCart Cloud
 
-VibeCart Cloud is the optional managed control plane for merchants that want VibeCart to operate the plumbing rather than self-host it. The current Cloud service includes:
+VibeCart Core is free to self-host. **VibeCart Cloud is the optional $29/month managed layer** for merchants that want VibeCart to operate the recurring plumbing.
+
+Current Cloud capabilities include:
 
 - durable verified commerce events
-- durable normalized paid-order records
-- merchant order history
-- integration-key-authenticated server-to-server order lookup
+- durable normalized paid-order records and order history
+- server-to-server order lookup
 - signed merchant fulfillment webhooks
-- delivery history and bounded retry scheduling
-- payment/event alerts and support workflows
+- delivery history and bounded retries
+- monitoring/alerts and support workflows
 
-Core only uses Cloud when the merchant has configured the Cloud integration URL/key. A missing Cloud configuration fails closed and does not change the merchant's Stripe settlement path.
+Cloud workspace: `https://vibecart-cloud-uupzkh.v2.appdeploy.ai/`
 
-## Order/UCP work
-
-The repository already contains:
-
-- paginated Stripe Checkout line-item normalization
-- stable Checkout Session order identity
-- trusted merchant product-ID correlation through Stripe Product metadata
-- private Core-to-Cloud order lookup
-- a fail-closed UCP `2026-04-08` order mapper
-- CI that executes the production mapper and validates its result with official `ucp-schema` against the released order schema
-- explicit merchant order-permalink configuration with no fake fallback URL
-
-Public UCP `get_order` is being kept fail-closed: it must not be advertised until Cloud order lookup and a real merchant order permalink are both configured and the conditional route passes its release gates.
-
-## Durable cart status
-
-A Neon-backed durable cart implementation exists in PR #11, including trusted repricing, idempotency, optimistic versioning, expiration, update/cancel, and cart-to-checkout handoff. The production Neon schema is prepared, but the feature is intentionally not merged or advertised until Vercel has the database connection environment configured and the full route lifecycle is exercised against that runtime.
-
-This is deliberate: VibeCart does not advertise a capability merely because code exists for it.
+Merchant checkout revenue still settles directly to the merchant's Stripe account. VibeCart takes no percentage of merchant sales.
 
 ## Quick start
 
@@ -89,17 +96,19 @@ npm install
 npm run dev
 ```
 
-Without a Stripe secret, checkout runs in clearly labeled demo mode. To use live Stripe Checkout, add `STRIPE_SECRET_KEY` directly in the hosting provider's secret/environment settings. Never commit secret values or paste them into source code.
+Without a Stripe secret, Checkout runs in clearly labeled demo mode. For live payments, configure `STRIPE_SECRET_KEY` in the hosting provider's secret/environment settings. Never commit secret values.
 
-Useful endpoints:
+Useful public endpoints:
 
-- `/mcp` — generic MCP discovery/transport
+- `/mcp` — generic MCP transport/discovery
+- `/api/cart` — durable cart creation
 - `/.well-known/ucp` — UCP business discovery
 - `/ucp/mcp` — UCP-aware MCP transport
-- `/llms.txt` — machine-readable integration notes
+- `/mcp-clients.json` — machine-readable client compatibility manifest
+- `/llms.txt` — concise machine-readable integration notes
 - `/agents.md` — agent-facing guide
 - `/api/health` — boolean readiness state without secret values
-- `/privacy`, `/terms`, `/support` — public policy/help surfaces
+- `/cloud` — managed Cloud offer
 
 ## Security model
 
@@ -107,21 +116,21 @@ Useful endpoints:
 - Trusted prices come from server-side merchant catalog state.
 - Client-supplied pricing is disabled by default and is prototype-only when explicitly enabled server-side.
 - Stripe webhook signatures are verified before post-payment processing.
+- Cart state is durable and versioned rather than trusted from the browser/agent.
 - Cloud integration credentials remain server-side.
 - Public health/discovery endpoints expose readiness booleans/capabilities, not credential values.
 - Optional UCP capabilities are advertised only when their runtime dependencies are valid.
 
 ## Protocol conformance
 
-CI pins the released UCP `v2026-04-08` repository and uses official `ucp-schema` validation for catalog and order payloads. VibeCart does not treat a locally convenient JSON shape as protocol conformance.
+CI pins the released UCP `v2026-04-08` source and executes VibeCart's real mappers through the official `ucp-schema` validator. Cart success/error payloads, catalog responses, discovery, and the private order mapper have release-pinned conformance gates.
 
-## Reference implementation limits
+## Current reference limits
 
-- The current merchant catalog is still a small reference catalog rather than a complete multi-merchant catalog database.
-- Inventory, tax calculation, shipping-rate calculation, returns/refunds, and full fulfillment lifecycle are not complete commerce-platform services yet.
-- Durable cart code is activation-gated as described above.
-- Public UCP order lookup remains activation-gated until its runtime dependencies are configured.
-- Next.js App Router is the reference implementation; other frameworks should use adapters around the same Core protocol surface.
+- The merchant catalog is still a small reference catalog rather than a complete multi-merchant catalog service.
+- Inventory, automated tax calculation, shipping-rate calculation, returns/refunds, and a complete fulfillment lifecycle are not finished platform services.
+- Public UCP order lookup remains activation-gated until its Cloud/permalink runtime dependencies are configured.
+- Next.js App Router is the reference implementation; other frameworks should use adapters around the same Core protocol surface rather than fork commerce logic.
 
 ## North star
 
