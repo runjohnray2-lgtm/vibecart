@@ -61,7 +61,7 @@ await record("health", async () => {
   return { status: response.status, service: body.service, ok: body.ok }
 })
 
-const listed = await record("mcp tools/list", async () => {
+await record("mcp tools/list", async () => {
   const result = await rpc("tools/list")
   const names = result.tools?.map(tool => tool.name) ?? []
   for (const expected of ["vibecart.list_products", "vibecart.get_product", "vibecart.create_checkout"]) {
@@ -137,6 +137,7 @@ if (allowCheckout) {
   })
 } else {
   evidence.checks.push({ name: "controlled checkout handoff", ok: true, skipped: true, reason: "VIBECART_PILOT_ALLOW_CHECKOUT is not true" })
+}
 
 if (!allowCheckout) {
   await record("cart cancel", async () => {
