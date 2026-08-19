@@ -41,13 +41,23 @@ function matchingRows(xml, tagName) {
 }
 
 function findProductNodes(xml) {
-  for (const tagName of ["Product", "Table", "ProductRow", "Row"]) {
+  // First-generation Generic\\Products responses use repeated <Products> records.
+  // Keep the singular/alternate wrappers for saved exports from other Volusion tools.
+  for (const tagName of ["Products", "Product", "Table", "ProductRow", "Row"]) {
     const nodes = matchingRows(xml, tagName)
     if (nodes.length) return nodes
   }
 
   const parts = xml.split(/(?=<ProductCode(?:\s[^>]*)?>)/i)
   return parts.filter(part => /<ProductCode(?:\s[^>]*)?>/i.test(part) && /<ProductName(?:\s[^>]*)?>/i.test(part))
+}
+
+export function inspectVolusionXml(xml) {
+  const nodes = findProductNodes(xml)
+  return {
+    sourceRows: nodes.length,
+    hiddenRows: nodes.filter(node => textOf(node, ["HideProduct", "p.HideProduct"]).trim().toUpperCase() === "Y").length,
+  }
 }
 
 export function convertVolusionXml(xml) {
@@ -58,7 +68,8 @@ export function convertVolusionXml(xml) {
   for (const node of findProductNodes(xml)) {
     const id = textOf(node, ["ProductCode", "p.ProductCode"])
     const name = textOf(node, ["ProductName", "p.ProductName"])
-    if (!id || !name || seen.has(id)) continue
+    const hidden = textOf(node, ["HideProduct", "p.HideProduct"]).trim().toUpperCase() === "Y"
+    if (!id || !name || hidden || seen.has(id)) continue
 
     const productPrice = cents(textOf(node, ["ProductPrice", "pe.ProductPrice"]), "ProductPrice", id)
     const salePrice = cents(textOf(node, ["SalePrice", "pe.SalePrice"]), "SalePrice", id)
@@ -78,7 +89,7 @@ export function convertVolusionXml(xml) {
     seen.add(id)
   }
 
-  if (!products.length) throw new Error("No Volusion products with ProductCode and ProductName were found")
+  if (!products.length) throw new Error("No visible Volusion products with ProductCode and ProductName were found")
   return { products }
 }
 
@@ -116,9 +127,14 @@ async function main() {
     ? await fetchVolusionXml(process.env.VOLUSION_PRODUCTS_URL ?? "")
     : await readFile(inputSource, "utf8")
 
+  const inspection = inspectVolusionXml(xml)
+  if (inputSource === "--live" && inspection.sourceRows === 100) {
+    throw new Error("Volusion Generic Products returned exactly 100 rows; verify/export remaining pages before treating this as a complete merchant catalog")
+  }
+
   const catalog = convertVolusionXml(xml)
   await writeFile(outputPath, `${JSON.stringify(catalog, null, 2)}\n`, "utf8")
-  console.log(`Converted ${catalog.products.length} Volusion products to ${outputPath}`)
+  console.log(`Converted ${catalog.products.length} visible Volusion products from ${inspection.sourceRows} source rows to ${outputPath}`)
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

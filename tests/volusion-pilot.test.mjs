@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { convertVolusionXml, fetchVolusionXml } from "../scripts/volusion-export-to-vibecart.mjs"
+import { convertVolusionXml, fetchVolusionXml, inspectVolusionXml } from "../scripts/volusion-export-to-vibecart.mjs"
 
 const sample = `<?xml version="1.0"?>
 <Volusion>
@@ -37,6 +37,21 @@ test("Volusion XML maps to the trusted VibeCart catalog contract", () => {
       image: "",
     },
   ])
+})
+
+test("real Generic Products plural rows exclude hidden products", () => {
+  const xml = `<xmldata>
+    <Products><HideProduct>Y</HideProduct><ProductCode>OLD-1</ProductCode><ProductName>Hidden old item</ProductName><ProductPrice>99.00</ProductPrice></Products>
+    <Products><ProductCode>LIVE-1</ProductCode><ProductName>Visible item</ProductName><ProductPrice>37.42</ProductPrice></Products>
+  </xmldata>`
+  assert.deepEqual(inspectVolusionXml(xml), { sourceRows: 2, hiddenRows: 1 })
+  assert.deepEqual(convertVolusionXml(xml).products, [{
+    id: "LIVE-1",
+    name: "Visible item",
+    description: "",
+    priceCents: 3742,
+    image: "",
+  }])
 })
 
 test("sale price is used only when it is positive", () => {
