@@ -16,8 +16,8 @@ async function loadMerchantAuth() {
   }).outputText
   const path = join(tmpdir(), `vibecart-merchant-auth-${process.pid}-${Math.random().toString(16).slice(2)}.mjs`)
   await writeFile(path, compiled, "utf8")
-  const module = await import(`${pathToFileURL(path).href}?t=${Date.now()}`)
-  return { module, cleanup: () => rm(path, { force: true }) }
+  const authModule = await import(`${pathToFileURL(path).href}?t=${Date.now()}`)
+  return { authModule, cleanup: () => rm(path, { force: true }) }
 }
 
 function withEnv(values, fn) {
@@ -46,14 +46,14 @@ function request(headers = {}) {
 }
 
 test("self-host mode remains low-friction and defaults to one merchant", async () => {
-  const { module, cleanup } = await loadMerchantAuth()
+  const { authModule, cleanup } = await loadMerchantAuth()
   try {
     await withEnv({}, async () => {
-      assert.equal(module.hostedModeEnabled(), false)
-      assert.equal(module.configuredMerchantId(), "default")
-      assert.equal(module.merchantRequestAuthorized(request()), true)
-      assert.equal(module.cartRequestAuthorized(request(), "cart-1"), true)
-      assert.equal(module.issueCartAccessToken("cart-1"), null)
+      assert.equal(authModule.hostedModeEnabled(), false)
+      assert.equal(authModule.configuredMerchantId(), "default")
+      assert.equal(authModule.merchantRequestAuthorized(request()), true)
+      assert.equal(authModule.cartRequestAuthorized(request(), "cart-1"), true)
+      assert.equal(authModule.issueCartAccessToken("cart-1"), null)
     })
   } finally {
     await cleanup()
@@ -61,11 +61,11 @@ test("self-host mode remains low-friction and defaults to one merchant", async (
 })
 
 test("hosted mode fails closed when merchant identity or secrets are missing", async () => {
-  const { module, cleanup } = await loadMerchantAuth()
+  const { authModule, cleanup } = await loadMerchantAuth()
   try {
     await withEnv({ VIBECART_HOSTED_MODE: "true" }, async () => {
-      assert.equal(module.hostedMerchantAuthConfigured(), false)
-      assert.throws(() => module.configuredMerchantId(), /explicit VIBECART_MERCHANT_ID/)
+      assert.equal(authModule.hostedMerchantAuthConfigured(), false)
+      assert.throws(() => authModule.configuredMerchantId(), /explicit VIBECART_MERCHANT_ID/)
     })
   } finally {
     await cleanup()
@@ -73,7 +73,7 @@ test("hosted mode fails closed when merchant identity or secrets are missing", a
 })
 
 test("hosted merchant and cart access are authenticated with separate scoped credentials", async () => {
-  const { module, cleanup } = await loadMerchantAuth()
+  const { authModule, cleanup } = await loadMerchantAuth()
   try {
     await withEnv({
       VIBECART_HOSTED_MODE: "true",
@@ -81,19 +81,19 @@ test("hosted merchant and cart access are authenticated with separate scoped cre
       VIBECART_MERCHANT_API_KEY: "merchant-key-abcdefghijklmnopqrstuvwxyz",
       VIBECART_CART_ACCESS_SECRET: "cart-secret-abcdefghijklmnopqrstuvwxyz-1234567890",
     }, async () => {
-      assert.equal(module.hostedMerchantAuthConfigured(), true)
-      assert.equal(module.configuredMerchantId(), "radiantz")
-      assert.equal(module.merchantRequestAuthorized(request()), false)
-      assert.equal(module.merchantRequestAuthorized(request({ "x-vibecart-merchant-key": "wrong" })), false)
-      assert.equal(module.merchantRequestAuthorized(request({ "x-vibecart-merchant-key": "merchant-key-abcdefghijklmnopqrstuvwxyz" })), true)
+      assert.equal(authModule.hostedMerchantAuthConfigured(), true)
+      assert.equal(authModule.configuredMerchantId(), "radiantz")
+      assert.equal(authModule.merchantRequestAuthorized(request()), false)
+      assert.equal(authModule.merchantRequestAuthorized(request({ "x-vibecart-merchant-key": "wrong" })), false)
+      assert.equal(authModule.merchantRequestAuthorized(request({ "x-vibecart-merchant-key": "merchant-key-abcdefghijklmnopqrstuvwxyz" })), true)
 
-      const token = module.issueCartAccessToken("cart-1")
+      const token = authModule.issueCartAccessToken("cart-1")
       assert.match(token, /^v1\.[A-Za-z0-9_-]+$/)
-      assert.equal(module.cartRequestAuthorized(request({ authorization: `Bearer ${token}` }), "cart-1"), true)
-      assert.equal(module.cartRequestAuthorized(request({ authorization: `Bearer ${token}` }), "cart-2"), false)
-      assert.equal(module.cartRequestAuthorized(request({ authorization: "Bearer v1.invalid" }), "cart-1"), false)
+      assert.equal(authModule.cartRequestAuthorized(request({ authorization: `Bearer ${token}` }), "cart-1"), true)
+      assert.equal(authModule.cartRequestAuthorized(request({ authorization: `Bearer ${token}` }), "cart-2"), false)
+      assert.equal(authModule.cartRequestAuthorized(request({ authorization: "Bearer v1.invalid" }), "cart-1"), false)
       assert.equal(
-        module.cartRequestAuthorized(
+        authModule.cartRequestAuthorized(
           request({ "x-vibecart-merchant-key": "merchant-key-abcdefghijklmnopqrstuvwxyz" }),
           "cart-1"
         ),
@@ -106,7 +106,7 @@ test("hosted merchant and cart access are authenticated with separate scoped cre
 })
 
 test("cart capability tokens are bound to both merchant and cart identity", async () => {
-  const { module, cleanup } = await loadMerchantAuth()
+  const { authModule, cleanup } = await loadMerchantAuth()
   try {
     await withEnv({
       VIBECART_HOSTED_MODE: "true",
@@ -114,9 +114,9 @@ test("cart capability tokens are bound to both merchant and cart identity", asyn
       VIBECART_MERCHANT_API_KEY: "merchant-key-abcdefghijklmnopqrstuvwxyz",
       VIBECART_CART_ACCESS_SECRET: "cart-secret-abcdefghijklmnopqrstuvwxyz-1234567890",
     }, async () => {
-      const a1 = module.issueCartAccessToken("cart-1", "merchant-a")
-      const a2 = module.issueCartAccessToken("cart-2", "merchant-a")
-      const b1 = module.issueCartAccessToken("cart-1", "merchant-b")
+      const a1 = authModule.issueCartAccessToken("cart-1", "merchant-a")
+      const a2 = authModule.issueCartAccessToken("cart-2", "merchant-a")
+      const b1 = authModule.issueCartAccessToken("cart-1", "merchant-b")
       assert.notEqual(a1, a2)
       assert.notEqual(a1, b1)
     })
