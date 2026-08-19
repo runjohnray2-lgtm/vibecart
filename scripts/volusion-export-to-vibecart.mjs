@@ -28,19 +28,28 @@ function cents(value, field, productCode) {
   return Math.round(amount * 100)
 }
 
-function findProductNodes(xml) {
+function matchingRows(xml, tagName) {
   const nodes = []
-  const tagPattern = /<([A-Za-z_][\w:.-]*)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/g
+  const escaped = tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  const pattern = new RegExp(`<${escaped}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${escaped}>`, "gi")
   let match
-  while ((match = tagPattern.exec(xml))) {
-    const body = match[2]
-    if (/<ProductCode(?:\s[^>]*)?>/i.test(body) && /<ProductName(?:\s[^>]*)?>/i.test(body)) {
-      nodes.push(body)
-    }
+  while ((match = pattern.exec(xml))) {
+    const body = match[1]
+    if (/<ProductCode(?:\s[^>]*)?>/i.test(body) && /<ProductName(?:\s[^>]*)?>/i.test(body)) nodes.push(body)
   }
-  if (nodes.length) return nodes
+  return nodes
+}
 
-  // Some Volusion exports flatten records under generic row elements. Split on ProductCode as a safe fallback.
+function findProductNodes(xml) {
+  // Volusion exports commonly wrap individual records in Product or Table elements.
+  // Search record-level tags first so an outer document wrapper cannot swallow sibling records.
+  for (const tagName of ["Product", "Table", "ProductRow", "Row"]) {
+    const nodes = matchingRows(xml, tagName)
+    if (nodes.length) return nodes
+  }
+
+  // Last-resort fallback for flattened exports: split at each ProductCode and keep segments
+  // that contain a complete product identity. This intentionally does not infer pricing.
   const parts = xml.split(/(?=<ProductCode(?:\s[^>]*)?>)/i)
   return parts.filter(part => /<ProductCode(?:\s[^>]*)?>/i.test(part) && /<ProductName(?:\s[^>]*)?>/i.test(part))
 }
