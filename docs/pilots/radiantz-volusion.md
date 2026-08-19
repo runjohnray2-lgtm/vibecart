@@ -52,6 +52,33 @@ The live CLI deliberately refuses an exactly-100-row response as a complete cata
 
 The generated JSON can then be served from a controlled HTTPS endpoint and configured as `VIBECART_CATALOG_URL` for a dedicated pilot deployment.
 
+## Controlled evidence harness
+
+Use `scripts/radiantz-pilot-evidence.mjs` against a dedicated pilot deployment after the validated visible Radiantz subset is configured there.
+
+The harness is deliberately safe by default:
+
+- it refuses the production VibeCart hostname unless `VIBECART_PILOT_ALLOW_PRODUCTION=true` is explicitly set;
+- it verifies health, MCP tool discovery, real catalog listing/lookup, and durable cart create/read/update/cancel;
+- checkout handoff is skipped unless `VIBECART_PILOT_ALLOW_CHECKOUT=true` is explicitly set;
+- it emits a structured JSON evidence record with timings, pass/fail/skip counts, catalog count, and a small product sample;
+- it never needs the Volusion credential or Stripe secret.
+
+Example against a dedicated Preview deployment:
+
+```bash
+VIBECART_PILOT_BASE_URL='https://your-pilot-preview.vercel.app' \
+  node scripts/radiantz-pilot-evidence.mjs > radiantz-pilot-evidence.json
+```
+
+Only enable checkout after verifying the deployment is isolated from unintended live purchasing:
+
+```bash
+VIBECART_PILOT_BASE_URL='https://your-pilot-preview.vercel.app' \
+VIBECART_PILOT_ALLOW_CHECKOUT=true \
+  node scripts/radiantz-pilot-evidence.mjs > radiantz-pilot-evidence.json
+```
+
 ## Evidence checklist
 
 Record these facts before making any case-study claim:
