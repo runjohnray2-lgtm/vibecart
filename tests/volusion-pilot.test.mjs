@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { convertVolusionXml } from "../scripts/volusion-export-to-vibecart.mjs"
+import { convertVolusionXml, fetchVolusionXml } from "../scripts/volusion-export-to-vibecart.mjs"
 
 const sample = `<?xml version="1.0"?>
 <Volusion>
@@ -52,4 +52,23 @@ test("duplicate Volusion rows do not create duplicate VibeCart IDs", () => {
 test("invalid or missing prices fail closed", () => {
   const bad = `<root><Product><ProductCode>A</ProductCode><ProductName>A</ProductName><ProductPrice>free</ProductPrice></Product></root>`
   assert.throws(() => convertVolusionXml(bad), /Invalid ProductPrice/)
+})
+
+test("live Volusion source requires HTTPS and refuses redirects", async () => {
+  await assert.rejects(() => fetchVolusionXml("http://example.com/products"), /must use HTTPS/)
+
+  let options
+  const xml = await fetchVolusionXml("https://example.com/products", async (_url, init) => {
+    options = init
+    return new Response(sample, { status: 200, headers: { "content-type": "text/xml" } })
+  })
+  assert.equal(xml, sample)
+  assert.equal(options.redirect, "error")
+})
+
+test("live Volusion source fails closed on upstream errors", async () => {
+  await assert.rejects(
+    () => fetchVolusionXml("https://example.com/products", async () => new Response("denied", { status: 401 })),
+    /HTTP 401/,
+  )
 })
