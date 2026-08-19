@@ -23,7 +23,7 @@ export interface RateLimitResult {
 export const RATE_LIMIT_POLICIES = {
   catalogRead: {
     scope: "catalog-read",
-    limit: 120,
+    limit: 60,
     windowSeconds: 60,
     failClosed: false,
   },
