@@ -4,11 +4,13 @@ This pilot is the first real-merchant evidence step for VibeCart. It must not ch
 
 ## Source path
 
-Use a read-only Volusion product export as the source. Volusion supports XML product exports through Generic\\Products and the All Products export. The adapter in `scripts/volusion-export-to-vibecart.mjs` converts a saved XML export into the existing trusted VibeCart JSON catalog contract.
+Use the existing read-only first-generation Volusion `Generic\\Products` endpoint as the preferred pilot source. The endpoint credential must stay outside GitHub and logs. The adapter in `scripts/volusion-export-to-vibecart.mjs` can now either convert a saved XML export or fetch the live XML through the `VOLUSION_PRODUCTS_URL` environment variable.
 
 Do not commit a live Volusion API URL, administrator email, encrypted password, bearer token, or customer/order data to this repository.
 
-## Minimum export fields
+The live source must use HTTPS. The adapter refuses redirects, times out after 15 seconds, caps the response at 10 MB, and fails closed on HTTP errors.
+
+## Minimum product fields
 
 Required:
 
@@ -24,13 +26,22 @@ Recommended when available:
 
 The adapter uses a positive `SalePrice` when present; otherwise it uses `ProductPrice`. It converts dollars to integer cents and fails closed on malformed or missing prices.
 
-## Local conversion
+## Saved-export conversion
 
 ```bash
 node scripts/volusion-export-to-vibecart.mjs radiantz-products.xml radiantz-catalog.json
 ```
 
-The output can then be served from a controlled HTTPS endpoint and configured as `VIBECART_CATALOG_URL` for a dedicated pilot deployment. Do not point production VibeCart at a local file or a private-network endpoint.
+## Live read-only conversion
+
+Store the complete authenticated `Generic\\Products` URL in a secret environment variable, using the HTTPS Radiantz endpoint. Do not put the value in shell history, source files, tickets, or logs.
+
+```bash
+VOLUSION_PRODUCTS_URL='https://…' \
+  node scripts/volusion-export-to-vibecart.mjs --live radiantz-catalog.json
+```
+
+The generated JSON can then be served from a controlled HTTPS endpoint and configured as `VIBECART_CATALOG_URL` for the dedicated pilot deployment.
 
 ## Evidence checklist
 
@@ -46,4 +57,4 @@ Record these facts before making any case-study claim:
 
 ## Pilot safety gate
 
-A saved real product-export sample is required before claiming compatibility with Radiantz's exact Volusion data shape. Until that sample is validated, this branch is pilot tooling only and must not replace the live merchant catalog.
+A real Radiantz product payload from the authenticated read-only endpoint must be successfully converted before claiming compatibility with Radiantz's exact Volusion data shape. The endpoint itself is now known; the remaining gate is runtime access to that secret-backed source and validation of the returned XML. Until that passes, do not replace the live merchant catalog or move to pricing/business-model validation.

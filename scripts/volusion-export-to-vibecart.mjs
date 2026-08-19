@@ -41,15 +41,11 @@ function matchingRows(xml, tagName) {
 }
 
 function findProductNodes(xml) {
-  // Volusion exports commonly wrap individual records in Product or Table elements.
-  // Search record-level tags first so an outer document wrapper cannot swallow sibling records.
   for (const tagName of ["Product", "Table", "ProductRow", "Row"]) {
     const nodes = matchingRows(xml, tagName)
     if (nodes.length) return nodes
   }
 
-  // Last-resort fallback for flattened exports: split at each ProductCode and keep segments
-  // that contain a complete product identity. This intentionally does not infer pricing.
   const parts = xml.split(/(?=<ProductCode(?:\s[^>]*)?>)/i)
   return parts.filter(part => /<ProductCode(?:\s[^>]*)?>/i.test(part) && /<ProductName(?:\s[^>]*)?>/i.test(part))
 }
@@ -86,14 +82,40 @@ export function convertVolusionXml(xml) {
   return { products }
 }
 
+export async function fetchVolusionXml(urlValue, fetchImpl = fetch) {
+  const url = new URL(urlValue)
+  if (url.protocol !== "https:") throw new Error("Volusion live source must use HTTPS")
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15000)
+  try {
+    const response = await fetchImpl(url, {
+      method: "GET",
+      redirect: "error",
+      signal: controller.signal,
+      headers: { accept: "application/xml,text/xml;q=0.9,*/*;q=0.1" },
+    })
+    if (!response.ok) throw new Error(`Volusion live source returned HTTP ${response.status}`)
+    const xml = await response.text()
+    if (xml.length > 10_000_000) throw new Error("Volusion live source exceeded 10 MB")
+    return xml
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function main() {
-  const [inputPath, outputPath] = process.argv.slice(2)
-  if (!inputPath || !outputPath) {
-    console.error("Usage: node scripts/volusion-export-to-vibecart.mjs <volusion.xml> <catalog.json>")
+  const [inputSource, outputPath] = process.argv.slice(2)
+  if (!inputSource || !outputPath) {
+    console.error("Usage: node scripts/volusion-export-to-vibecart.mjs <volusion.xml|--live> <catalog.json>")
     process.exitCode = 2
     return
   }
-  const xml = await readFile(inputPath, "utf8")
+
+  const xml = inputSource === "--live"
+    ? await fetchVolusionXml(process.env.VOLUSION_PRODUCTS_URL ?? "")
+    : await readFile(inputSource, "utf8")
+
   const catalog = convertVolusionXml(xml)
   await writeFile(outputPath, `${JSON.stringify(catalog, null, 2)}\n`, "utf8")
   console.log(`Converted ${catalog.products.length} Volusion products to ${outputPath}`)
