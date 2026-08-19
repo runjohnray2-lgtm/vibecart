@@ -30,6 +30,19 @@ const clientRecipes = [
   },
 ]
 
+const catalogExample = `{
+  "products": [
+    {
+      "id": "sku-123",
+      "name": "Example product",
+      "description": "Merchant-controlled product data",
+      "priceCents": 4900,
+      "image": "https://merchant.example/products/sku-123.jpg",
+      "variant": "Optional variant"
+    }
+  ]
+}`
+
 export default function StartPage() {
   return (
     <main className="min-h-screen bg-neutral-950 px-6 py-10 text-neutral-100 md:py-16">
@@ -93,9 +106,9 @@ export default function StartPage() {
             <p className="mt-3 text-sm leading-6 text-neutral-400">The agent can inspect products and create trusted one- or multi-item checkout sessions.</p>
           </article>
           <article className="rounded-xl border border-neutral-800 bg-neutral-900 p-6">
-            <p className="text-sm text-emerald-400">2 · Adapt</p>
-            <h3 className="mt-2 text-xl font-semibold">Use your product source.</h3>
-            <p className="mt-3 text-sm leading-6 text-neutral-400">Self-hosters replace the reference catalog lookup with their own database/CMS while keeping server-side pricing authoritative.</p>
+            <p className="text-sm text-emerald-400">2 · Connect your catalog</p>
+            <h3 className="mt-2 text-xl font-semibold">Keep SKUs and prices in your system.</h3>
+            <p className="mt-3 text-sm leading-6 text-neutral-400">Set `VIBECART_CATALOG_URL` to a merchant-controlled HTTPS JSON feed. VibeCart reads trusted prices from that source; no TypeScript edit or redeploy is required for normal SKU/price changes.</p>
           </article>
           <article className="rounded-xl border border-neutral-800 bg-neutral-900 p-6">
             <p className="text-sm text-emerald-400">3 · Go live</p>
@@ -104,12 +117,26 @@ export default function StartPage() {
           </article>
         </section>
 
+        <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-7 md:p-9">
+          <p className="text-sm font-semibold uppercase tracking-[0.14em] text-emerald-400">Merchant catalog contract</p>
+          <h2 className="mt-2 text-3xl font-bold">One HTTPS JSON feed. Same source for agents, carts and checkout.</h2>
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            <div className="space-y-4 text-sm leading-6 text-neutral-300">
+              <p><code className="text-emerald-200">VIBECART_CATALOG_URL</code> — required for a real remote merchant catalog.</p>
+              <p><code className="text-emerald-200">VIBECART_CATALOG_BEARER_TOKEN</code> — optional server-side bearer credential when the feed is private.</p>
+              <p><code className="text-emerald-200">VIBECART_MERCHANT_NAME</code> — optional merchant display name used in UCP catalog responses.</p>
+              <p className="text-neutral-400">The remote source must be public-routable HTTPS. Responses are size-bounded, validated, fetched without redirects, and cached briefly. If a configured remote catalog is unhealthy, VibeCart fails closed instead of falling back to fictional demo products.</p>
+            </div>
+            <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg bg-neutral-950 p-4 text-xs leading-6 text-neutral-300">{catalogExample}</pre>
+          </div>
+        </section>
+
         <section className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-7 md:p-9">
           <div className="grid gap-6 md:grid-cols-2">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.14em] text-emerald-300">Self-host Core</p>
               <p className="mt-3 text-3xl font-bold">Free</p>
-              <p className="mt-3 text-sm leading-6 text-neutral-300">Run the reference implementation yourself, keep your Stripe account, adapt the trusted catalog source, and use MCP/UCP directly.</p>
+              <p className="mt-3 text-sm leading-6 text-neutral-300">Run the reference implementation yourself, keep your Stripe account, connect the trusted merchant catalog feed, and use MCP/UCP directly.</p>
               <a className="mt-5 inline-block font-semibold text-emerald-200 hover:text-white" href="https://github.com/runjohnray2-lgtm/vibecart">Open GitHub →</a>
             </div>
             <div className="border-t border-emerald-500/20 pt-6 md:border-l md:border-t-0 md:pl-8 md:pt-0">

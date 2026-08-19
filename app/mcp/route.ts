@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
-import { PRODUCTS, getProduct, type VibeProduct } from "@/lib/products"
+import { CatalogSourceError, getCatalogProduct, listCatalogProducts } from "@/lib/catalog-source"
+import type { VibeProduct } from "@/lib/products"
 import { POST as checkoutPost } from "@/app/api/checkout/route"
 
 export const runtime = "nodejs"
@@ -66,7 +67,7 @@ const tools = [
   {
     name: "vibecart.list_products",
     title: "List trusted catalog products",
-    description: "Lists fictional demonstration products registered in VibeCart's trusted server-side catalog. Use the returned stable IDs for product lookup or checkout.",
+    description: "Lists products from the configured trusted merchant catalog. Use the returned stable IDs for product lookup or checkout.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     outputSchema: {
       type: "object",
@@ -82,7 +83,7 @@ const tools = [
   {
     name: "vibecart.get_product",
     title: "Get one trusted catalog product",
-    description: "Looks up one product and its trusted USD-cent price from the server-side catalog. Does not access Stripe or create a checkout.",
+    description: "Looks up one product and its trusted USD-cent price from the configured merchant catalog. Does not access Stripe or create a checkout.",
     inputSchema: {
       type: "object",
       properties: { productId: { type: "string", minLength: 1, description: "A stable ID returned by vibecart.list_products." } },
@@ -122,7 +123,7 @@ const tools = [
   {
     name: "vibecart.create_checkout",
     title: "Create a hosted Stripe Checkout session",
-    description: "Creates a hosted checkout URL for one or more trusted server-catalog products. Legacy productId + quantity input remains supported; new integrations should use items[]. VibeCart resolves all prices server-side. This can contact Stripe but never charges by itself; the customer must complete Stripe Checkout.",
+    description: "Creates a hosted checkout URL for one or more trusted merchant-catalog products. Legacy productId + quantity input remains supported; new integrations should use items[]. VibeCart resolves all prices server-side. This can contact Stripe but never charges by itself; the customer must complete Stripe Checkout.",
     inputSchema: {
       type: "object",
       properties: {
@@ -255,6 +256,12 @@ function toolError(message: string, code: string, details?: unknown) {
   )
 }
 
+function catalogFailure(error: unknown) {
+  if (!(error instanceof CatalogSourceError)) return null
+  console.error(`[vibecart mcp] ${error.code}`, error.message)
+  return toolError("Trusted merchant catalog is unavailable. Retry after the merchant catalog is healthy.", error.code)
+}
+
 function getStringArg(args: Record<string, unknown>, key: string): string | null {
   const value = args[key]
   return typeof value === "string" && value.length > 0 ? value : null
@@ -268,7 +275,7 @@ function normalizeQuantity(value: unknown, location: string) {
   return quantity
 }
 
-function normalizeCheckoutItems(args: Record<string, unknown>): { items: CheckoutItem[]; products: VibeProduct[]; legacy: boolean } {
+async function normalizeCheckoutItems(args: Record<string, unknown>): Promise<{ items: CheckoutItem[]; products: VibeProduct[]; legacy: boolean }> {
   const hasLegacy = args.productId !== undefined || args.quantity !== undefined
   const hasItems = args.items !== undefined
   if (hasLegacy && hasItems) throw new Error("Use either productId + quantity or items, not both")
@@ -303,39 +310,53 @@ function normalizeCheckoutItems(args: Record<string, unknown>): { items: Checkou
   }
 
   const items = [...combined.entries()].map(([productId, quantity]) => ({ productId, quantity }))
-  const products = items.map(line => {
-    const product = getProduct(line.productId)
+  const products: VibeProduct[] = []
+  for (const line of items) {
+    const product = await getCatalogProduct(line.productId)
     if (!product) throw new Error(`Unknown productId \"${line.productId}\". Call vibecart.list_products and retry with a returned ID.`)
-    return product
-  })
+    products.push(product)
+  }
 
   return { items, products, legacy }
 }
 
 async function callTool(req: Request, name: string, args: Record<string, unknown>) {
   if (name === "vibecart.list_products") {
-    return completeToolResult(
-      {
-        success: true,
-        products: PRODUCTS,
-      },
-      JSON.stringify({ products: PRODUCTS })
-    )
+    try {
+      const products = await listCatalogProducts()
+      return completeToolResult(
+        {
+          success: true,
+          products,
+        },
+        JSON.stringify({ products })
+      )
+    } catch (error) {
+      const failure = catalogFailure(error)
+      if (failure) return failure
+      throw error
+    }
   }
 
   if (name === "vibecart.get_product") {
     const productId = getStringArg(args, "productId")
     if (!productId) return toolError("productId is required", "INVALID_ARGUMENT")
 
-    const product = getProduct(productId)
-    if (!product) {
-      return toolError(
-        `Unknown productId \"${productId}\". Call vibecart.list_products and retry with a returned ID.`,
-        "UNKNOWN_PRODUCT"
-      )
-    }
+    try {
+      const product = await getCatalogProduct(productId)
+      if (!product) {
+        return toolError(
+          `Unknown productId \"${productId}\". Call vibecart.list_products and retry with a returned ID.`,
+          "UNKNOWN_PRODUCT"
+        )
+      }
 
-    return completeToolResult({ success: true, product })
+      return completeToolResult({ success: true, product })
+    } catch (error) {
+      const failure = catalogFailure(error)
+      if (failure) return failure
+      throw error
+    }
   }
 
   if (name === "vibecart.get_integration_instructions") {
@@ -347,9 +368,10 @@ async function callTool(req: Request, name: string, args: Record<string, unknown
       mcpEndpoint: "/mcp",
       rules: [
         "Keep prices server-side for production stores.",
-        "Use product IDs registered in the merchant catalog for trusted checkout.",
+        "Configure VIBECART_CATALOG_URL for a merchant-controlled HTTPS JSON catalog; the built-in catalog is demo-only.",
+        "Use product IDs returned by the trusted merchant catalog for checkout.",
         "vibecart.create_checkout accepts legacy productId + quantity or a multi-item items[] list.",
-        "Never expose STRIPE_SECRET_KEY in client code.",
+        "Never expose STRIPE_SECRET_KEY or VIBECART_CATALOG_BEARER_TOKEN in client code.",
         "Never send prices through the generic MCP checkout tool; VibeCart resolves trusted prices server-side.",
       ],
       machineReadableSpec: "/llms.txt",
@@ -360,8 +382,10 @@ async function callTool(req: Request, name: string, args: Record<string, unknown
   if (name === "vibecart.create_checkout") {
     let checkout: { items: CheckoutItem[]; products: VibeProduct[]; legacy: boolean }
     try {
-      checkout = normalizeCheckoutItems(args)
+      checkout = await normalizeCheckoutItems(args)
     } catch (error) {
+      const failure = catalogFailure(error)
+      if (failure) return failure
       const message = error instanceof Error ? error.message : "Invalid checkout items"
       return toolError(message, message.startsWith("Unknown productId") ? "UNKNOWN_PRODUCT" : "INVALID_ARGUMENT")
     }
@@ -473,7 +497,7 @@ export async function POST(req: Request) {
         name: SERVER_NAME,
         version: SERVER_VERSION,
       },
-      instructions: "VibeCart is agent-friendly commerce infrastructure with a trusted catalog and hosted multi-item checkout on the generic MCP surface. Durable cart and released UCP commerce capabilities are available through VibeCart's dedicated UCP transport. Always use trusted product IDs; merchants own their Stripe account and fulfillment workflow.",
+      instructions: "VibeCart is agent-friendly commerce infrastructure with a trusted merchant catalog and hosted multi-item checkout on the generic MCP surface. Durable cart and released UCP commerce capabilities are available through VibeCart's dedicated UCP transport. Always use trusted product IDs; merchants own their Stripe account and fulfillment workflow.",
     })
   }
 
@@ -515,12 +539,17 @@ export async function POST(req: Request) {
       ? rawArgs as Record<string, unknown>
       : {}
 
-    const result = await callTool(req, name, args)
-    if (!result) {
-      return rpcError(message.id, -32602, `Unknown tool: ${name}`, 400)
-    }
+    try {
+      const result = await callTool(req, name, args)
+      if (!result) {
+        return rpcError(message.id, -32602, `Unknown tool: ${name}`, 400)
+      }
 
-    return rpcResult(message.id, result)
+      return rpcResult(message.id, result)
+    } catch (error) {
+      console.error("[vibecart mcp] Unexpected tool failure", error)
+      return rpcError(message.id, -32603, "Internal error", 500)
+    }
   }
 
   return rpcError(message.id, -32601, `Method not found: ${message.method}`, 404)

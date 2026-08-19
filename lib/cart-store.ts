@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless"
-import { getProduct } from "@/lib/products"
+import { getCatalogProduct } from "@/lib/catalog-source"
 
 const CART_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_QUANTITY = 99
@@ -90,7 +90,7 @@ function normalizeIdempotencyKey(value?: string): string | undefined {
   return key
 }
 
-export function resolveCartItems(input: CartItemInput[]): CartLine[] {
+export async function resolveCartItems(input: CartItemInput[]): Promise<CartLine[]> {
   if (!Array.isArray(input) || input.length === 0) throw new Error("Cart requires at least one item")
 
   const combined = new Map<string, number>()
@@ -106,10 +106,11 @@ export function resolveCartItems(input: CartItemInput[]): CartLine[] {
     combined.set(item.productId, next)
   }
 
-  return [...combined.entries()].map(([productId, quantity]) => {
-    const product = getProduct(productId)
+  const lines: CartLine[] = []
+  for (const [productId, quantity] of combined.entries()) {
+    const product = await getCatalogProduct(productId)
     if (!product) throw new Error(`Unknown productId "${productId}"`)
-    return {
+    lines.push({
       productId,
       name: product.name,
       description: product.description,
@@ -118,13 +119,14 @@ export function resolveCartItems(input: CartItemInput[]): CartLine[] {
       quantity,
       unitPriceCents: product.priceCents,
       lineTotalCents: product.priceCents * quantity,
-    }
-  })
+    })
+  }
+  return lines
 }
 
 export async function createCart(itemsInput: CartItemInput[], idempotencyKey?: string, merchantId = "default"): Promise<VibeCart> {
   const db = sql()
-  const items = resolveCartItems(itemsInput)
+  const items = await resolveCartItems(itemsInput)
   const subtotal = items.reduce((sum, item) => sum + item.lineTotalCents, 0)
   const id = crypto.randomUUID()
   const expiresAt = new Date(Date.now() + CART_TTL_MS).toISOString()
@@ -183,7 +185,7 @@ export async function replaceCartItems(id: string, itemsInput: CartItemInput[], 
   if (existing.status !== "active") throw new Error(`Cart is ${existing.status}`)
   if (expectedVersion !== undefined && existing.version !== expectedVersion) throw new Error("Cart version conflict")
 
-  const items = resolveCartItems(itemsInput)
+  const items = await resolveCartItems(itemsInput)
   const subtotal = items.reduce((sum, item) => sum + item.lineTotalCents, 0)
   const itemsJson = JSON.stringify(items)
   const db = sql()

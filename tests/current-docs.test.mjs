@@ -26,3 +26,21 @@ test("public docs describe the live durable cart and UCP cart surface", async ()
   assert.match(llms, /durable multi-item cart/i)
   assert.match(llms, /items\[\]/)
 })
+
+test("merchant-facing docs no longer require editing TypeScript for a real catalog", async () => {
+  for (const path of paths) {
+    const source = await readFile(path, "utf8")
+    assert.match(source, /VIBECART_CATALOG_URL/, `${path} must document the external merchant catalog`)
+    assert.match(source, /fail(?:s)? closed/i, `${path} must document remote catalog fail-closed behavior`)
+  }
+
+  const readme = await readFile("README.md", "utf8")
+  assert.match(readme, /Normal SKU and price changes therefore do not require editing VibeCart TypeScript/i)
+  assert.match(readme, /VIBECART_CATALOG_BEARER_TOKEN/)
+
+  const agents = await readFile("public/agents.md", "utf8")
+  assert.match(agents, /fictional demo\/reference data/i)
+
+  const llms = await readFile("public/llms.txt", "utf8")
+  assert.match(llms, /fictional reference\/demo data/i)
+})

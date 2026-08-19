@@ -45,9 +45,19 @@ test("UCP lookup enforces a batch limit with Invalid params", async () => {
   assert.match(source, /-32602/)
 })
 
-test("UCP catalog prices come from trusted server products", async () => {
+test("UCP catalog prices come from the shared trusted merchant provider", async () => {
   const source = await readFile("app/ucp/mcp/route.ts", "utf8")
   assert.match(source, /product\.priceCents/)
-  assert.match(source, /PRODUCTS\.filter/)
-  assert.match(source, /getProduct/)
+  assert.match(source, /await listCatalogProducts\(\)/)
+  assert.match(source, /configuredMerchantName\(\)/)
+  assert.doesNotMatch(source, /PRODUCTS\.filter/)
+  assert.doesNotMatch(source, /\bgetProduct\(/)
+})
+
+test("UCP catalog fails closed when the configured merchant source is unhealthy", async () => {
+  const source = await readFile("app/ucp/mcp/route.ts", "utf8")
+  assert.match(source, /CatalogSourceError/)
+  assert.match(source, /catalogResultError/)
+  assert.match(source, /service_unavailable/)
+  assert.match(source, /Merchant catalog is temporarily unavailable/)
 })

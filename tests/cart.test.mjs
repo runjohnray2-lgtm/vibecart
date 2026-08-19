@@ -2,12 +2,14 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 
-test("durable cart storage uses trusted catalog products and Neon", async () => {
+test("durable cart storage uses the shared trusted catalog provider and Neon", async () => {
   const source = await readFile("lib/cart-store.ts", "utf8")
   assert.match(source, /@neondatabase\/serverless/)
-  assert.match(source, /getProduct\(productId\)/)
+  assert.match(source, /getCatalogProduct\(productId\)/)
+  assert.match(source, /await resolveCartItems/)
   assert.match(source, /subtotalCents/)
   assert.match(source, /Cart version conflict/)
+  assert.doesNotMatch(source, /getProduct\(productId\)/)
 })
 
 test("cart creation is idempotent under concurrent retries", async () => {
@@ -37,15 +39,17 @@ test("cart API exposes create read update cancel and checkout", async () => {
   assert.match(checkout, /checkoutPost/)
 })
 
-test("all cart routes fail closed with 503 when durable storage is not configured", async () => {
+test("cart routes fail closed when durable storage or the trusted merchant catalog is unavailable", async () => {
   const create = await readFile("app/api/cart/route.ts", "utf8")
   const mutate = await readFile("app/api/cart/[id]/route.ts", "utf8")
   const checkout = await readFile("app/api/cart/[id]/checkout/route.ts", "utf8")
 
   assert.match(create, /CART_STORAGE_NOT_CONFIGURED/)
-  assert.match(create, /503/)
+  assert.match(create, /CatalogSourceError/)
+  assert.match(create, /Trusted merchant catalog is unavailable/)
   assert.match(mutate, /CART_STORAGE_NOT_CONFIGURED/)
-  assert.match(mutate, /503/)
+  assert.match(mutate, /CatalogSourceError/)
+  assert.match(mutate, /status: 503/)
   assert.match(checkout, /CART_STORAGE_NOT_CONFIGURED/)
   assert.match(checkout, /503/)
 })

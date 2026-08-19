@@ -1,3 +1,4 @@
+import { CatalogSourceError } from "@/lib/catalog-source"
 import { cancelCart, createCart, getCart, replaceCartItems, type CartItemInput } from "@/lib/cart-store"
 import { mapDurableCartToUcp, type UcpCart } from "@/lib/ucp-cart"
 
@@ -31,6 +32,9 @@ function cartItemsFromUcp(value: unknown): CartItemInput[] {
 }
 
 function classifyFailure(error: unknown): UcpCartServiceResult {
+  if (error instanceof CatalogSourceError) {
+    return { kind: "unavailable", retryable: error.code !== "CATALOG_CONFIG_INVALID" }
+  }
   const message = error instanceof Error ? error.message : "Cart operation failed"
   if (message.includes("storage is not configured")) return { kind: "unavailable", retryable: false }
   if (message.includes("Cart version conflict")) return { kind: "unavailable", retryable: true }

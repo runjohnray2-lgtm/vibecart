@@ -14,15 +14,16 @@ test("generic MCP checkout keeps legacy input while adding items[]", async () =>
   assert.match(source, /\{ required: \["items"\] \}/)
 })
 
-test("generic MCP multi-item checkout never accepts caller pricing", async () => {
+test("generic MCP multi-item checkout resolves products through the trusted catalog provider and never accepts caller pricing", async () => {
   const source = await readFile(routePath, "utf8")
-  const normalizeStart = source.indexOf("function normalizeCheckoutItems")
+  const normalizeStart = source.indexOf("async function normalizeCheckoutItems")
   const normalizeEnd = source.indexOf("async function callTool", normalizeStart)
   const normalize = source.slice(normalizeStart, normalizeEnd)
   assert.ok(normalizeStart >= 0)
-  assert.match(normalize, /getProduct\(line\.productId\)/)
+  assert.match(normalize, /await getCatalogProduct\(line\.productId\)/)
   assert.doesNotMatch(normalize, /priceCents|unitPrice|amount|price:/)
   assert.doesNotMatch(source, /allowInlineProduct|trustClientPrice|allowUntrustedPricing/)
+  assert.doesNotMatch(source, /PRODUCTS|\bgetProduct\(/)
 })
 
 test("generic MCP combines duplicate product IDs and caps aggregate quantity", async () => {
@@ -43,6 +44,14 @@ test("legacy single-product callers keep productId and quantity in successful ou
   assert.match(source, /const legacyFields = checkout\.legacy/)
   assert.match(source, /productId: checkout\.items\[0\]\.productId/)
   assert.match(source, /quantity: checkout\.items\[0\]\.quantity/)
+})
+
+test("generic MCP surfaces catalog outages as tool errors rather than demo fallback", async () => {
+  const source = await readFile(routePath, "utf8")
+  assert.match(source, /CatalogSourceError/)
+  assert.match(source, /catalogFailure/)
+  assert.match(source, /Trusted merchant catalog is unavailable/)
+  assert.match(source, /listCatalogProducts\(\)/)
 })
 
 test("generic MCP positioning no longer claims VibeCart is not a cart platform", async () => {

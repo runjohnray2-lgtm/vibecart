@@ -60,6 +60,40 @@ The order pipeline and released-schema `get_order` adapter also exist, but `get_
 - Paid Checkout line items are normalized into durable order records when VibeCart Cloud forwarding is configured.
 - Trusted merchant product IDs survive Checkout through Stripe Product metadata.
 
+## Merchant catalog source
+
+The built-in `lib/products.ts` catalog is **demo/reference data only**. A real merchant can keep SKUs and prices outside VibeCart and point Core at a merchant-controlled HTTPS JSON feed:
+
+```bash
+VIBECART_CATALOG_URL=https://merchant.example/vibecart/catalog.json
+VIBECART_MERCHANT_NAME="Example Merchant"
+# Optional when the feed is private:
+VIBECART_CATALOG_BEARER_TOKEN=server-side-secret
+```
+
+Accepted response shape:
+
+```json
+{
+  "products": [
+    {
+      "id": "sku-123",
+      "name": "Example product",
+      "description": "Merchant-controlled product data",
+      "priceCents": 4900,
+      "image": "https://merchant.example/products/sku-123.jpg",
+      "variant": "Optional variant"
+    }
+  ]
+}
+```
+
+An array of products at the document root is also accepted. `id`, `name`, and a non-negative integer `priceCents` are required; image URLs, when present, must use HTTPS.
+
+The configured source is shared by generic MCP catalog/checkout, UCP catalog, and durable cart repricing. VibeCart validates the document, rejects duplicate IDs, caps response/product counts, blocks redirects/private-network targets, applies a short timeout, and caches healthy catalog data for 30 seconds. If `VIBECART_CATALOG_URL` is configured and the source is unhealthy or invalid, commerce operations fail closed; VibeCart does **not** silently fall back to demo products.
+
+Normal SKU and price changes therefore do not require editing VibeCart TypeScript or redeploying Core.
+
 ## Agent-client distribution
 
 VibeCart does **not** build a different commerce engine for every model. OpenAI/Codex/ChatGPT, Claude, Gemini, VS Code, Cursor, and other MCP clients connect to the same backend.
@@ -70,7 +104,7 @@ See:
 - [`integrations/mcp-clients.json`](integrations/mcp-clients.json)
 - `https://vibecart.vercel.app/mcp-clients.json`
 
-Provider adapters are CI-checked to keep Stripe/database secrets and duplicated commerce logic out of client configuration.
+Provider adapters are CI-checked to keep Stripe/database/catalog secrets and duplicated commerce logic out of client configuration.
 
 ## VibeCart Cloud
 
@@ -96,10 +130,13 @@ npm install
 npm run dev
 ```
 
+Without `VIBECART_CATALOG_URL`, Core uses the fictional reference catalog for development. Configure a merchant catalog URL before treating products/prices as a real store catalog.
+
 Without a Stripe secret, Checkout runs in clearly labeled demo mode. For live payments, configure `STRIPE_SECRET_KEY` in the hosting provider's secret/environment settings. Never commit secret values.
 
 Useful public endpoints:
 
+- `/start` — merchant/client quickstart
 - `/mcp` — generic MCP transport/discovery
 - `/api/cart` — durable cart creation
 - `/.well-known/ucp` — UCP business discovery
@@ -113,11 +150,12 @@ Useful public endpoints:
 ## Security model
 
 - Merchant owns the Stripe account and receives merchant funds directly.
-- Trusted prices come from server-side merchant catalog state.
+- Trusted prices come from the configured server-side merchant catalog provider.
+- A configured remote merchant catalog fails closed rather than falling back to demo prices.
 - Client-supplied pricing is disabled by default and is prototype-only when explicitly enabled server-side.
 - Stripe webhook signatures are verified before post-payment processing.
 - Cart state is durable and versioned rather than trusted from the browser/agent.
-- Cloud integration credentials remain server-side.
+- Catalog, Stripe, database, and Cloud integration credentials remain server-side.
 - Public health/discovery endpoints expose readiness booleans/capabilities, not credential values.
 - Optional UCP capabilities are advertised only when their runtime dependencies are valid.
 
@@ -127,7 +165,7 @@ CI pins the released UCP `v2026-04-08` source and executes VibeCart's real mappe
 
 ## Current reference limits
 
-- The merchant catalog is still a small reference catalog rather than a complete multi-merchant catalog service.
+- The remote catalog connector is intentionally a simple trusted JSON-provider contract, not yet a multi-merchant catalog control plane with merchant UI, inventory sync, or per-merchant credentials stored by VibeCart Cloud.
 - Inventory, automated tax calculation, shipping-rate calculation, returns/refunds, and a complete fulfillment lifecycle are not finished platform services.
 - Public UCP order lookup remains activation-gated until its Cloud/permalink runtime dependencies are configured.
 - Next.js App Router is the reference implementation; other frameworks should use adapters around the same Core protocol surface rather than fork commerce logic.
