@@ -1,12 +1,24 @@
 import { NextResponse } from "next/server"
 import { getCart } from "@/lib/cart-store"
 import { POST as checkoutPost } from "@/app/api/checkout/route"
+import {
+  cartRequestAuthorized,
+  hostedModeEnabled,
+  MerchantAuthConfigurationError,
+} from "@/lib/merchant-auth"
 
 export const runtime = "nodejs"
 
 export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params
+    if (hostedModeEnabled() && !cartRequestAuthorized(req, id)) {
+      return NextResponse.json(
+        { success: false, code: "UNAUTHORIZED", error: "Cart access authorization is required." },
+        { status: 401 }
+      )
+    }
+
     const cart = await getCart(id)
     if (!cart) return NextResponse.json({ success: false, code: "CART_NOT_FOUND", error: "Cart not found." }, { status: 404 })
     if (cart.status !== "active") {
@@ -26,6 +38,12 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     return checkoutPost(checkoutRequest)
   } catch (error) {
     console.error("[vibecart cart] checkout handoff failed", error)
+    if (error instanceof MerchantAuthConfigurationError) {
+      return NextResponse.json(
+        { success: false, code: "MERCHANT_AUTH_NOT_CONFIGURED", error: "Hosted merchant authentication is not configured." },
+        { status: 503 }
+      )
+    }
     if (error instanceof Error && error.message.includes("storage is not configured")) {
       return NextResponse.json({ success: false, code: "CART_STORAGE_NOT_CONFIGURED", error: "Cart storage is not configured." }, { status: 503 })
     }

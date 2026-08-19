@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server"
 import { cancelCart, CartItemInput, getCart, replaceCartItems } from "@/lib/cart-store"
 import { CatalogSourceError } from "@/lib/catalog-source"
+import {
+  cartRequestAuthorized,
+  hostedModeEnabled,
+  MerchantAuthConfigurationError,
+} from "@/lib/merchant-auth"
 
 export const runtime = "nodejs"
 
@@ -26,13 +31,40 @@ function catalogFailure(error: unknown) {
   )
 }
 
-export async function GET(_req: Request, context: { params: Promise<{ id: string }> }) {
+function authConfigurationFailure(error: unknown) {
+  if (!(error instanceof MerchantAuthConfigurationError)) return null
+  console.error("[vibecart cart] hosted auth configuration failed", error)
+  return NextResponse.json(
+    { success: false, code: "MERCHANT_AUTH_NOT_CONFIGURED", error: "Hosted merchant authentication is not configured." },
+    { status: 503 }
+  )
+}
+
+async function authorize(req: Request, context: { params: Promise<{ id: string }> }) {
+  const id = await cartId(context)
+  if (hostedModeEnabled() && !cartRequestAuthorized(req, id)) {
+    return {
+      id,
+      response: NextResponse.json(
+        { success: false, code: "UNAUTHORIZED", error: "Cart access authorization is required." },
+        { status: 401 }
+      ),
+    }
+  }
+  return { id, response: null }
+}
+
+export async function GET(req: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const cart = await getCart(await cartId(context))
+    const auth = await authorize(req, context)
+    if (auth.response) return auth.response
+    const cart = await getCart(auth.id)
     if (!cart) return NextResponse.json({ success: false, code: "CART_NOT_FOUND", error: "Cart not found." }, { status: 404 })
     return NextResponse.json({ success: true, cart })
   } catch (error) {
     console.error("[vibecart cart] get failed", error)
+    const authFailure = authConfigurationFailure(error)
+    if (authFailure) return authFailure
     if (isStorageConfigurationError(error)) {
       return NextResponse.json({ success: false, code: "CART_STORAGE_NOT_CONFIGURED", error: "Cart storage is not configured." }, { status: 503 })
     }
@@ -42,14 +74,18 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
 
 export async function PATCH(req: Request, context: { params: Promise<{ id: string }> }) {
   try {
+    const auth = await authorize(req, context)
+    if (auth.response) return auth.response
     const body = await req.json() as UpdateCartBody
     if (!Array.isArray(body.items)) {
       return NextResponse.json({ success: false, code: "INVALID_CART", error: "items is required." }, { status: 400 })
     }
-    const cart = await replaceCartItems(await cartId(context), body.items, body.version)
+    const cart = await replaceCartItems(auth.id, body.items, body.version)
     if (!cart) return NextResponse.json({ success: false, code: "CART_NOT_FOUND", error: "Cart not found." }, { status: 404 })
     return NextResponse.json({ success: true, cart })
   } catch (error) {
+    const authFailure = authConfigurationFailure(error)
+    if (authFailure) return authFailure
     if (isStorageConfigurationError(error)) {
       return NextResponse.json({ success: false, code: "CART_STORAGE_NOT_CONFIGURED", error: "Cart storage is not configured." }, { status: 503 })
     }
@@ -64,13 +100,17 @@ export async function PATCH(req: Request, context: { params: Promise<{ id: strin
   }
 }
 
-export async function DELETE(_req: Request, context: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const cart = await cancelCart(await cartId(context))
+    const auth = await authorize(req, context)
+    if (auth.response) return auth.response
+    const cart = await cancelCart(auth.id)
     if (!cart) return NextResponse.json({ success: false, code: "CART_NOT_FOUND", error: "Cart not found." }, { status: 404 })
     return NextResponse.json({ success: true, cart })
   } catch (error) {
     console.error("[vibecart cart] cancel failed", error)
+    const authFailure = authConfigurationFailure(error)
+    if (authFailure) return authFailure
     if (isStorageConfigurationError(error)) {
       return NextResponse.json({ success: false, code: "CART_STORAGE_NOT_CONFIGURED", error: "Cart storage is not configured." }, { status: 503 })
     }
