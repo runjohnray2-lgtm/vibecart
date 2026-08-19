@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { orderPermalinkConfigured } from "@/lib/order-permalink"
+import { hostedMerchantAuthConfigured, hostedModeEnabled } from "@/lib/merchant-auth"
 
 export const dynamic = "force-dynamic"
 
@@ -14,6 +15,8 @@ export async function GET() {
         process.env.VIBECART_CLOUD_INGEST_URL && process.env.VIBECART_CLOUD_INGEST_KEY
       ),
       orderPermalinkConfigured: orderPermalinkConfigured(),
+      hostedMode: hostedModeEnabled(),
+      merchantAuthConfigured: hostedMerchantAuthConfigured(),
     },
     { headers: { "cache-control": "no-store" } }
   )
