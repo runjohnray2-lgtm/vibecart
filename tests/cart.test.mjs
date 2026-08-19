@@ -20,10 +20,10 @@ test("cart creation is idempotent under concurrent retries", async () => {
   assert.match(source, /idempotency_key = \$\{key\}/)
 })
 
-test("expiration races re-read durable state instead of returning stale active cart", async () => {
+test("expiration races re-read durable state inside the same merchant tenant", async () => {
   const source = await readFile("lib/cart-store.ts", "utf8")
   assert.match(source, /SET status = 'expired'/)
-  assert.match(source, /const current = await db`SELECT \* FROM vibecart_carts WHERE id = \$\{id\} LIMIT 1`/)
+  assert.match(source, /const current = await db`[\s\S]*?SELECT \* FROM vibecart_carts[\s\S]*?WHERE id = \$\{id\} AND merchant_id = \$\{merchantId\}[\s\S]*?LIMIT 1[\s\S]*?`/)
   assert.match(source, /expires_at > now\(\)/)
 })
 
