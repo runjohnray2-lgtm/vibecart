@@ -4,7 +4,7 @@ function assert(condition, message) {
   if (!condition) throw new Error(message)
 }
 
-async function rpc(method, params = {}) {
+async function rpcResponse(method, params = {}) {
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -16,7 +16,11 @@ async function rpc(method, params = {}) {
     }),
   })
 
-  const body = await response.json()
+  return { response, body: await response.json() }
+}
+
+async function rpc(method, params = {}) {
+  const { response, body } = await rpcResponse(method, params)
   assert(response.ok, `${method} returned HTTP ${response.status}: ${JSON.stringify(body)}`)
   assert(!body.error, `${method} returned JSON-RPC error: ${JSON.stringify(body.error)}`)
   return body.result
@@ -81,6 +85,18 @@ const productCall = await rpc("tools/call", {
   arguments: { productId },
 })
 assert(productCall.structuredContent?.product?.id === productId, "get_product returned the wrong product")
+
+const durableLimiterConfigured = Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL)
+if (!durableLimiterConfigured) {
+  const { response, body } = await rpcResponse("tools/call", {
+    name: "vibecart.create_checkout",
+    arguments: { productId, quantity: 1 },
+  })
+  assert(response.status === 503, `checkout without durable limiter returned HTTP ${response.status}`)
+  assert(body.error?.data?.code === "RATE_LIMIT_BACKEND_UNAVAILABLE", "checkout without durable limiter did not fail closed with the stable backend-unavailable code")
+  console.log(`MCP smoke test passed for ${toolNames.length} tools; checkout correctly fails closed without durable limiter storage`)
+  process.exit(0)
+}
 
 const legacyCheckoutCall = await rpc("tools/call", {
   name: "vibecart.create_checkout",
