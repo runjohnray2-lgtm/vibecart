@@ -14,6 +14,27 @@ export interface VibeProduct {
 
 export const PRODUCTS: VibeProduct[] = [
   {
+    id: "hsn-nothing-box-39",
+    name: "A Little Nothing",
+    description: "He Said Nothing mystery gift box — $39 pilot tier. Final contents are selected from the shopper's clues before fulfillment opens.",
+    priceCents: 3900,
+    image: "",
+  },
+  {
+    id: "hsn-nothing-box-59",
+    name: "The Original Nothing Box",
+    description: "He Said Nothing mystery gift box — $59 pilot tier. Final contents are selected from the shopper's clues before fulfillment opens.",
+    priceCents: 5900,
+    image: "",
+  },
+  {
+    id: "hsn-nothing-box-89",
+    name: "A Whole Lot of Nothing",
+    description: "He Said Nothing mystery gift box — $89 pilot tier. Final contents are selected from the shopper's clues before fulfillment opens.",
+    priceCents: 8900,
+    image: "",
+  },
+  {
     id: "sticker-pack-nw",
     name: "Pacific Northwest Sticker Pack",
     description: "5 regional stickers — Bigfoot, raccoon, mermaid, pirate ship, buck.",

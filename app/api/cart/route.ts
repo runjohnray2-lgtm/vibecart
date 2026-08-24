@@ -12,6 +12,7 @@ export const runtime = "nodejs"
 
 interface CreateCartBody {
   items?: CartItemInput[]
+  metadata?: unknown
 }
 
 export async function POST(req: Request) {
@@ -25,7 +26,7 @@ export async function POST(req: Request) {
 
     const body = await req.json() as CreateCartBody
     const idempotencyKey = req.headers.get("idempotency-key") ?? undefined
-    const cart = await createCart(body.items ?? [], idempotencyKey)
+    const cart = await createCart(body.items ?? [], idempotencyKey, undefined, body.metadata)
     const cartAccessToken = issueCartAccessToken(cart.id, cart.merchantId)
     return NextResponse.json(
       { success: true, cart, ...(cartAccessToken ? { cartAccessToken } : {}) },

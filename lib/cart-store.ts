@@ -5,6 +5,11 @@ import { configuredMerchantId } from "@/lib/merchant-auth"
 const CART_TTL_MS = 24 * 60 * 60 * 1000
 const MAX_QUANTITY = 99
 const MAX_IDEMPOTENCY_KEY_LENGTH = 200
+const MAX_METADATA_ENTRIES = 20
+const MAX_METADATA_KEY_LENGTH = 40
+const MAX_METADATA_VALUE_LENGTH = 500
+const MAX_METADATA_TOTAL_LENGTH = 5_000
+const METADATA_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/
 
 export interface CartItemInput {
   productId: string
@@ -22,12 +27,15 @@ export interface CartLine {
   lineTotalCents: number
 }
 
+export type CartMetadata = Record<string, string>
+
 export interface VibeCart {
   id: string
   merchantId: string
   status: "active" | "cancelled" | "converted" | "expired"
   currency: string
   items: CartLine[]
+  metadata: CartMetadata
   subtotalCents: number
   version: number
   checkoutSessionId?: string
@@ -42,6 +50,7 @@ type CartRow = {
   status: VibeCart["status"]
   currency: string
   items: CartLine[] | string
+  metadata: CartMetadata | string | null
   subtotal_cents: number
   version: number
   checkout_session_id?: string | null
@@ -66,12 +75,16 @@ function toIso(value: string | Date): string {
 
 function mapRow(row: CartRow): VibeCart {
   const items = typeof row.items === "string" ? JSON.parse(row.items) as CartLine[] : row.items
+  const metadata = typeof row.metadata === "string"
+    ? JSON.parse(row.metadata) as CartMetadata
+    : row.metadata ?? {}
   return {
     id: row.id,
     merchantId: row.merchant_id,
     status: row.status,
     currency: row.currency,
     items,
+    metadata,
     subtotalCents: Number(row.subtotal_cents),
     version: Number(row.version),
     ...(row.checkout_session_id ? { checkoutSessionId: row.checkout_session_id } : {}),
@@ -79,6 +92,35 @@ function mapRow(row: CartRow): VibeCart {
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   }
+}
+
+export function normalizeCartMetadata(value: unknown): CartMetadata {
+  if (value === undefined) return {}
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Cart metadata must be an object")
+  }
+
+  const entries = Object.entries(value)
+  if (entries.length > MAX_METADATA_ENTRIES) {
+    throw new Error(`Cart metadata cannot exceed ${MAX_METADATA_ENTRIES} entries`)
+  }
+
+  const metadata: CartMetadata = {}
+  let totalLength = 0
+  for (const [key, entryValue] of entries) {
+    if (!key || key.length > MAX_METADATA_KEY_LENGTH || !METADATA_KEY_PATTERN.test(key)) {
+      throw new Error(`Cart metadata keys must be 1-${MAX_METADATA_KEY_LENGTH} letters, numbers, dots, colons, underscores, or dashes`)
+    }
+    if (typeof entryValue !== "string" || entryValue.length > MAX_METADATA_VALUE_LENGTH) {
+      throw new Error(`Cart metadata values must be strings up to ${MAX_METADATA_VALUE_LENGTH} characters`)
+    }
+    totalLength += key.length + entryValue.length
+    if (totalLength > MAX_METADATA_TOTAL_LENGTH) {
+      throw new Error(`Cart metadata cannot exceed ${MAX_METADATA_TOTAL_LENGTH} total characters`)
+    }
+    metadata[key] = entryValue
+  }
+  return metadata
 }
 
 function normalizeIdempotencyKey(value?: string): string | undefined {
@@ -128,7 +170,8 @@ export async function resolveCartItems(input: CartItemInput[]): Promise<CartLine
 export async function createCart(
   itemsInput: CartItemInput[],
   idempotencyKey?: string,
-  merchantId = configuredMerchantId()
+  merchantId = configuredMerchantId(),
+  metadataInput: unknown = {}
 ): Promise<VibeCart> {
   const db = sql()
   const items = await resolveCartItems(itemsInput)
@@ -136,12 +179,13 @@ export async function createCart(
   const id = crypto.randomUUID()
   const expiresAt = new Date(Date.now() + CART_TTL_MS).toISOString()
   const itemsJson = JSON.stringify(items)
+  const metadataJson = JSON.stringify(normalizeCartMetadata(metadataInput))
   const key = normalizeIdempotencyKey(idempotencyKey)
 
   if (key) {
     const rows = await db`
-      INSERT INTO vibecart_carts (id, merchant_id, status, currency, items, subtotal_cents, version, idempotency_key, expires_at)
-      VALUES (${id}, ${merchantId}, 'active', 'usd', ${itemsJson}::jsonb, ${subtotal}, 1, ${key}, ${expiresAt})
+      INSERT INTO vibecart_carts (id, merchant_id, status, currency, items, metadata, subtotal_cents, version, idempotency_key, expires_at)
+      VALUES (${id}, ${merchantId}, 'active', 'usd', ${itemsJson}::jsonb, ${metadataJson}::jsonb, ${subtotal}, 1, ${key}, ${expiresAt})
       ON CONFLICT (merchant_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
       RETURNING *
     `
@@ -157,8 +201,8 @@ export async function createCart(
   }
 
   const rows = await db`
-    INSERT INTO vibecart_carts (id, merchant_id, status, currency, items, subtotal_cents, version, expires_at)
-    VALUES (${id}, ${merchantId}, 'active', 'usd', ${itemsJson}::jsonb, ${subtotal}, 1, ${expiresAt})
+    INSERT INTO vibecart_carts (id, merchant_id, status, currency, items, metadata, subtotal_cents, version, expires_at)
+    VALUES (${id}, ${merchantId}, 'active', 'usd', ${itemsJson}::jsonb, ${metadataJson}::jsonb, ${subtotal}, 1, ${expiresAt})
     RETURNING *
   `
   return mapRow(rows[0] as CartRow)

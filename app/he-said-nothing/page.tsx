@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   Gift,
@@ -73,6 +73,26 @@ const shopperVibes = {
 
 type Shopper = keyof typeof shopperVibes;
 
+type PilotCart = {
+  id: string;
+  status: "active" | "cancelled" | "converted" | "expired";
+  subtotalCents: number;
+  expiresAt: string;
+};
+
+type PilotResponse = {
+  success: boolean;
+  cart?: PilotCart;
+  cartAccessToken?: string;
+  error?: string;
+};
+
+const pilotProductIds: Record<number, string> = {
+  39: "hsn-nothing-box-39",
+  59: "hsn-nothing-box-59",
+  89: "hsn-nothing-box-89",
+};
+
 const saidOptions = [
   "Nothing",
   "Whatever",
@@ -104,12 +124,88 @@ export default function HeSaidNothingStorefront() {
   const [age, setAge] = useState("30–44");
   const [interest, setInterest] = useState(interests[9]);
   const [packaging, setPackaging] = useState("Ship It Like Nothing");
+  const [pilotMode, setPilotMode] = useState(false);
+  const [pilotStatus, setPilotStatus] = useState<"idle" | "creating" | "created" | "cancelling" | "cancelled" | "error">("idle");
+  const [pilotCart, setPilotCart] = useState<PilotCart | null>(null);
+  const [pilotError, setPilotError] = useState("");
+  const pilotIdempotencyKey = useRef<string | null>(null);
+  const pilotAccessToken = useRef<string | null>(null);
+
+  useEffect(() => {
+    setPilotMode(new URLSearchParams(window.location.search).get("pilot") === "cart");
+  }, []);
 
   const vibe = shopperVibes[shopper];
   const selected = useMemo(
     () => boxes.find((box) => box.price === selectedBox) ?? boxes[1],
     [selectedBox]
   );
+
+  async function createPilotCart() {
+    setPilotStatus("creating");
+    setPilotError("");
+    pilotIdempotencyKey.current ??= `hsn-pilot-${crypto.randomUUID()}`;
+
+    try {
+      const response = await fetch("/api/cart", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": pilotIdempotencyKey.current,
+        },
+        body: JSON.stringify({
+          items: [{ productId: pilotProductIds[selected.price], quantity: 1 }],
+          metadata: {
+            source: "he-said-nothing-web-pilot",
+            shopper_relationship: shopper,
+            recipient_relationship: recipient,
+            recipient_age: age,
+            recipient_interest: interest,
+            recipient_answer: said,
+            packaging,
+            box_tier: String(selected.price),
+            product_name: selected.name,
+            fulfillment_note: "PILOT TEST CART — NO PAYMENT",
+          },
+        }),
+      });
+      const result = await response.json() as PilotResponse;
+      if (!response.ok || !result.success || !result.cart) {
+        throw new Error(result.error ?? "The pilot cart could not be created.");
+      }
+      setPilotCart(result.cart);
+      pilotAccessToken.current = result.cartAccessToken ?? null;
+      pilotIdempotencyKey.current = null;
+      setPilotStatus("created");
+    } catch (error) {
+      setPilotStatus("error");
+      setPilotError(error instanceof Error ? error.message : "The pilot cart could not be created.");
+    }
+  }
+
+  async function cancelPilotCart() {
+    if (!pilotCart) return;
+    setPilotStatus("cancelling");
+    setPilotError("");
+
+    try {
+      const response = await fetch(`/api/cart/${pilotCart.id}`, {
+        method: "DELETE",
+        headers: pilotAccessToken.current
+          ? { authorization: `Bearer ${pilotAccessToken.current}` }
+          : undefined,
+      });
+      const result = await response.json() as PilotResponse;
+      if (!response.ok || !result.success || !result.cart) {
+        throw new Error(result.error ?? "The pilot cart could not be cancelled.");
+      }
+      setPilotCart(result.cart);
+      setPilotStatus("cancelled");
+    } catch (error) {
+      setPilotStatus("error");
+      setPilotError(error instanceof Error ? error.message : "The pilot cart could not be cancelled.");
+    }
+  }
 
   return (
     <main className="min-h-screen bg-[#f6f1e9] text-[#201c19]">
@@ -311,6 +407,43 @@ export default function HeSaidNothingStorefront() {
               <button type="button" disabled className="mt-5 w-full cursor-not-allowed rounded-2xl bg-white/15 px-5 py-4 font-black text-white/60">
                 Ordering opens after prototype validation
               </button>
+              {pilotMode && (
+                <div className="mt-5 border-t border-white/10 pt-5" aria-live="polite">
+                  <div className="text-xs font-black uppercase tracking-[.18em] text-[#e0b38e]">Private pilot tool</div>
+                  <p className="mt-2 text-sm leading-6 text-white/65">
+                    This saves the quiz as a VibeCart test cart. It does not open checkout, charge a card, or create a paid order.
+                  </p>
+                  {pilotCart ? (
+                    <div className="mt-4 rounded-2xl bg-black/20 p-4 text-sm">
+                      <div className="font-black">Test cart {pilotCart.status}</div>
+                      <div className="mt-2 break-all font-mono text-xs text-white/65">{pilotCart.id}</div>
+                      <div className="mt-2 text-white/65">
+                        ${(pilotCart.subtotalCents / 100).toFixed(2)} · expires {new Date(pilotCart.expiresAt).toLocaleString()}
+                      </div>
+                    </div>
+                  ) : null}
+                  {pilotError ? <p className="mt-3 text-sm font-bold text-red-300">{pilotError}</p> : null}
+                  {pilotCart?.status === "active" ? (
+                    <button
+                      type="button"
+                      onClick={cancelPilotCart}
+                      disabled={pilotStatus === "cancelling"}
+                      className="mt-4 w-full rounded-2xl border border-white/20 px-5 py-3 font-black text-white transition hover:bg-white/10 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {pilotStatus === "cancelling" ? "Cancelling…" : "Cancel test cart"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={createPilotCart}
+                      disabled={pilotStatus === "creating"}
+                      className="mt-4 w-full rounded-2xl bg-[#e0b38e] px-5 py-4 font-black text-[#26211e] transition hover:bg-[#edc7a7] disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {pilotStatus === "creating" ? "Saving test cart…" : "Create no-payment pilot cart"}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
