@@ -27,10 +27,19 @@ test("Cloud sales page separates recurring Cloud from custom done-for-you setup"
   assert.ok(source.includes(cloudUrl))
   assert.match(source, /\$29<span/)
   assert.match(source, /verified active subscription unlocks\s*live commerce ingestion/i)
-  assert.match(source, /Request Done-for-you Setup/)
+  assert.match(source, /See Done-for-you Setup/)
   assert.match(source, /Custom quote/)
-  assert.match(source, /managedSetupUrl/)
+  assert.match(source, /href="\/setup"/)
   assert.match(source, /Open Cloud workspace/)
+})
+
+test("done-for-you setup has its own paid-service funnel", async () => {
+  const source = await readFile("app/setup/page.tsx", "utf8")
+  assert.match(source, /We make your AI-built payment system actually work in production/)
+  assert.match(source, /Request a setup quote/)
+  assert.match(source, /Connect successful payments to access, orders, licenses, notifications, or other business logic/)
+  assert.match(source, /Custom one-time setup quote/)
+  assert.match(source, /No percentage of your sales/)
 })
 
 test("revenue pages preserve merchant-owned Stripe economics and honest product limits", async () => {
