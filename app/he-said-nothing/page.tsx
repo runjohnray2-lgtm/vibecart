@@ -291,7 +291,13 @@ export default function HeSaidNothingStorefront() {
               ))}
             </div>
 
-            <div key={`${shopper}-photo`} className="relative mt-6 h-72 overflow-hidden rounded-2xl bg-black/20 animate-[hsnReveal_420ms_ease-out]">
+            <div key={`${shopper}-mobile-message`} aria-live="polite" className="mt-5 rounded-2xl bg-white p-5 text-[var(--hsn-deep)] shadow-lg animate-[hsnReveal_420ms_ease-out]">
+              <div className="text-xs font-black uppercase tracking-[.18em] text-[var(--hsn-accent)]">{vibe.mode}</div>
+              <div className="mt-2 text-2xl font-black leading-tight">{vibe.headline}</div>
+              <p className="mt-2 text-sm leading-6 text-black/65">{vibe.subhead}</p>
+            </div>
+
+            <div key={`${shopper}-photo`} className="relative mt-4 h-56 overflow-hidden rounded-2xl bg-black/20 animate-[hsnReveal_420ms_ease-out] sm:h-72">
               <Image src={vibe.image} alt={vibe.imageAlt} fill priority sizes="(max-width: 1024px) 100vw, 38vw" className="object-cover" />
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent p-5">
                 <div className="text-xs font-black uppercase tracking-[.18em] text-white/65">{vibe.mode}</div>
