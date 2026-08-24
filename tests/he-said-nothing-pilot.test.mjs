@@ -20,6 +20,22 @@ test("private pilot saves quiz choices as a no-payment durable cart", async () =
   assert.doesNotMatch(page, /fetch\("\/api\/checkout"/)
 })
 
+test("relationship choices visibly switch the storefront mode", async () => {
+  const page = await readFile("app/he-said-nothing/page.tsx", "utf8")
+  for (const role of ["Wife", "Girlfriend", "Daughter", "Mom", "Sister", "Other"]) {
+    assert.match(page, new RegExp(`${role}:\\s*\\{[\\s\\S]*?mode:`))
+  }
+  assert.match(page, /Buying for your \{shopper\.toLowerCase\(\)\}/)
+  assert.match(page, /<Image src=\{vibe\.image\}/)
+  assert.match(page, /--hsn-accent/)
+  assert.match(page, /wife-garage\.webp/)
+  assert.match(page, /girlfriend-apartment\.webp/)
+  assert.match(page, /daughter-backyard\.webp/)
+  assert.match(page, /mom-desk\.webp/)
+  assert.match(page, /sister-trail\.webp/)
+  assert.match(page, /other-lounge\.webp/)
+})
+
 test("cart metadata is bounded, persisted, and returned with the cart", async () => {
   const store = await readFile("lib/cart-store.ts", "utf8")
   const route = await readFile("app/api/cart/route.ts", "utf8")

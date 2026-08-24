@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import {
   Check,
   Gift,
@@ -34,40 +35,58 @@ const boxes = [
 
 const shopperVibes = {
   Wife: {
-    kicker: "You asked. He shrugged. We know the type.",
-    headline: "You’ve asked him enough times.",
+    mode: "Wife mode",
+    headline: "You asked. He shrugged. We know the type.",
     subhead: "He still says he wants nothing. Fine. We’ll turn that into a gift he actually wants to open.",
     reaction: "Of course he did.",
+    image: "/he-said-nothing/wife-garage.webp",
+    imageAlt: "A relaxed man in his garage workshop",
+    theme: { accent: "#b54d35", soft: "#f5ded3", paper: "#fff6f0", deep: "#2e1b18", ink: "#201713" },
   },
   Girlfriend: {
-    kicker: "He said ‘whatever.’ Bold answer.",
-    headline: "Dating him shouldn’t require a gift detective.",
+    mode: "Girlfriend mode",
+    headline: "He said ‘whatever.’ Bold answer.",
     subhead: "Give us a few clues. We’ll make his impossible answer look like you had a plan all along.",
     reaction: "Nothing? Risky move.",
+    image: "/he-said-nothing/girlfriend-apartment.webp",
+    imageAlt: "A stylish man relaxing in his apartment",
+    theme: { accent: "#107a78", soft: "#d9f3ee", paper: "#f0fbf8", deep: "#073c3e", ink: "#102c2b" },
   },
   Daughter: {
-    kicker: "Dad says he needs nothing. Dad is incorrect.",
-    headline: "Classic Dad.",
+    mode: "Daughter mode",
+    headline: "Dad says he needs nothing. Dad is incorrect.",
     subhead: "You know him. You love him. You still have no idea what to buy him. That’s our part.",
     reaction: "Yep. Sounds like Dad.",
+    image: "/he-said-nothing/daughter-backyard.webp",
+    imageAlt: "A happy dad grilling in the backyard",
+    theme: { accent: "#47713c", soft: "#e3efd9", paper: "#f5f9ef", deep: "#1d321f", ink: "#1c2b1b" },
   },
   Mom: {
-    kicker: "He may be grown. His wish list is not.",
-    headline: "He still can’t tell you what he wants.",
+    mode: "Mom mode",
+    headline: "He may be grown. His wish list is not.",
     subhead: "Apparently some things never change. Give us the clues and we’ll take it from here.",
     reaction: "He’s been saying that for years.",
+    image: "/he-said-nothing/mom-desk.webp",
+    imageAlt: "An adult son at his creative desk",
+    theme: { accent: "#3159b8", soft: "#dce7ff", paper: "#f1f5ff", deep: "#172751", ink: "#18264b" },
   },
   Sister: {
-    kicker: "You’ve known him forever. Still impossible.",
-    headline: "Sibling knowledge only gets you so far.",
+    mode: "Sister mode",
+    headline: "You’ve known him forever. Still impossible.",
     subhead: "We’ll handle the gift. You can take credit for knowing exactly what he needed.",
     reaction: "Very on brand for him.",
+    image: "/he-said-nothing/sister-trail.webp",
+    imageAlt: "A brother on a mountain trail",
+    theme: { accent: "#c66a32", soft: "#fce4d1", paper: "#fff6ed", deep: "#3e2518", ink: "#342017" },
   },
   Other: {
-    kicker: "He gave you zero useful information.",
-    headline: "Good. That’s literally our specialty.",
+    mode: "Mystery mode",
+    headline: "He gave you zero useful information.",
     subhead: "Tell us what little you do know. We’ll handle the rest.",
     reaction: "Perfect. We specialize in that.",
+    image: "/he-said-nothing/other-lounge.webp",
+    imageAlt: "A man opening a small gift in a warm lounge",
+    theme: { accent: "#865077", soft: "#f3dff0", paper: "#fcf3fb", deep: "#371d34", ink: "#2d182b" },
   },
 } as const;
 
@@ -207,12 +226,20 @@ export default function HeSaidNothingStorefront() {
     }
   }
 
+  const themeStyle = {
+    "--hsn-accent": vibe.theme.accent,
+    "--hsn-soft": vibe.theme.soft,
+    "--hsn-paper": vibe.theme.paper,
+    "--hsn-deep": vibe.theme.deep,
+    "--hsn-ink": vibe.theme.ink,
+  } as React.CSSProperties;
+
   return (
-    <main className="min-h-screen bg-[#f6f1e9] text-[#201c19]">
-      <header className="border-b border-black/10 bg-[#f6f1e9]/95 backdrop-blur">
+    <main style={themeStyle} className="min-h-screen bg-[var(--hsn-paper)] text-[var(--hsn-ink)] transition-colors duration-500">
+      <header className="border-b border-black/10 bg-[var(--hsn-paper)]/95 backdrop-blur transition-colors duration-500">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-[#7b5644]">The gift for men who give you nothing</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.24em] text-[var(--hsn-accent)]">The gift for men who give you nothing</div>
             <div className="text-xl font-black tracking-tight">HE SAID NOTHING</div>
           </div>
           <div className="hidden rounded-full bg-white px-4 py-2 text-sm font-semibold shadow-sm ring-1 ring-black/5 sm:block">
@@ -223,14 +250,18 @@ export default function HeSaidNothingStorefront() {
 
       <section className="mx-auto grid max-w-6xl gap-10 px-5 py-14 lg:grid-cols-[1.05fr_.95fr] lg:items-center">
         <div>
-          <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-[#eadccc] px-4 py-2 text-sm font-bold text-[#694332]">
-            <Sparkles className="h-4 w-4" /> {vibe.kicker}
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-[var(--hsn-soft)] px-4 py-2 text-sm font-bold text-[var(--hsn-deep)] transition-colors duration-500">
+            <Sparkles className="h-4 w-4" /> {vibe.mode}
           </div>
           <h1 className="max-w-3xl text-5xl font-black leading-[.95] tracking-[-.05em] sm:text-6xl">
             HE SAID NOTHING.
-            <span className="mt-2 block text-[#7b5644]">SO WE GOT HIM NOTHING.</span>
+            <span className="mt-2 block text-[var(--hsn-accent)]">SO WE GOT HIM NOTHING.</span>
           </h1>
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-black/65">{vibe.subhead}</p>
+          <div key={shopper} className="mt-7 min-h-[15rem] rounded-[2rem] bg-[var(--hsn-deep)] p-6 text-white shadow-2xl transition-colors duration-500 sm:p-8 animate-[hsnReveal_420ms_ease-out]">
+            <div className="text-xs font-black uppercase tracking-[.24em] text-white/55">Buying for your {shopper.toLowerCase()}</div>
+            <h2 className="mt-3 max-w-xl text-3xl font-black leading-[.98] tracking-[-.04em] sm:text-5xl">{vibe.headline}</h2>
+            <p className="mt-5 max-w-2xl text-base leading-7 text-white/75">{vibe.subhead}</p>
+          </div>
           <div className="mt-8 flex flex-wrap gap-3 text-sm font-semibold">
             {["Useful > random junk", "Built around him", "You still get the credit"].map((item) => (
               <div key={item} className="flex items-center gap-2 rounded-full bg-white px-4 py-2 shadow-sm ring-1 ring-black/5">
@@ -240,10 +271,10 @@ export default function HeSaidNothingStorefront() {
           </div>
         </div>
 
-        <div className="rounded-[2rem] bg-[#26211e] p-5 text-white shadow-2xl sm:p-6">
+        <div className="rounded-[2rem] bg-[var(--hsn-deep)] p-5 text-white shadow-2xl transition-colors duration-500 sm:p-6">
           <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-5 sm:p-6">
-            <div className="text-xs font-bold uppercase tracking-[.2em] text-white/50">Start here</div>
-            <h2 className="mt-2 text-2xl font-black">Who are you?</h2>
+            <div className="text-xs font-bold uppercase tracking-[.2em] text-white/50">Start here — this changes the site</div>
+            <h2 className="mt-2 text-2xl font-black">Who are you buying for?</h2>
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
               {(Object.keys(shopperVibes) as Shopper[]).map((value) => (
                 <button
@@ -251,7 +282,7 @@ export default function HeSaidNothingStorefront() {
                   type="button"
                   onClick={() => setShopper(value)}
                   className={`rounded-xl px-3 py-3 text-sm font-bold transition ${
-                    shopper === value ? "bg-white text-[#26211e]" : "bg-white/10 text-white hover:bg-white/15"
+                    shopper === value ? "bg-white text-[var(--hsn-deep)] shadow-lg" : "bg-white/10 text-white hover:bg-white/15"
                   }`}
                 >
                   {value}
@@ -259,10 +290,12 @@ export default function HeSaidNothingStorefront() {
               ))}
             </div>
 
-            <div className="mt-6 rounded-2xl bg-white/10 p-5">
-              <div className="text-sm text-white/55">Your version of the site</div>
-              <div className="mt-1 text-xl font-black">{vibe.headline}</div>
-              <p className="mt-2 text-sm leading-6 text-white/70">The jokes and recommendations change with you. The fulfillment stays simple for us.</p>
+            <div key={`${shopper}-photo`} className="relative mt-6 h-72 overflow-hidden rounded-2xl bg-black/20 animate-[hsnReveal_420ms_ease-out]">
+              <Image src={vibe.image} alt={vibe.imageAlt} fill priority sizes="(max-width: 1024px) 100vw, 38vw" className="object-cover" />
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent p-5">
+                <div className="text-xs font-black uppercase tracking-[.18em] text-white/65">{vibe.mode}</div>
+                <div className="mt-1 text-xl font-black">This is the guy we&apos;re solving for.</div>
+              </div>
             </div>
           </div>
         </div>
@@ -272,7 +305,7 @@ export default function HeSaidNothingStorefront() {
         <div className="mx-auto max-w-6xl px-5 py-14">
           <div className="grid gap-8 lg:grid-cols-[.78fr_1.22fr]">
             <div>
-              <div className="text-sm font-bold uppercase tracking-[.2em] text-[#7b5644]">The important question</div>
+              <div className="text-sm font-bold uppercase tracking-[.2em] text-[var(--hsn-accent)]">The important question</div>
               <h2 className="mt-2 text-3xl font-black tracking-tight">What did he say when you asked what he wanted?</h2>
               <p className="mt-4 leading-7 text-black/60">His answer becomes part of the joke, the gift note, and the box experience.</p>
             </div>
@@ -280,8 +313,8 @@ export default function HeSaidNothingStorefront() {
               <select value={said} onChange={(e) => setSaid(e.target.value)} className="field text-lg">
                 {saidOptions.map((value) => <option key={value}>{value}</option>)}
               </select>
-              <div className="mt-5 rounded-2xl bg-[#f1e7dc] p-5">
-                <div className="text-sm font-bold uppercase tracking-wider text-[#7b5644]">Our response</div>
+              <div className="mt-5 rounded-2xl bg-[var(--hsn-soft)] p-5 transition-colors duration-500">
+                <div className="text-sm font-bold uppercase tracking-wider text-[var(--hsn-accent)]">Our response</div>
                 <div className="mt-1 text-2xl font-black">{vibe.reaction}</div>
                 <div className="mt-2 text-sm text-black/60">He said: “{said}.” We can work with that.</div>
               </div>
@@ -292,7 +325,7 @@ export default function HeSaidNothingStorefront() {
 
       <section className="mx-auto max-w-6xl px-5 py-14">
         <div className="mb-8 max-w-2xl">
-          <div className="text-sm font-bold uppercase tracking-[.2em] text-[#7b5644]">How much Nothing?</div>
+          <div className="text-sm font-bold uppercase tracking-[.2em] text-[var(--hsn-accent)]">How much Nothing?</div>
           <h2 className="mt-2 text-3xl font-black tracking-tight">Pick the budget. We’ll handle the mystery.</h2>
         </div>
         <div className="grid gap-5 lg:grid-cols-3">
@@ -303,19 +336,19 @@ export default function HeSaidNothingStorefront() {
               onClick={() => setSelectedBox(box.price)}
               className={`relative rounded-3xl border p-6 text-left transition ${
                 selectedBox === box.price
-                  ? "border-[#7b5644] bg-[#fffaf5] shadow-xl ring-2 ring-[#7b5644]/10"
+                  ? "border-[var(--hsn-accent)] bg-[var(--hsn-soft)] shadow-xl ring-2 ring-[var(--hsn-accent)]/15"
                   : "border-black/10 bg-white hover:-translate-y-1 hover:shadow-lg"
               }`}
             >
               {box.featured && (
-                <div className="absolute -top-3 left-6 rounded-full bg-[#7b5644] px-3 py-1 text-xs font-black uppercase tracking-wider text-white">Best place to start</div>
+                <div className="absolute -top-3 left-6 rounded-full bg-[var(--hsn-accent)] px-3 py-1 text-xs font-black uppercase tracking-wider text-white">Best place to start</div>
               )}
               <div className="text-4xl font-black">${box.price}</div>
               <div className="mt-3 text-xl font-black">{box.name}</div>
               <p className="mt-2 min-h-16 text-sm leading-6 text-black/55">{box.subtitle}</p>
               <div className="mt-5 space-y-2">
                 {box.items.map((item) => (
-                  <div key={item} className="flex items-center gap-2 text-sm font-semibold"><Check className="h-4 w-4 text-[#7b5644]" /> {item}</div>
+                  <div key={item} className="flex items-center gap-2 text-sm font-semibold"><Check className="h-4 w-4 text-[var(--hsn-accent)]" /> {item}</div>
                 ))}
               </div>
             </button>
@@ -323,11 +356,11 @@ export default function HeSaidNothingStorefront() {
         </div>
       </section>
 
-      <section className="border-y border-black/10 bg-[#eee4d8]">
+      <section className="border-y border-black/10 bg-[var(--hsn-soft)] transition-colors duration-500">
         <div className="mx-auto max-w-6xl px-5 py-14">
           <div className="grid gap-8 lg:grid-cols-[.85fr_1.15fr]">
             <div>
-              <div className="text-sm font-bold uppercase tracking-[.2em] text-[#7b5644]">Make it his</div>
+              <div className="text-sm font-bold uppercase tracking-[.2em] text-[var(--hsn-accent)]">Make it his</div>
               <h2 className="mt-2 text-3xl font-black tracking-tight">A few clues. Not an interrogation.</h2>
               <p className="mt-4 leading-7 text-black/60">We want enough information to avoid obvious misses without turning gift shopping into homework.</p>
             </div>
@@ -360,7 +393,7 @@ export default function HeSaidNothingStorefront() {
       <section className="mx-auto max-w-6xl px-5 py-14">
         <div className="grid gap-8 lg:grid-cols-2">
           <div>
-            <div className="text-sm font-bold uppercase tracking-[.2em] text-[#7b5644]">Packaging</div>
+            <div className="text-sm font-bold uppercase tracking-[.2em] text-[var(--hsn-accent)]">Packaging</div>
             <h2 className="mt-2 text-3xl font-black tracking-tight">How should Nothing arrive?</h2>
             <p className="mt-4 leading-7 text-black/60">We’ll make the basic option intentionally plain, not accidentally cheap. Premium presentation becomes an easy upsell.</p>
           </div>
@@ -370,9 +403,9 @@ export default function HeSaidNothingStorefront() {
                 key={value}
                 type="button"
                 onClick={() => setPackaging(value)}
-                className={`rounded-3xl border p-5 text-left transition ${packaging === value ? "border-[#7b5644] bg-[#fffaf5] ring-2 ring-[#7b5644]/10" : "border-black/10 bg-white"}`}
+                className={`rounded-3xl border p-5 text-left transition ${packaging === value ? "border-[var(--hsn-accent)] bg-[var(--hsn-soft)] ring-2 ring-[var(--hsn-accent)]/15" : "border-black/10 bg-white"}`}
               >
-                <Package className="h-7 w-7 text-[#7b5644]" />
+                <Package className="h-7 w-7 text-[var(--hsn-accent)]" />
                 <div className="mt-3 font-black">{value}</div>
                 <p className="mt-2 text-sm leading-6 text-black/55">
                   {value === "Ship It Like Nothing"
@@ -385,7 +418,7 @@ export default function HeSaidNothingStorefront() {
         </div>
       </section>
 
-      <section className="bg-[#26211e] text-white">
+      <section className="bg-[var(--hsn-deep)] text-white transition-colors duration-500">
         <div className="mx-auto max-w-6xl px-5 py-14">
           <div className="grid gap-8 lg:grid-cols-[1fr_.9fr] lg:items-center">
             <div>
@@ -401,7 +434,7 @@ export default function HeSaidNothingStorefront() {
               </div>
             </div>
             <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-              <WandSparkles className="h-8 w-8 text-[#e0b38e]" />
+              <WandSparkles className="h-8 w-8 text-[var(--hsn-soft)]" />
               <div className="mt-3 text-xl font-black">Checkout is intentionally off for now.</div>
               <p className="mt-3 text-sm leading-6 text-white/65">We’re locking the first real box contents, costs, shipping, and fulfillment before taking money. The storefront experience can still go live early for indexing and testing.</p>
               <button type="button" disabled className="mt-5 w-full cursor-not-allowed rounded-2xl bg-white/15 px-5 py-4 font-black text-white/60">
@@ -409,7 +442,7 @@ export default function HeSaidNothingStorefront() {
               </button>
               {pilotMode && (
                 <div className="mt-5 border-t border-white/10 pt-5" aria-live="polite">
-                  <div className="text-xs font-black uppercase tracking-[.18em] text-[#e0b38e]">Private pilot tool</div>
+                  <div className="text-xs font-black uppercase tracking-[.18em] text-[var(--hsn-soft)]">Private pilot tool</div>
                   <p className="mt-2 text-sm leading-6 text-white/65">
                     This saves the quiz as a VibeCart test cart. It does not open checkout, charge a card, or create a paid order.
                   </p>
@@ -437,7 +470,7 @@ export default function HeSaidNothingStorefront() {
                       type="button"
                       onClick={createPilotCart}
                       disabled={pilotStatus === "creating"}
-                      className="mt-4 w-full rounded-2xl bg-[#e0b38e] px-5 py-4 font-black text-[#26211e] transition hover:bg-[#edc7a7] disabled:cursor-wait disabled:opacity-60"
+                      className="mt-4 w-full rounded-2xl bg-[var(--hsn-soft)] px-5 py-4 font-black text-[var(--hsn-deep)] transition hover:brightness-105 disabled:cursor-wait disabled:opacity-60"
                     >
                       {pilotStatus === "creating" ? "Saving test cart…" : "Create no-payment pilot cart"}
                     </button>
@@ -467,7 +500,11 @@ export default function HeSaidNothingStorefront() {
           font-weight: 650;
           outline: none;
         }
-        .field:focus { border-color: #7b5644; box-shadow: 0 0 0 3px rgba(123,86,68,.12); }
+        .field:focus { border-color: var(--hsn-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--hsn-accent) 18%, transparent); }
+        @keyframes hsnReveal {
+          from { opacity: 0; transform: translateY(10px) scale(.99); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
       `}</style>
     </main>
   );
@@ -478,5 +515,5 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function Trust({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
-  return <div className="flex gap-3"><div className="mt-1 text-[#7b5644]">{icon}</div><div><div className="font-black">{title}</div><p className="mt-1 text-sm leading-6 text-black/55">{text}</p></div></div>;
+  return <div className="flex gap-3"><div className="mt-1 text-[var(--hsn-accent)]">{icon}</div><div><div className="font-black">{title}</div><p className="mt-1 text-sm leading-6 text-black/55">{text}</p></div></div>;
 }
