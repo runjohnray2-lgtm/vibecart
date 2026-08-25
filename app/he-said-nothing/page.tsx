@@ -148,7 +148,9 @@ export default function HeSaidNothingStorefront() {
   const [recipient, setRecipient] = useState("Husband");
   const [said, setSaid] = useState("Nothing");
   const [selectedBox, setSelectedBox] = useState(59);
-  const [age, setAge] = useState("30–44");
+  const [shirtSize, setShirtSize] = useState("Not sure");
+  const [waistSize, setWaistSize] = useState("Not sure");
+  const [shoeSize, setShoeSize] = useState("Not sure");
   const [interest, setInterest] = useState(interests[9]);
   const [packaging, setPackaging] = useState("Ship It Like Nothing");
   const [pilotMode, setPilotMode] = useState(false);
@@ -186,7 +188,9 @@ export default function HeSaidNothingStorefront() {
             source: "he-said-nothing-web-pilot",
             shopper_relationship: shopper ?? "not-selected",
             recipient_relationship: recipient,
-            recipient_age: age,
+            recipient_shirt_size: shirtSize,
+            recipient_waist_size: waistSize,
+            recipient_shoe_size: shoeSize,
             recipient_interest: interest,
             recipient_answer: said,
             packaging,
@@ -391,9 +395,9 @@ export default function HeSaidNothingStorefront() {
                     {["Husband", "Boyfriend", "Dad", "Adult son", "Brother", "Grandpa", "Other"].map((value) => <option key={value}>{value}</option>)}
                   </select>
                 </Field>
-                <Field label="Age">
-                  <select value={age} onChange={(e) => setAge(e.target.value)} className="field">
-                    {["18–29", "30–44", "45–59", "60+"].map((value) => <option key={value}>{value}</option>)}
+                <Field label="Shirt size (optional)">
+                  <select value={shirtSize} onChange={(e) => setShirtSize(e.target.value)} className="field">
+                    {["Not sure", "S", "M", "L", "XL", "2XL", "3XL+"].map((value) => <option key={value}>{value}</option>)}
                   </select>
                 </Field>
                 <div className="sm:col-span-2">
@@ -403,6 +407,16 @@ export default function HeSaidNothingStorefront() {
                     </select>
                   </Field>
                 </div>
+                <Field label="Waist size (optional)">
+                  <select value={waistSize} onChange={(e) => setWaistSize(e.target.value)} className="field">
+                    {["Not sure", "28", "30", "32", "34", "36", "38", "40", "42+"].map((value) => <option key={value}>{value}</option>)}
+                  </select>
+                </Field>
+                <Field label="Shoe size (optional)">
+                  <select value={shoeSize} onChange={(e) => setShoeSize(e.target.value)} className="field">
+                    {["Not sure", "7", "8", "9", "10", "11", "12", "13", "14+"].map((value) => <option key={value}>{value}</option>)}
+                  </select>
+                </Field>
               </div>
             </div>
           </div>
@@ -444,7 +458,7 @@ export default function HeSaidNothingStorefront() {
               <div className="text-sm font-bold uppercase tracking-[.2em] text-white/50">Your current Nothing</div>
               <h2 className="mt-2 text-3xl font-black">{selected.name} — ${selected.price}</h2>
               <p className="mt-4 max-w-2xl leading-7 text-white/65">
-                From a {shopper?.toLowerCase() ?? "gift giver"} for her {recipient.toLowerCase()}, age {age}. He said “{said}.” He leans {interest.toLowerCase()}. Packaging: {packaging}.
+                From a {shopper?.toLowerCase() ?? "gift giver"} for her {recipient.toLowerCase()}. Shirt: {shirtSize}; waist: {waistSize}; shoes: {shoeSize}. He said “{said}.” He leans {interest.toLowerCase()}. Packaging: {packaging}.
               </p>
               <div className="mt-6 flex flex-wrap gap-3 text-sm font-semibold">
                 <div className="rounded-full bg-white/10 px-4 py-2">Mystery stays fun</div>
