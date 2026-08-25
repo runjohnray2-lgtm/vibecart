@@ -92,6 +92,14 @@ const shopperVibes = {
 
 type Shopper = keyof typeof shopperVibes;
 
+const neutralVibe = {
+  mode: "Start here",
+  headline: "Tell us who he ignored. We’ll take it from there.",
+  subhead: "Pick the relationship first, then we’ll tune the jokes, color, and gift experience around her.",
+  reaction: "We can work with that.",
+  theme: { accent: "#7b5644", soft: "#eadccc", paper: "#f6f1e9", deep: "#26211e", ink: "#201c19" },
+};
+
 type PilotCart = {
   id: string;
   status: "active" | "cancelled" | "converted" | "expired";
@@ -136,7 +144,7 @@ const interests = [
 ];
 
 export default function HeSaidNothingStorefront() {
-  const [shopper, setShopper] = useState<Shopper>("Wife");
+  const [shopper, setShopper] = useState<Shopper | null>(null);
   const [recipient, setRecipient] = useState("Husband");
   const [said, setSaid] = useState("Nothing");
   const [selectedBox, setSelectedBox] = useState(59);
@@ -154,7 +162,7 @@ export default function HeSaidNothingStorefront() {
     setPilotMode(new URLSearchParams(window.location.search).get("pilot") === "cart");
   }, []);
 
-  const vibe = shopperVibes[shopper];
+  const vibe = shopper ? shopperVibes[shopper] : neutralVibe;
   const selected = useMemo(
     () => boxes.find((box) => box.price === selectedBox) ?? boxes[1],
     [selectedBox]
@@ -176,7 +184,7 @@ export default function HeSaidNothingStorefront() {
           items: [{ productId: pilotProductIds[selected.price], quantity: 1 }],
           metadata: {
             source: "he-said-nothing-web-pilot",
-            shopper_relationship: shopper,
+            shopper_relationship: shopper ?? "not-selected",
             recipient_relationship: recipient,
             recipient_age: age,
             recipient_interest: interest,
@@ -249,7 +257,7 @@ export default function HeSaidNothingStorefront() {
       </header>
 
       <section className="mx-auto grid max-w-6xl gap-10 px-5 py-14 lg:grid-cols-[1.05fr_.95fr] lg:items-center">
-        <div>
+        <div className="order-2 lg:order-1">
           <div className="mb-5 inline-flex items-center gap-2 rounded-full bg-[var(--hsn-soft)] px-4 py-2 text-sm font-bold text-[var(--hsn-deep)] transition-colors duration-500">
             <Sparkles className="h-4 w-4" /> {vibe.mode}
           </div>
@@ -257,8 +265,8 @@ export default function HeSaidNothingStorefront() {
             HE SAID NOTHING.
             <span className="mt-2 block text-[var(--hsn-accent)]">SO WE GOT HIM NOTHING.</span>
           </h1>
-          <div key={shopper} className="mt-7 min-h-[15rem] rounded-[2rem] bg-[var(--hsn-deep)] p-6 text-white shadow-2xl transition-colors duration-500 sm:p-8 animate-[hsnReveal_420ms_ease-out]">
-            <div className="text-xs font-black uppercase tracking-[.24em] text-white/55">Buying for your {shopper.toLowerCase()}</div>
+          <div key={shopper ?? "start"} className="mt-7 min-h-[15rem] rounded-[2rem] bg-[var(--hsn-deep)] p-6 text-white shadow-2xl transition-colors duration-500 sm:p-8 animate-[hsnReveal_420ms_ease-out]">
+            <div className="text-xs font-black uppercase tracking-[.24em] text-white/55">{shopper ? `Buying for your ${shopper.toLowerCase()}` : "First, choose who he ignored"}</div>
             <h2 className="mt-3 max-w-xl text-3xl font-black leading-[.98] tracking-[-.04em] sm:text-5xl">{vibe.headline}</h2>
             <p className="mt-5 max-w-2xl text-base leading-7 text-white/75">{vibe.subhead}</p>
           </div>
@@ -271,7 +279,7 @@ export default function HeSaidNothingStorefront() {
           </div>
         </div>
 
-        <div className="rounded-[2rem] bg-[var(--hsn-deep)] p-5 text-white shadow-2xl transition-colors duration-500 sm:p-6">
+        <div className="order-1 rounded-[2rem] bg-[var(--hsn-deep)] p-5 text-white shadow-2xl transition-colors duration-500 lg:order-2 sm:p-6">
           <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-5 sm:p-6">
             <div className="text-xs font-bold uppercase tracking-[.2em] text-white/50">Start here — this changes the site</div>
             <h2 className="mt-2 text-2xl font-black">Who is he not answering?</h2>
@@ -291,19 +299,23 @@ export default function HeSaidNothingStorefront() {
               ))}
             </div>
 
-            <div key={`${shopper}-mobile-message`} aria-live="polite" className="mt-5 rounded-2xl bg-white p-5 text-[var(--hsn-deep)] shadow-lg animate-[hsnReveal_420ms_ease-out]">
-              <div className="text-xs font-black uppercase tracking-[.18em] text-[var(--hsn-accent)]">{vibe.mode}</div>
-              <div className="mt-2 text-2xl font-black leading-tight">{vibe.headline}</div>
-              <p className="mt-2 text-sm leading-6 text-black/65">{vibe.subhead}</p>
-            </div>
+            {shopper && "image" in vibe && (
+              <>
+                <div key={`${shopper}-mobile-message`} aria-live="polite" className="mt-5 rounded-2xl bg-white p-5 text-[var(--hsn-deep)] shadow-lg animate-[hsnReveal_420ms_ease-out]">
+                  <div className="text-xs font-black uppercase tracking-[.18em] text-[var(--hsn-accent)]">{vibe.mode}</div>
+                  <div className="mt-2 text-2xl font-black leading-tight">{vibe.headline}</div>
+                  <p className="mt-2 text-sm leading-6 text-black/65">{vibe.subhead}</p>
+                </div>
 
-            <div key={`${shopper}-photo`} className="relative mt-4 h-56 overflow-hidden rounded-2xl bg-black/20 animate-[hsnReveal_420ms_ease-out] sm:h-72">
-              <Image src={vibe.image} alt={vibe.imageAlt} fill priority sizes="(max-width: 1024px) 100vw, 38vw" className="object-cover" />
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent p-5">
-                <div className="text-xs font-black uppercase tracking-[.18em] text-white/65">{vibe.mode}</div>
-                <div className="mt-1 text-xl font-black">This is the guy we&apos;re solving for.</div>
-              </div>
-            </div>
+                <div key={`${shopper}-photo`} className="relative mt-4 h-56 overflow-hidden rounded-2xl bg-black/20 animate-[hsnReveal_420ms_ease-out] sm:h-72">
+                  <Image src={vibe.image} alt={vibe.imageAlt} fill priority sizes="(max-width: 1024px) 100vw, 38vw" className="object-cover" />
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent p-5">
+                    <div className="text-xs font-black uppercase tracking-[.18em] text-white/65">{vibe.mode}</div>
+                    <div className="mt-1 text-xl font-black">This is the guy we&apos;re solving for.</div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </section>
@@ -432,7 +444,7 @@ export default function HeSaidNothingStorefront() {
               <div className="text-sm font-bold uppercase tracking-[.2em] text-white/50">Your current Nothing</div>
               <h2 className="mt-2 text-3xl font-black">{selected.name} — ${selected.price}</h2>
               <p className="mt-4 max-w-2xl leading-7 text-white/65">
-                From a {shopper.toLowerCase()} for her {recipient.toLowerCase()}, age {age}. He said “{said}.” He leans {interest.toLowerCase()}. Packaging: {packaging}.
+                From a {shopper?.toLowerCase() ?? "gift giver"} for her {recipient.toLowerCase()}, age {age}. He said “{said}.” He leans {interest.toLowerCase()}. Packaging: {packaging}.
               </p>
               <div className="mt-6 flex flex-wrap gap-3 text-sm font-semibold">
                 <div className="rounded-full bg-white/10 px-4 py-2">Mystery stays fun</div>
