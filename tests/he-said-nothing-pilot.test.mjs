@@ -25,7 +25,9 @@ test("relationship choices visibly switch the storefront mode", async () => {
   for (const role of ["Wife", "Girlfriend", "Daughter", "Mom", "Sister", "Other"]) {
     assert.match(page, new RegExp(`${role}:\\s*\\{[\\s\\S]*?mode:`))
   }
-  assert.match(page, /Buying for your \{shopper\.toLowerCase\(\)\}/)
+  assert.match(page, /useState<Shopper \| null>\(null\)/)
+  assert.match(page, /Tell us who he ignored/)
+  assert.match(page, /order-1[\s\S]*lg:order-2/)
   assert.match(page, /<Image src=\{vibe\.image\}/)
   assert.match(page, /--hsn-accent/)
   assert.match(page, /wife-garage\.webp/)
