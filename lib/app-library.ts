@@ -22,6 +22,14 @@ export interface ShortLink {
   updatedAt: string
 }
 
+export interface ShortLinkEventInput {
+  shortLinkId: number
+  referrer?: string | null
+  userAgent?: string | null
+  countryCode?: string | null
+  deviceType?: string | null
+}
+
 function databaseUrl(): string {
   const value = process.env.DATABASE_URL ?? process.env.POSTGRES_URL
   if (!value) throw new Error("VibeCart app-library storage is not configured")
@@ -59,6 +67,17 @@ function validDestinationUrl(value: string): string {
 function iso(value: string | Date | null): string | null {
   if (!value) return null
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString()
+}
+
+function boundedOptional(value: string | null | undefined, maxLength: number): string | null {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  return trimmed.slice(0, maxLength)
+}
+
+function normalizedCountryCode(value: string | null | undefined): string | null {
+  const code = value?.trim().toUpperCase()
+  return code && /^[A-Z]{2}$/.test(code) ? code : null
 }
 
 export async function hasAppAccess(accountKey: string, appKey: string): Promise<boolean> {
@@ -135,4 +154,21 @@ export async function resolveShortLink(slugValue: string): Promise<{ id: number;
   `
   const row = rows[0]
   return row ? { id: Number(row.id), destinationUrl: String(row.destination_url) } : null
+}
+
+export async function recordShortLinkEvent(input: ShortLinkEventInput): Promise<void> {
+  const shortLinkId = Math.trunc(input.shortLinkId)
+  if (!Number.isSafeInteger(shortLinkId) || shortLinkId < 1) {
+    throw new Error("Invalid short-link id")
+  }
+
+  const referrer = boundedOptional(input.referrer, 500)
+  const userAgent = boundedOptional(input.userAgent, 500)
+  const countryCode = normalizedCountryCode(input.countryCode)
+  const deviceType = boundedOptional(input.deviceType, 30)
+
+  await sql()`
+    INSERT INTO short_link_events (short_link_id, referrer, user_agent, country_code, device_type)
+    VALUES (${shortLinkId}, ${referrer}, ${userAgent}, ${countryCode}, ${deviceType})
+  `
 }
