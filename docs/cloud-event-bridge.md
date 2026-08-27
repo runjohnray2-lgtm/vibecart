@@ -6,7 +6,7 @@ VibeCart Core can optionally forward Stripe-verified payment events into VibeCar
 
 Core remains usable without Cloud. To enable the durable Cloud bridge, configure both server-side environment variables:
 
-- `VIBECART_CLOUD_INGEST_URL` — the full HTTPS ingest endpoint issued by VibeCart Cloud, including `/api/ingest/<integration-id>`
+- `VIBECART_CLOUD_INGEST_URL` — the full HTTPS ingest endpoint issued by VibeCart Cloud. The self-hosted reference receiver uses `/api/cloud/ingest/<integration-id>`.
 - `VIBECART_CLOUD_INGEST_KEY` — the integration key issued by VibeCart Cloud
 
 Never commit either value to the repository or expose the key to browser code.
@@ -31,6 +31,13 @@ Configure the Stripe webhook destination to send the Checkout Session events use
 This preserves the separation of responsibilities:
 
 Stripe → verified VibeCart Core webhook → durable VibeCart Cloud event → merchant fulfillment webhook.
+
+The reference Next.js deployment includes an authenticated receiver and lookup pair at:
+
+- `POST /api/cloud/ingest/<integration-id>`
+- `POST /api/cloud/ingest/<integration-id>/order`
+
+The receiver writes paid orders, order lines, gift/cart metadata, and order events to Neon. It is inactive unless the shared ingest key and integration URL are configured.
 
 ## Health check
 

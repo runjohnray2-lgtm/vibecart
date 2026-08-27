@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server"
 import { orderPermalinkConfigured } from "@/lib/order-permalink"
 import { hostedMerchantAuthConfigured, hostedModeEnabled } from "@/lib/merchant-auth"
+import { hsnCheckoutReadiness } from "@/lib/he-said-nothing-config"
 
 export const dynamic = "force-dynamic"
 
 export async function GET() {
+  const hsn = hsnCheckoutReadiness()
   return NextResponse.json(
     {
       service: "vibecart",
@@ -17,6 +19,8 @@ export async function GET() {
       orderPermalinkConfigured: orderPermalinkConfigured(),
       hostedMode: hostedModeEnabled(),
       merchantAuthConfigured: hostedMerchantAuthConfigured(),
+      heSaidNothingCheckoutEnabled: hsn.enabled,
+      heSaidNothingCheckoutMode: hsn.mode,
     },
     { headers: { "cache-control": "no-store" } }
   )

@@ -16,12 +16,30 @@ export interface NormalizedOrderLine {
 export interface NormalizedOrder {
   checkoutSessionId: string
   cartId: string
+  stripePaymentIntentId: string
   customerEmail: string
+  customerName: string
+  customerPhone: string
+  shipping: {
+    name: string
+    line1: string
+    line2: string
+    city: string
+    state: string
+    postalCode: string
+    country: string
+  }
   amountSubtotal: number | null
+  amountShipping: number
+  amountTax: number
   amountTotal: number | null
   currency: string
   paymentStatus: string
   lines: NormalizedOrderLine[]
+}
+
+function stripeId(value: string | { id: string } | null): string {
+  return typeof value === "string" ? value : value?.id ?? ""
 }
 
 function stripeProductId(line: Stripe.LineItem): string {
@@ -67,12 +85,28 @@ export async function buildNormalizedOrder(
 ): Promise<NormalizedOrder> {
   const lineItems = await listAllLineItems(stripe, session.id)
   if (lineItems.length === 0) throw new Error(`Checkout Session ${session.id} has no line items`)
+  const shipping = session.collected_information?.shipping_details
+  const address = shipping?.address
 
   return {
     checkoutSessionId: session.id,
     cartId: session.client_reference_id ?? session.metadata?.vibecart_cart_id ?? "",
+    stripePaymentIntentId: stripeId(session.payment_intent),
     customerEmail: session.customer_details?.email ?? session.customer_email ?? "",
+    customerName: shipping?.name ?? session.customer_details?.name ?? "",
+    customerPhone: session.customer_details?.phone ?? "",
+    shipping: {
+      name: shipping?.name ?? "",
+      line1: address?.line1 ?? "",
+      line2: address?.line2 ?? "",
+      city: address?.city ?? "",
+      state: address?.state ?? "",
+      postalCode: address?.postal_code ?? "",
+      country: address?.country ?? "",
+    },
     amountSubtotal: session.amount_subtotal,
+    amountShipping: session.total_details?.amount_shipping ?? 0,
+    amountTax: session.total_details?.amount_tax ?? 0,
     amountTotal: session.amount_total,
     currency: session.currency ?? lineItems[0]?.currency ?? "",
     paymentStatus: session.payment_status,

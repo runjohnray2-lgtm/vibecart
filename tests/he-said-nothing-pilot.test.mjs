@@ -11,7 +11,7 @@ test("He Said Nothing tiers are trusted server-side products at the displayed pr
 
 test("private pilot saves quiz choices as a no-payment durable cart", async () => {
   const page = await readFile("app/he-said-nothing/page.tsx", "utf8")
-  assert.match(page, /get\("pilot"\) === "cart"/)
+  assert.match(page, /setPilotMode\(pilot === "cart"\)/)
   assert.match(page, /fetch\("\/api\/cart"/)
   assert.match(page, /he-said-nothing-web-pilot/)
   assert.match(page, /recipient_interest/)

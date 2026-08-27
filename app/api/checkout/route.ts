@@ -2,6 +2,8 @@ import { NextResponse } from "next/server"
 import Stripe from "stripe"
 import { CatalogSourceError, getCatalogProduct } from "@/lib/catalog-source"
 import type { VibeProduct } from "@/lib/products"
+import { getCart, markCartConverted, type VibeCart } from "@/lib/cart-store"
+import { isHsnProductId, requireHsnCheckoutReady } from "@/lib/he-said-nothing-config"
 
 export const runtime = "nodejs"
 
@@ -106,6 +108,16 @@ function safeRedirectUrl(candidate: string | undefined, origin: string, fallback
   }
 }
 
+function cartMatchesCheckout(cart: VibeCart, resolved: { product: VibeProduct; quantity: number }[]): boolean {
+  if (cart.items.length !== resolved.length) return false
+  const expected = new Map(cart.items.map(item => [item.productId, item.quantity]))
+  return resolved.every(item => expected.get(item.product.id) === item.quantity)
+}
+
+function automaticTaxEnabled(): boolean {
+  return process.env.VIBECART_AUTOMATIC_TAX_ENABLED?.trim().toLowerCase() === "true"
+}
+
 export async function POST(req: Request) {
   if (isRateLimited(req)) {
     return err("RATE_LIMITED", "Too many checkout requests. Retry in one minute.", 429)
@@ -187,9 +199,40 @@ export async function POST(req: Request) {
     }
 
     const origin = req.headers.get("origin") ?? new URL(req.url).origin
-    const successUrl = safeRedirectUrl(body.successUrl, origin, "/?checkout=success")
-    const cancelUrl = safeRedirectUrl(body.cancelUrl, origin, "/?checkout=cancelled")
     const cartId = cartReference(body.cartId)
+    const containsHsnProduct = resolved.some(item => isHsnProductId(item.product.id))
+    const isHsnCheckout = containsHsnProduct && resolved.every(item => isHsnProductId(item.product.id))
+    if (containsHsnProduct && !isHsnCheckout) {
+      return err("MIXED_STOREFRONT_CART", "He Said Nothing products cannot be mixed with another merchant catalog.", 400)
+    }
+
+    let hsnCart: VibeCart | null = null
+    let hsnShippingCents: number | null = null
+    let hsnPremiumPackagingCents: number | null = null
+    if (isHsnCheckout) {
+      if (!cartId) return err("CART_REQUIRED", "He Said Nothing checkout requires a durable cart.", 400)
+      hsnCart = await getCart(cartId)
+      if (!hsnCart) return err("CART_NOT_FOUND", "Cart not found.", 404)
+      if (hsnCart.status !== "active") return err("CART_NOT_ACTIVE", `Cart is ${hsnCart.status}.`, 409)
+      if (!cartMatchesCheckout(hsnCart, resolved)) {
+        return err("CART_MISMATCH", "Checkout items do not match the durable cart.", 409)
+      }
+      try {
+        const readiness = requireHsnCheckoutReady()
+        hsnShippingCents = readiness.shippingCents
+        hsnPremiumPackagingCents = readiness.premiumPackagingCents
+      } catch (error) {
+        console.warn("[he said nothing] Checkout gate remains closed", error)
+        return err("CHECKOUT_NOT_READY", "Ordering is not open yet.", 503)
+      }
+    }
+
+    const successUrl = isHsnCheckout
+      ? `${origin}/he-said-nothing/order/success?session_id={CHECKOUT_SESSION_ID}`
+      : safeRedirectUrl(body.successUrl, origin, "/?checkout=success")
+    const cancelUrl = isHsnCheckout
+      ? `${origin}/he-said-nothing?checkout=cancelled`
+      : safeRedirectUrl(body.cancelUrl, origin, "/?checkout=cancelled")
 
     const secretKey = process.env.STRIPE_SECRET_KEY
 
@@ -209,34 +252,99 @@ export async function POST(req: Request) {
     }
 
     const stripe = new Stripe(secretKey)
+    const stripeLineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = resolved.map(r => ({
+      price_data: {
+        currency: "usd",
+        product_data: {
+          name: displayName(r.product),
+          description: r.product.description,
+          images: r.product.image ? [r.product.image] : [],
+          metadata: {
+            vibecart_product_id: r.trusted ? r.product.id : "",
+            vibecart_catalog_source: r.trusted ? "trusted" : "inline_untrusted",
+          },
+        },
+        unit_amount: r.product.priceCents,
+      },
+      quantity: r.quantity,
+    }))
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      line_items: resolved.map(r => ({
+    if (isHsnCheckout && hsnCart?.metadata.packaging === "Make Nothing Look Expensive") {
+      if (hsnPremiumPackagingCents === null) {
+        return err("PREMIUM_PACKAGING_NOT_CONFIGURED", "Premium packaging is not available yet.", 503)
+      }
+      stripeLineItems.push({
         price_data: {
           currency: "usd",
           product_data: {
-            name: displayName(r.product),
-            description: r.product.description,
-            images: r.product.image ? [r.product.image] : [],
+            name: "Make Nothing Look Expensive",
+            description: "Gift-ready tissue, ribbon or bow, and a premium reveal.",
             metadata: {
-              vibecart_product_id: r.trusted ? r.product.id : "",
-              vibecart_catalog_source: r.trusted ? "trusted" : "inline_untrusted",
+              vibecart_product_id: "hsn-premium-packaging",
+              vibecart_catalog_source: "trusted",
             },
           },
-          unit_amount: r.product.priceCents,
+          unit_amount: hsnPremiumPackagingCents,
         },
-        quantity: r.quantity,
-      })),
-      ...(cartId ? { client_reference_id: cartId, metadata: { vibecart_cart_id: cartId } } : {}),
+        quantity: 1,
+      })
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      line_items: stripeLineItems,
+      ...(cartId ? {
+        client_reference_id: cartId,
+        metadata: {
+          vibecart_cart_id: cartId,
+          vibecart_merchant_id: hsnCart?.merchantId ?? "default",
+          vibecart_store: isHsnCheckout ? "he-said-nothing" : "",
+        },
+        payment_intent_data: {
+          metadata: {
+            vibecart_cart_id: cartId,
+            vibecart_merchant_id: hsnCart?.merchantId ?? "default",
+            vibecart_store: isHsnCheckout ? "he-said-nothing" : "",
+          },
+        },
+      } : {}),
+      ...(isHsnCheckout ? {
+        billing_address_collection: "auto" as const,
+        customer_creation: "always" as const,
+        phone_number_collection: { enabled: true },
+        shipping_address_collection: { allowed_countries: ["US" as const] },
+        shipping_options: [{
+          shipping_rate_data: {
+            type: "fixed_amount" as const,
+            fixed_amount: { amount: hsnShippingCents ?? 0, currency: "usd" },
+            display_name: "Standard shipping",
+            delivery_estimate: {
+              minimum: { unit: "business_day" as const, value: 3 },
+              maximum: { unit: "business_day" as const, value: 8 },
+            },
+          },
+        }],
+        automatic_tax: { enabled: automaticTaxEnabled() },
+        submit_type: "pay" as const,
+        custom_text: {
+          shipping_address: {
+            message: "We need his delivery address so Nothing arrives in the right place.",
+          },
+        },
+      } : {}),
       success_url: successUrl,
       cancel_url: cancelUrl,
-    })
+    }, cartId ? { idempotencyKey: `vibecart-cart-${cartId}` } : undefined)
+
+    if (isHsnCheckout && hsnCart) {
+      await markCartConverted(hsnCart.id, session.id, hsnCart.merchantId)
+    }
 
     return NextResponse.json({
       success: true,
       mode: "live",
       checkoutUrl: session.url,
+      checkoutSessionId: session.id,
     })
   } catch (error) {
     if (error instanceof CatalogSourceError) {

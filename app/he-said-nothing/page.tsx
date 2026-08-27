@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import {
   Check,
   Gift,
@@ -111,7 +112,15 @@ type PilotResponse = {
   success: boolean;
   cart?: PilotCart;
   cartAccessToken?: string;
+  checkoutUrl?: string;
   error?: string;
+};
+
+type CheckoutAvailability = {
+  enabled: boolean;
+  mode: "test" | "live" | null;
+  shippingCents: number | null;
+  premiumPackagingCents: number | null;
 };
 
 const pilotProductIds: Record<number, string> = {
@@ -153,15 +162,33 @@ export default function HeSaidNothingStorefront() {
   const [shoeSize, setShoeSize] = useState("Not sure");
   const [interest, setInterest] = useState(interests[9]);
   const [packaging, setPackaging] = useState("Ship It Like Nothing");
+  const [giftMessage, setGiftMessage] = useState("");
+  const [specialNotes, setSpecialNotes] = useState("");
   const [pilotMode, setPilotMode] = useState(false);
+  const [testCheckoutMode, setTestCheckoutMode] = useState(false);
+  const [checkoutAvailability, setCheckoutAvailability] = useState<CheckoutAvailability>({
+    enabled: false,
+    mode: null,
+    shippingCents: null,
+    premiumPackagingCents: null,
+  });
+  const [checkoutStatus, setCheckoutStatus] = useState<"idle" | "creating" | "redirecting" | "error">("idle");
+  const [checkoutError, setCheckoutError] = useState("");
   const [pilotStatus, setPilotStatus] = useState<"idle" | "creating" | "created" | "cancelling" | "cancelled" | "error">("idle");
   const [pilotCart, setPilotCart] = useState<PilotCart | null>(null);
   const [pilotError, setPilotError] = useState("");
   const pilotIdempotencyKey = useRef<string | null>(null);
   const pilotAccessToken = useRef<string | null>(null);
+  const checkoutIdempotencyKey = useRef<string | null>(null);
 
   useEffect(() => {
-    setPilotMode(new URLSearchParams(window.location.search).get("pilot") === "cart");
+    const pilot = new URLSearchParams(window.location.search).get("pilot");
+    setPilotMode(pilot === "cart");
+    setTestCheckoutMode(pilot === "checkout");
+    fetch("/api/he-said-nothing/status", { cache: "no-store" })
+      .then(response => response.ok ? response.json() as Promise<CheckoutAvailability> : null)
+      .then(result => { if (result) setCheckoutAvailability(result); })
+      .catch(() => undefined);
   }, []);
 
   const vibe = shopper ? shopperVibes[shopper] : neutralVibe;
@@ -237,6 +264,73 @@ export default function HeSaidNothingStorefront() {
       setPilotError(error instanceof Error ? error.message : "The pilot cart could not be cancelled.");
     }
   }
+
+  async function startCheckout() {
+    if (!shopper) {
+      setCheckoutError("Choose who he ignored first so we can personalize the box.");
+      return;
+    }
+
+    setCheckoutStatus("creating");
+    setCheckoutError("");
+    checkoutIdempotencyKey.current ??= `hsn-checkout-${crypto.randomUUID()}`;
+
+    try {
+      const cartResponse = await fetch("/api/cart", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": checkoutIdempotencyKey.current,
+        },
+        body: JSON.stringify({
+          items: [{ productId: pilotProductIds[selected.price], quantity: 1 }],
+          metadata: {
+            source: testCheckoutMode ? "he-said-nothing-stripe-test" : "he-said-nothing-web",
+            shopper_relationship: shopper,
+            recipient_relationship: recipient,
+            recipient_shirt_size: shirtSize,
+            recipient_waist_size: waistSize,
+            recipient_shoe_size: shoeSize,
+            recipient_interest: interest,
+            recipient_answer: said,
+            packaging,
+            box_tier: String(selected.price),
+            product_name: selected.name,
+            gift_message: giftMessage.trim(),
+            fulfillment_note: specialNotes.trim(),
+          },
+        }),
+      });
+      const cartResult = await cartResponse.json() as PilotResponse;
+      if (!cartResponse.ok || !cartResult.success || !cartResult.cart) {
+        throw new Error(cartResult.error ?? "Your cart could not be created.");
+      }
+
+      const checkoutResponse = await fetch(`/api/cart/${cartResult.cart.id}/checkout`, {
+        method: "POST",
+        headers: cartResult.cartAccessToken
+          ? { authorization: `Bearer ${cartResult.cartAccessToken}` }
+          : undefined,
+      });
+      const checkoutResult = await checkoutResponse.json() as PilotResponse;
+      if (!checkoutResponse.ok || !checkoutResult.success || !checkoutResult.checkoutUrl) {
+        throw new Error(checkoutResult.error ?? "Checkout could not be opened.");
+      }
+
+      checkoutIdempotencyKey.current = null;
+      setCheckoutStatus("redirecting");
+      window.location.assign(checkoutResult.checkoutUrl);
+    } catch (error) {
+      setCheckoutStatus("error");
+      setCheckoutError(error instanceof Error ? error.message : "Checkout could not be opened.");
+    }
+  }
+
+  const checkoutVisible = checkoutAvailability.enabled
+    && (checkoutAvailability.mode === "live" || testCheckoutMode);
+  const shippingLabel = checkoutAvailability.shippingCents === null
+    ? null
+    : `$${(checkoutAvailability.shippingCents / 100).toFixed(2)} shipping`;
 
   const themeStyle = {
     "--hsn-accent": vibe.theme.accent,
@@ -417,6 +511,28 @@ export default function HeSaidNothingStorefront() {
                     {["Not sure", "7", "8", "9", "10", "11", "12", "13", "14+"].map((value) => <option key={value}>{value}</option>)}
                   </select>
                 </Field>
+                <div className="sm:col-span-2">
+                  <Field label="Gift message (optional)">
+                    <textarea
+                      value={giftMessage}
+                      onChange={(e) => setGiftMessage(e.target.value.slice(0, 300))}
+                      rows={3}
+                      placeholder="Happy birthday. You said you wanted nothing..."
+                      className="field resize-y"
+                    />
+                  </Field>
+                </div>
+                <div className="sm:col-span-2">
+                  <Field label="Anything else we should know? (optional)">
+                    <textarea
+                      value={specialNotes}
+                      onChange={(e) => setSpecialNotes(e.target.value.slice(0, 500))}
+                      rows={3}
+                      placeholder="Favorite team, colors to avoid, allergies, inside jokes, or delivery notes"
+                      className="field resize-y"
+                    />
+                  </Field>
+                </div>
               </div>
             </div>
           </div>
@@ -431,22 +547,28 @@ export default function HeSaidNothingStorefront() {
             <p className="mt-4 leading-7 text-black/60">We’ll make the basic option intentionally plain, not accidentally cheap. Premium presentation becomes an easy upsell.</p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
-            {["Ship It Like Nothing", "Make Nothing Look Expensive"].map((value) => (
+            {["Ship It Like Nothing", "Make Nothing Look Expensive"].map((value) => {
+              const premium = value === "Make Nothing Look Expensive";
+              const premiumUnavailable = premium && checkoutAvailability.premiumPackagingCents === null;
+              return (
               <button
                 key={value}
                 type="button"
                 onClick={() => setPackaging(value)}
-                className={`rounded-3xl border p-5 text-left transition ${packaging === value ? "border-[var(--hsn-accent)] bg-[var(--hsn-soft)] ring-2 ring-[var(--hsn-accent)]/15" : "border-black/10 bg-white"}`}
+                disabled={premiumUnavailable}
+                className={`rounded-3xl border p-5 text-left transition disabled:cursor-not-allowed disabled:opacity-55 ${packaging === value ? "border-[var(--hsn-accent)] bg-[var(--hsn-soft)] ring-2 ring-[var(--hsn-accent)]/15" : "border-black/10 bg-white"}`}
               >
                 <Package className="h-7 w-7 text-[var(--hsn-accent)]" />
                 <div className="mt-3 font-black">{value}</div>
                 <p className="mt-2 text-sm leading-6 text-black/55">
                   {value === "Ship It Like Nothing"
                     ? "Plain-on-purpose box, branded seal, and the joke doing the work."
-                    : "Gift-ready presentation with nicer tissue, ribbon/bow, and premium reveal."}
+                    : premiumUnavailable
+                      ? "Premium presentation will open after its final price is locked."
+                      : `Gift-ready tissue, ribbon/bow, and premium reveal — $${((checkoutAvailability.premiumPackagingCents ?? 0) / 100).toFixed(2)}.`}
                 </p>
               </button>
-            ))}
+            )})}
           </div>
         </div>
       </section>
@@ -468,11 +590,39 @@ export default function HeSaidNothingStorefront() {
             </div>
             <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
               <WandSparkles className="h-8 w-8 text-[var(--hsn-soft)]" />
-              <div className="mt-3 text-xl font-black">Checkout is intentionally off for now.</div>
-              <p className="mt-3 text-sm leading-6 text-white/65">We’re locking the first real box contents, costs, shipping, and fulfillment before taking money. The storefront experience can still go live early for indexing and testing.</p>
-              <button type="button" disabled className="mt-5 w-full cursor-not-allowed rounded-2xl bg-white/15 px-5 py-4 font-black text-white/60">
-                Ordering opens after prototype validation
-              </button>
+              <div className="mt-3 text-xl font-black">
+                {checkoutVisible
+                  ? testCheckoutMode
+                    ? "Stripe test checkout is ready."
+                    : "Ready to send him Nothing?"
+                  : "Checkout is safely closed for now."}
+              </div>
+              <p className="mt-3 text-sm leading-6 text-white/65">
+                {checkoutVisible
+                  ? `${shippingLabel ?? "Shipping"} is added separately. Stripe securely collects payment and the delivery address.`
+                  : "The page is public for testing and indexing. Ordering opens only after shipping, durable orders, merchant access, and the payment test are all configured."}
+              </p>
+              {checkoutVisible ? (
+                <button
+                  type="button"
+                  onClick={startCheckout}
+                  disabled={checkoutStatus === "creating" || checkoutStatus === "redirecting"}
+                  className="mt-5 w-full rounded-2xl bg-[var(--hsn-soft)] px-5 py-4 font-black text-[var(--hsn-deep)] transition hover:brightness-105 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {checkoutStatus === "creating"
+                    ? "Building your order…"
+                    : checkoutStatus === "redirecting"
+                      ? "Opening secure checkout…"
+                      : testCheckoutMode
+                        ? "Run Stripe test checkout"
+                        : `Checkout — $${selected.price}${shippingLabel ? ` + ${shippingLabel}` : ""}`}
+                </button>
+              ) : (
+                <button type="button" disabled className="mt-5 w-full cursor-not-allowed rounded-2xl bg-white/15 px-5 py-4 font-black text-white/60">
+                  Ordering opens after payment verification
+                </button>
+              )}
+              {checkoutError ? <p className="mt-3 text-sm font-bold text-red-300" aria-live="polite">{checkoutError}</p> : null}
               {pilotMode && (
                 <div className="mt-5 border-t border-white/10 pt-5" aria-live="polite">
                   <div className="text-xs font-black uppercase tracking-[.18em] text-[var(--hsn-soft)]">Private pilot tool</div>
@@ -522,6 +672,16 @@ export default function HeSaidNothingStorefront() {
           <Trust icon={<Sparkles className="h-5 w-5" />} title="Easy to buy" text="A few answers, one clear recommendation, and no endless catalog browsing." />
         </div>
       </section>
+
+      <footer className="border-t border-black/10 bg-[var(--hsn-paper)] px-5 py-8 text-sm text-black/55">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4">
+          <div className="font-black text-[var(--hsn-ink)]">HE SAID NOTHING</div>
+          <div className="flex flex-wrap gap-5">
+            <Link href="/he-said-nothing/policies" className="font-semibold hover:text-[var(--hsn-accent)]">Shipping, returns & privacy</Link>
+            <Link href="/he-said-nothing/admin" className="font-semibold hover:text-[var(--hsn-accent)]">Merchant sign in</Link>
+          </div>
+        </div>
+      </footer>
 
       <style jsx global>{`
         .field {

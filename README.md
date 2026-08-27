@@ -60,6 +60,19 @@ The order pipeline and released-schema `get_order` adapter also exist, but `get_
 - Paid Checkout line items are normalized into durable order records when VibeCart Cloud forwarding is configured.
 - Trusted merchant product IDs survive Checkout through Stripe Product metadata.
 
+### He Said Nothing physical-store pilot
+
+`/he-said-nothing` is the controlled physical-product pilot for the $39, $59, and $89 mystery gift boxes. The storefront can remain public while ordering fails closed. When the full launch gate is configured it:
+
+- saves the relationship quiz, sizing clues, packaging choice, gift message, and fulfillment note in a durable cart
+- opens a cart-bound, idempotent Stripe Checkout Session
+- collects email, phone, shipping address, a separately disclosed shipping charge, and optional Stripe automatic tax
+- stores the verified paid order, line items, delivery details, gift clues, and event history in Neon
+- exposes paid orders only through the HMAC-signed merchant session at `/he-said-nothing/admin`
+- supports the fulfillment states New, Packing, Shipped, Cancelled, and Refunded-in-Stripe
+
+The checkout gate requires every dependency in `.env.example`; `HSN_CHECKOUT_ENABLED=true` alone is insufficient. Test and live Stripe keys must match `HSN_CHECKOUT_MODE`, and live mode additionally requires customer-support, return-policy, and processing-time text.
+
 ## Merchant catalog source
 
 The built-in `lib/products.ts` catalog is **demo/reference data only**. A real merchant can keep SKUs and prices outside VibeCart and point Core at a merchant-controlled HTTPS JSON feed:
