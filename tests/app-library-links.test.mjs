@@ -16,3 +16,17 @@ test("short-link redirects record privacy-minimized analytics without blocking r
   assert.doesNotMatch(route, /x-forwarded-for|x-real-ip/i)
   assert.doesNotMatch(store, /ip_address|raw_ip/i)
 })
+
+test("link analytics are entitlement-gated and scoped to the requesting account", async () => {
+  const store = await readFile("lib/app-library.ts", "utf8")
+  const route = await readFile("app/api/apps/links/[id]/analytics/route.ts", "utf8")
+
+  assert.match(store, /WHERE id = \$\{shortLinkId\} AND account_key = \$\{account\}/)
+  assert.match(store, /COUNT\(\*\)::int AS total_clicks/)
+  assert.match(store, /GROUP BY country_code/)
+  assert.match(store, /GROUP BY device_type/)
+  assert.match(route, /hasAppAccess\(account, APP_KEY\)/)
+  assert.match(route, /getShortLinkAnalytics\(account, shortLinkId\)/)
+  assert.match(route, /status: 403/)
+  assert.match(route, /status: 404/)
+})
