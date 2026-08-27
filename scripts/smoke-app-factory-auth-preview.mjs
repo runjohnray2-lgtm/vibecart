@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto"
 
+// Exercises the deployed preview through the same VibeCart auth endpoint used by the browser form.
 const baseUrl = process.env.VIBECART_SMOKE_BASE_URL
 if (!baseUrl) throw new Error("VIBECART_SMOKE_BASE_URL is required")
 const origin = new URL(baseUrl).origin
