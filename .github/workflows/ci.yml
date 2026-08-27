@@ -122,7 +122,10 @@ jobs:
           ucp-schema validate /tmp/vibecart-ucp-payloads/order-unavailable.json --schema .ucp-spec/source/schemas/shopping/types/error_response.json --response --op read --schema-local-base .ucp-spec/source/schemas --schema-remote-base https://ucp.dev/schemas --json
 
       - name: Inspect MCP production transport
-        run: npx --yes @modelcontextprotocol/inspector@latest --cli http://127.0.0.1:3000/mcp --transport http --method tools/list
+        # 0.16.8 is the last known-good v1 CLI release for this Node 20 workflow.
+        # The current v2 Inspector requires Node >=22.19 and is intentionally not
+        # pulled through @latest so CI cannot break from upstream engine drift.
+        run: npx --yes @modelcontextprotocol/inspector@0.16.8 --cli http://127.0.0.1:3000/mcp --transport http --method tools/list
 
       - name: Show server log on failure
         if: failure()
