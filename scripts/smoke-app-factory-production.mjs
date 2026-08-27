@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto"
 
+// This script intentionally exercises the deployed production app, not a preview.
 const baseUrl = process.env.VIBECART_SMOKE_BASE_URL || "https://vibecart.vercel.app"
 const stamp = `${Date.now()}-${randomBytes(4).toString("hex")}`
 const email = `appfactory-smoke-${stamp}@example.com`
