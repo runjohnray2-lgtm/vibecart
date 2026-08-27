@@ -4,6 +4,13 @@ import { FormEvent, Suspense, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { authClient } from "@/lib/auth/client"
 
+const DEFAULT_AFTER_AUTH = "/apps/links"
+
+function safeNextPath(value: string | null): string {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return DEFAULT_AFTER_AUTH
+  return value
+}
+
 export default function SignInPage() {
   return (
     <Suspense fallback={<SignInFallback />}>
@@ -15,7 +22,7 @@ export default function SignInPage() {
 function SignInForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const next = searchParams.get("next") || "/apps/links"
+  const next = safeNextPath(searchParams.get("next"))
   const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in")
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
