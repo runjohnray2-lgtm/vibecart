@@ -1,12 +1,12 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
-import { auth } from "@/lib/auth/server"
+import { getAuth } from "@/lib/auth/server"
 import { LinkManager } from "@/components/link-manager"
 
 export const dynamic = "force-dynamic"
 
 export default async function LinksAppPage() {
-  const { data } = await auth.getSession()
+  const { data } = await getAuth().getSession()
   if (!data?.user) redirect("/auth/sign-in?next=/apps/links")
 
   return (
