@@ -1,5 +1,6 @@
 import Stripe from "stripe"
 import { buildNormalizedOrder, type NormalizedOrder } from "@/lib/orders"
+import { getCart } from "@/lib/cart-store"
 
 const CLOUD_TIMEOUT_MS = 5_000
 
@@ -63,6 +64,21 @@ export async function forwardVerifiedCheckoutEvent(
     return { configured: true, delivered: false, retryable: true, reason: "order_normalization" }
   }
 
+  let merchantId = session.metadata?.vibecart_merchant_id?.trim() || "default"
+  let metadata: Record<string, string> = {}
+  if (order.cartId) {
+    try {
+      const cart = await getCart(order.cartId, merchantId)
+      if (cart) {
+        merchantId = cart.merchantId
+        metadata = cart.metadata
+      }
+    } catch (error) {
+      console.warn(`[vibecart cloud] Could not load cart metadata for ${order.cartId}`, error)
+      return { configured: true, delivered: false, retryable: true, reason: "order_normalization" }
+    }
+  }
+
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), CLOUD_TIMEOUT_MS)
 
@@ -84,6 +100,8 @@ export async function forwardVerifiedCheckoutEvent(
         currency: session.currency ?? "",
         productId: session.metadata?.vibecart_product_id ?? "",
         quantity: metadataQuantity(session),
+        merchantId,
+        metadata,
         createdAt: eventCreatedAt(event),
         order,
       }),

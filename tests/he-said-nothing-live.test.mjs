@@ -1,0 +1,92 @@
+import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
+import test from "node:test"
+
+test("He Said Nothing checkout fails closed until the whole paid-order path is configured", async () => {
+  const config = await readFile("lib/he-said-nothing-config.ts", "utf8")
+  assert.match(config, /HSN_CHECKOUT_ENABLED/)
+  assert.match(config, /HSN_CHECKOUT_MODE/)
+  assert.match(config, /stripeKeyMatchesMode/)
+  assert.match(config, /VIBECART_CLOUD_INGEST_URL/)
+  assert.match(config, /VIBECART_CLOUD_INGEST_KEY/)
+  assert.match(config, /VIBECART_ORDER_PERMALINK_TEMPLATE/)
+  assert.match(config, /admin_auth_missing/)
+  assert.match(config, /return_policy_missing/)
+  assert.match(config, /processing_time_missing/)
+})
+
+test("physical box checkout collects delivery facts and uses one cart-bound Stripe session", async () => {
+  const checkout = await readFile("app/api/checkout/route.ts", "utf8")
+  assert.match(checkout, /shipping_address_collection/)
+  assert.match(checkout, /phone_number_collection/)
+  assert.match(checkout, /shipping_options/)
+  assert.match(checkout, /automatic_tax/)
+  assert.match(checkout, /customer_creation/)
+  assert.match(checkout, /cartMatchesCheckout/)
+  assert.match(checkout, /vibecart_store: isHsnCheckout \? "he-said-nothing"/)
+  assert.match(checkout, /idempotencyKey: `vibecart-cart-\$\{cartId\}`/)
+  assert.match(checkout, /markCartConverted/)
+})
+
+test("paid order normalization preserves shipping, tax, contact, and Stripe payment identity", async () => {
+  const orders = await readFile("lib/orders.ts", "utf8")
+  assert.match(orders, /collected_information\?\.shipping_details/)
+  assert.match(orders, /stripePaymentIntentId/)
+  assert.match(orders, /customerPhone/)
+  assert.match(orders, /amountShipping/)
+  assert.match(orders, /amountTax/)
+  assert.match(orders, /postalCode/)
+})
+
+test("verified Cloud ingest writes idempotent durable orders, lines, and events", async () => {
+  const migration = await readFile("migrations/005_durable_orders.sql", "utf8")
+  const store = await readFile("lib/order-store.ts", "utf8")
+  const ingest = await readFile("app/api/cloud/ingest/[integrationId]/route.ts", "utf8")
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS vibecart_orders/)
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS vibecart_order_lines/)
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS vibecart_order_events/)
+  assert.match(migration, /checkout_session_id text NOT NULL UNIQUE/)
+  assert.match(store, /ON CONFLICT \(checkout_session_id\) DO UPDATE/)
+  assert.match(store, /ON CONFLICT \(order_id, line_item_id\) DO UPDATE/)
+  assert.match(store, /ON CONFLICT \(id\) DO NOTHING/)
+  assert.match(ingest, /cloudIntegrationAuthorized/)
+  assert.match(ingest, /storeVerifiedOrder/)
+})
+
+test("merchant fulfillment is cookie-protected and keeps an order status history", async () => {
+  const auth = await readFile("lib/hsn-admin-auth.ts", "utf8")
+  const list = await readFile("app/he-said-nothing/admin/page.tsx", "utf8")
+  const detail = await readFile("app/he-said-nothing/admin/orders/[id]/page.tsx", "utf8")
+  const status = await readFile("app/api/he-said-nothing/admin/orders/[id]/status/route.ts", "utf8")
+  const store = await readFile("lib/order-store.ts", "utf8")
+  assert.match(auth, /createHmac\("sha256"/)
+  assert.match(auth, /timingSafeEqual/)
+  assert.match(list, /verifyHsnAdminSession/)
+  assert.match(detail, /Refund the payment in Stripe before marking/)
+  assert.match(status, /hsnAdminRequestAuthorized/)
+  assert.match(store, /fulfillment_status_changed/)
+})
+
+test("the storefront creates a durable paid cart and preserves the gift clues", async () => {
+  const page = await readFile("app/he-said-nothing/page.tsx", "utf8")
+  assert.match(page, /he-said-nothing-stripe-test/)
+  assert.match(page, /he-said-nothing-web/)
+  assert.match(page, /gift_message: giftMessage\.trim\(\)/)
+  assert.match(page, /fulfillment_note: specialNotes\.trim\(\)/)
+  assert.match(page, /fetch\(`\/api\/cart\/\$\{cartResult\.cart\.id\}\/checkout`/)
+  assert.match(page, /window\.location\.assign\(checkoutResult\.checkoutUrl\)/)
+  assert.doesNotMatch(page, /fetch\("\/api\/checkout"/)
+})
+
+test("the branded domain rewrites only the storefront root and publishes canonical crawl files", async () => {
+  const middleware = await readFile("middleware.ts", "utf8")
+  const layout = await readFile("app/he-said-nothing/layout.tsx", "utf8")
+  const sitemap = await readFile("app/he-said-nothing/sitemap.ts", "utf8")
+  const robots = await readFile("app/he-said-nothing/robots.ts", "utf8")
+  assert.match(middleware, /HSN_APEX_HOST = "hesaidnothing\.com"/)
+  assert.match(middleware, /destination\.pathname = "\/he-said-nothing"/)
+  assert.match(middleware, /NextResponse\.rewrite/)
+  assert.match(layout, /alternates: \{ canonical: "https:\/\/hesaidnothing\.com" \}/)
+  assert.match(sitemap, /https:\/\/hesaidnothing\.com/)
+  assert.match(robots, /disallow: \["\/he-said-nothing\/admin", "\/api\/"\]/)
+})

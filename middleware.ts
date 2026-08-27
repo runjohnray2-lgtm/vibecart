@@ -26,6 +26,47 @@ interface RpcEnvelope {
   params?: { name?: string }
 }
 
+const HSN_APEX_HOST = "hesaidnothing.com"
+const HSN_WWW_HOST = "www.hesaidnothing.com"
+
+function hostname(req: NextRequest): string {
+  return (req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "")
+    .split(",")[0]
+    .trim()
+    .split(":")[0]
+    .toLowerCase()
+}
+
+function brandedSiteRouting(req: NextRequest): NextResponse | null {
+  const host = hostname(req)
+  if (host !== HSN_APEX_HOST && host !== HSN_WWW_HOST) return null
+
+  if (host === HSN_WWW_HOST) {
+    const canonical = req.nextUrl.clone()
+    canonical.protocol = "https:"
+    canonical.host = HSN_APEX_HOST
+    return NextResponse.redirect(canonical, 308)
+  }
+
+  const path = req.nextUrl.pathname
+  if (path === "/") {
+    const destination = req.nextUrl.clone()
+    destination.pathname = "/he-said-nothing"
+    return NextResponse.rewrite(destination)
+  }
+  if (path === "/he-said-nothing") {
+    const canonical = req.nextUrl.clone()
+    canonical.pathname = "/"
+    return NextResponse.redirect(canonical, 308)
+  }
+  if (path === "/robots.txt" || path === "/sitemap.xml") {
+    const destination = req.nextUrl.clone()
+    destination.pathname = `/he-said-nothing${path}`
+    return NextResponse.rewrite(destination)
+  }
+  return null
+}
+
 function hostedModeEnabled() {
   return process.env.VIBECART_HOSTED_MODE?.trim().toLowerCase() === "true"
 }
@@ -74,6 +115,10 @@ async function rpcEnvelope(req: NextRequest): Promise<RpcEnvelope | null> {
 
 async function classifyRateLimit(req: NextRequest): Promise<{ policy: RateLimitPolicy; rpcId?: RpcEnvelope["id"] } | null> {
   const path = req.nextUrl.pathname
+
+  if (path === "/api/he-said-nothing/admin/login" && req.method === "POST") {
+    return { policy: RATE_LIMIT_POLICIES.commerceWrite }
+  }
 
   if (path === "/api/checkout" && req.method === "POST") {
     return { policy: RATE_LIMIT_POLICIES.checkout }
@@ -159,6 +204,9 @@ function rateFailure(req: NextRequest, result: RateLimitResult, rpcId?: RpcEnvel
 }
 
 export async function middleware(req: NextRequest) {
+  const brandedRoute = brandedSiteRouting(req)
+  if (brandedRoute) return brandedRoute
+
   const authFailure = await hostedMerchantAuthFailure(req)
   if (authFailure) return authFailure
 
@@ -174,11 +222,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    "/mcp",
-    "/ucp/mcp",
-    "/api/checkout",
-    "/api/cart",
-    "/api/cart/:path*",
-  ],
+  matcher: "/:path*",
 }
