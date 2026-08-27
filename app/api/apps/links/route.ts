@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/lib/auth/server"
+import { getAuth } from "@/lib/auth/server"
 import { createShortLink, ensureInitialAppTrial, hasAppAccess, listShortLinks } from "@/lib/app-library"
 
 const APP_KEY = "links"
 
 async function authenticatedAccount(): Promise<string | null> {
-  const { data } = await auth.getSession()
+  const { data } = await getAuth().getSession()
   return data?.user?.id ? String(data.user.id) : null
 }
 
