@@ -25,7 +25,7 @@ export async function GET(
     }
 
     const userAgent = request.headers.get("user-agent")
-    void recordShortLinkEvent({
+    await recordShortLinkEvent({
       shortLinkId: link.id,
       referrer: request.headers.get("referer"),
       userAgent,
