@@ -1,0 +1,21 @@
+name: App Factory Auth Preview Smoke
+
+on:
+  push:
+    branches:
+      - agent/app-factory-auth-hotfix
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+      - name: Exercise auth hotfix preview
+        env:
+          VIBECART_SMOKE_BASE_URL: https://vibecart-git-agent-app-factory-auth-hotfix-promptmeter.vercel.app
+        run: node scripts/smoke-app-factory-auth-preview.mjs
