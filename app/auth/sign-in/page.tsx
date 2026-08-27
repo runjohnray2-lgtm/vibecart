@@ -1,10 +1,18 @@
 "use client"
 
-import { FormEvent, useState } from "react"
+import { FormEvent, Suspense, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { authClient } from "@/lib/auth/client"
 
 export default function SignInPage() {
+  return (
+    <Suspense fallback={<SignInFallback />}>
+      <SignInForm />
+    </Suspense>
+  )
+}
+
+function SignInForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const next = searchParams.get("next") || "/apps/links"
@@ -68,6 +76,16 @@ export default function SignInPage() {
         <button onClick={() => setMode(mode === "sign-in" ? "sign-up" : "sign-in")} className="mt-4 text-sm text-emerald-400 hover:text-emerald-300">
           {mode === "sign-in" ? "Need an account? Create one" : "Already have an account? Sign in"}
         </button>
+      </div>
+    </main>
+  )
+}
+
+function SignInFallback() {
+  return (
+    <main className="min-h-screen bg-neutral-950 px-6 py-14 text-neutral-100">
+      <div className="mx-auto max-w-md rounded-2xl border border-neutral-800 bg-neutral-900 p-6 text-neutral-400">
+        Loading sign in…
       </div>
     </main>
   )
