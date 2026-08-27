@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createShortLink, hasAppAccess, listShortLinks } from "@/lib/app-library"
+import { withUtmParameters } from "@/lib/utm"
 
 const APP_KEY = "links"
 
@@ -27,10 +28,17 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
+    const destinationUrl = withUtmParameters(String(body.destinationUrl ?? ""), {
+      source: body.utmSource == null ? undefined : String(body.utmSource),
+      medium: body.utmMedium == null ? undefined : String(body.utmMedium),
+      campaign: body.utmCampaign == null ? undefined : String(body.utmCampaign),
+      term: body.utmTerm == null ? undefined : String(body.utmTerm),
+      content: body.utmContent == null ? undefined : String(body.utmContent),
+    })
     const link = await createShortLink({
       accountKey: account,
       slug: String(body.slug ?? ""),
-      destinationUrl: String(body.destinationUrl ?? ""),
+      destinationUrl,
       title: body.title == null ? undefined : String(body.title),
     })
     return NextResponse.json({ link }, { status: 201 })
