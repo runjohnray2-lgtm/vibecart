@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto"
 
 // This script intentionally exercises the deployed production app, not a preview.
 const baseUrl = process.env.VIBECART_SMOKE_BASE_URL || "https://vibecart.vercel.app"
+const origin = new URL(baseUrl).origin
 const stamp = `${Date.now()}-${randomBytes(4).toString("hex")}`
 const email = `appfactory-smoke-${stamp}@example.com`
 const password = `VibeCart-${randomBytes(18).toString("base64url")}!9`
@@ -29,6 +30,10 @@ function cookieHeader() {
 async function request(path, options = {}) {
   const headers = new Headers(options.headers || {})
   if (cookieJar.size) headers.set("cookie", cookieHeader())
+  if (options.method && options.method !== "GET" && options.method !== "HEAD") {
+    headers.set("origin", origin)
+    headers.set("referer", `${origin}/`)
+  }
   const response = await fetch(new URL(path, baseUrl), { ...options, headers })
   absorbCookies(response)
   return response
