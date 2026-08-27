@@ -1,6 +1,6 @@
 "use client"
 
-import { FormEvent, useEffect, useMemo, useState } from "react"
+import { FormEvent, useEffect, useState } from "react"
 import QRCode from "react-qr-code"
 import { Copy, Download, ExternalLink, Link2, Plus } from "lucide-react"
 
@@ -36,7 +36,7 @@ export function LinkManager() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const origin = useMemo(() => typeof window === "undefined" ? "" : window.location.origin, [])
+  const [origin, setOrigin] = useState("")
 
   async function load() {
     setLoading(true)
@@ -53,7 +53,10 @@ export function LinkManager() {
     }
   }
 
-  useEffect(() => { void load() }, [])
+  useEffect(() => {
+    setOrigin(window.location.origin)
+    void load()
+  }, [])
 
   function update(name: keyof typeof form, value: string) {
     setForm(current => ({ ...current, [name]: value }))
@@ -142,7 +145,7 @@ export function LinkManager() {
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
             {links.map(link => {
-              const shortUrl = `${origin}/r/${link.slug}`
+              const shortUrl = origin ? `${origin}/r/${link.slug}` : `/r/${link.slug}`
               return (
                 <article key={link.id} className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
                   <div className="flex gap-4">
