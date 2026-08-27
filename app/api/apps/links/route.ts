@@ -1,17 +1,23 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createShortLink, hasAppAccess, listShortLinks } from "@/lib/app-library"
+import { auth } from "@/lib/auth/server"
+import { createShortLink, ensureInitialAppTrial, hasAppAccess, listShortLinks } from "@/lib/app-library"
 
 const APP_KEY = "links"
 
-function accountKey(req: NextRequest): string | null {
-  const value = req.headers.get("x-vibecart-account")?.trim()
-  return value || null
+async function authenticatedAccount(): Promise<string | null> {
+  const { data } = await auth.getSession()
+  return data?.user?.id ? String(data.user.id) : null
 }
 
-export async function GET(req: NextRequest) {
-  const account = accountKey(req)
-  if (!account) return NextResponse.json({ error: "Missing VibeCart account" }, { status: 401 })
-  if (!(await hasAppAccess(account, APP_KEY))) {
+async function ensureAccess(account: string): Promise<boolean> {
+  await ensureInitialAppTrial(account, APP_KEY)
+  return hasAppAccess(account, APP_KEY)
+}
+
+export async function GET() {
+  const account = await authenticatedAccount()
+  if (!account) return NextResponse.json({ error: "Sign in required" }, { status: 401 })
+  if (!(await ensureAccess(account))) {
     return NextResponse.json({ error: "Link Manager entitlement required" }, { status: 403 })
   }
   const links = await listShortLinks(account)
@@ -19,9 +25,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const account = accountKey(req)
-  if (!account) return NextResponse.json({ error: "Missing VibeCart account" }, { status: 401 })
-  if (!(await hasAppAccess(account, APP_KEY))) {
+  const account = await authenticatedAccount()
+  if (!account) return NextResponse.json({ error: "Sign in required" }, { status: 401 })
+  if (!(await ensureAccess(account))) {
     return NextResponse.json({ error: "Link Manager entitlement required" }, { status: 403 })
   }
 
@@ -32,6 +38,11 @@ export async function POST(req: NextRequest) {
       slug: String(body.slug ?? ""),
       destinationUrl: String(body.destinationUrl ?? ""),
       title: body.title == null ? undefined : String(body.title),
+      utmSource: body.utmSource == null ? undefined : String(body.utmSource),
+      utmMedium: body.utmMedium == null ? undefined : String(body.utmMedium),
+      utmCampaign: body.utmCampaign == null ? undefined : String(body.utmCampaign),
+      utmTerm: body.utmTerm == null ? undefined : String(body.utmTerm),
+      utmContent: body.utmContent == null ? undefined : String(body.utmContent),
     })
     return NextResponse.json({ link }, { status: 201 })
   } catch (error) {
