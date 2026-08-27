@@ -1,0 +1,23 @@
+name: App Factory Production Smoke
+
+on:
+  push:
+    branches:
+      - agent/app-factory-production-smoke
+
+jobs:
+  production-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Use Node.js 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+      - name: Exercise live App Factory user flow
+        env:
+          VIBECART_SMOKE_BASE_URL: https://vibecart.vercel.app
+        run: node scripts/smoke-app-factory-production.mjs
