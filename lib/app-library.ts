@@ -30,6 +30,14 @@ export interface ShortLinkEventInput {
   deviceType?: string | null
 }
 
+export interface ShortLinkAnalytics {
+  shortLinkId: number
+  totalClicks: number
+  lastClickedAt: string | null
+  countries: Array<{ countryCode: string; clicks: number }>
+  devices: Array<{ deviceType: string; clicks: number }>
+}
+
 function databaseUrl(): string {
   const value = process.env.DATABASE_URL ?? process.env.POSTGRES_URL
   if (!value) throw new Error("VibeCart app-library storage is not configured")
@@ -171,4 +179,51 @@ export async function recordShortLinkEvent(input: ShortLinkEventInput): Promise<
     INSERT INTO short_link_events (short_link_id, referrer, user_agent, country_code, device_type)
     VALUES (${shortLinkId}, ${referrer}, ${userAgent}, ${countryCode}, ${deviceType})
   `
+}
+
+export async function getShortLinkAnalytics(accountKey: string, shortLinkIdValue: number): Promise<ShortLinkAnalytics | null> {
+  const account = validAccountKey(accountKey)
+  const shortLinkId = Math.trunc(shortLinkIdValue)
+  if (!Number.isSafeInteger(shortLinkId) || shortLinkId < 1) throw new Error("Invalid short-link id")
+
+  const links = await sql()`
+    SELECT id
+    FROM short_links
+    WHERE id = ${shortLinkId} AND account_key = ${account}
+    LIMIT 1
+  `
+  if (!links[0]) return null
+
+  const [summaryRows, countryRows, deviceRows] = await Promise.all([
+    sql()`
+      SELECT COUNT(*)::int AS total_clicks, MAX(created_at) AS last_clicked_at
+      FROM short_link_events
+      WHERE short_link_id = ${shortLinkId}
+    `,
+    sql()`
+      SELECT country_code, COUNT(*)::int AS clicks
+      FROM short_link_events
+      WHERE short_link_id = ${shortLinkId} AND country_code IS NOT NULL
+      GROUP BY country_code
+      ORDER BY clicks DESC, country_code ASC
+      LIMIT 20
+    `,
+    sql()`
+      SELECT device_type, COUNT(*)::int AS clicks
+      FROM short_link_events
+      WHERE short_link_id = ${shortLinkId} AND device_type IS NOT NULL
+      GROUP BY device_type
+      ORDER BY clicks DESC, device_type ASC
+      LIMIT 20
+    `,
+  ])
+
+  const summary = summaryRows[0]
+  return {
+    shortLinkId,
+    totalClicks: Number(summary?.total_clicks ?? 0),
+    lastClickedAt: iso((summary?.last_clicked_at as string | Date | null | undefined) ?? null),
+    countries: countryRows.map(row => ({ countryCode: String(row.country_code), clicks: Number(row.clicks) })),
+    devices: deviceRows.map(row => ({ deviceType: String(row.device_type), clicks: Number(row.clicks) })),
+  }
 }
