@@ -30,3 +30,19 @@ test("link analytics are entitlement-gated and scoped to the requesting account"
   assert.match(route, /status: 403/)
   assert.match(route, /status: 404/)
 })
+
+test("link creation supports standard UTM parameters through the shared URL builder", async () => {
+  const utm = await readFile("lib/utm.ts", "utf8")
+  const route = await readFile("app/api/apps/links/route.ts", "utf8")
+
+  for (const key of ["utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content"]) {
+    assert.match(utm, new RegExp(key))
+  }
+  assert.match(utm, /url\.searchParams\.set/)
+  assert.match(route, /withUtmParameters/)
+  assert.match(route, /utmSource/)
+  assert.match(route, /utmMedium/)
+  assert.match(route, /utmCampaign/)
+  assert.match(route, /utmTerm/)
+  assert.match(route, /utmContent/)
+})
