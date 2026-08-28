@@ -88,6 +88,20 @@ function normalizedCountryCode(value: string | null | undefined): string | null 
   return code && /^[A-Z]{2}$/.test(code) ? code : null
 }
 
+function shortLinkFromRow(row: Record<string, unknown>): ShortLink {
+  return {
+    id: Number(row.id),
+    accountKey: String(row.account_key),
+    slug: String(row.slug),
+    destinationUrl: String(row.destination_url),
+    title: row.title ? String(row.title) : null,
+    isActive: Boolean(row.is_active),
+    expiresAt: iso(row.expires_at as string | Date | null),
+    createdAt: iso(row.created_at as string | Date)!,
+    updatedAt: iso(row.updated_at as string | Date)!,
+  }
+}
+
 export async function hasAppAccess(accountKey: string, appKey: string): Promise<boolean> {
   const rows = await sql()`
     SELECT status, starts_at, ends_at
@@ -113,17 +127,7 @@ export async function listShortLinks(accountKey: string, limit = 100): Promise<S
     ORDER BY created_at DESC
     LIMIT ${safeLimit}
   `
-  return rows.map(row => ({
-    id: Number(row.id),
-    accountKey: String(row.account_key),
-    slug: String(row.slug),
-    destinationUrl: String(row.destination_url),
-    title: row.title ? String(row.title) : null,
-    isActive: Boolean(row.is_active),
-    expiresAt: iso(row.expires_at as string | Date | null),
-    createdAt: iso(row.created_at as string | Date)!,
-    updatedAt: iso(row.updated_at as string | Date)!,
-  }))
+  return rows.map(row => shortLinkFromRow(row as Record<string, unknown>))
 }
 
 export async function createShortLink(input: {
@@ -141,13 +145,40 @@ export async function createShortLink(input: {
     VALUES (${accountKey}, ${slug}, ${destinationUrl}, ${title})
     RETURNING id, account_key, slug, destination_url, title, is_active, expires_at, created_at, updated_at
   `
-  const row = rows[0]
-  return {
-    id: Number(row.id), accountKey: String(row.account_key), slug: String(row.slug),
-    destinationUrl: String(row.destination_url), title: row.title ? String(row.title) : null,
-    isActive: Boolean(row.is_active), expiresAt: iso(row.expires_at as string | Date | null),
-    createdAt: iso(row.created_at as string | Date)!, updatedAt: iso(row.updated_at as string | Date)!,
+  return shortLinkFromRow(rows[0] as Record<string, unknown>)
+}
+
+export async function updateShortLink(input: {
+  accountKey: string
+  id: number
+  destinationUrl?: string
+  title?: string | null
+  isActive?: boolean
+}): Promise<ShortLink | null> {
+  const accountKey = validAccountKey(input.accountKey)
+  const id = Math.trunc(input.id)
+  if (!Number.isSafeInteger(id) || id < 1) throw new Error("Invalid short-link id")
+  if (input.destinationUrl === undefined && input.title === undefined && input.isActive === undefined) {
+    throw new Error("No short-link changes supplied")
   }
+
+  const destinationUrl = input.destinationUrl === undefined ? null : validDestinationUrl(input.destinationUrl)
+  const title = input.title === undefined ? null : input.title?.trim().slice(0, 200) || null
+  const hasDestination = input.destinationUrl !== undefined
+  const hasTitle = input.title !== undefined
+  const hasActive = input.isActive !== undefined
+  const isActive = input.isActive ?? false
+
+  const rows = await sql()`
+    UPDATE short_links
+    SET destination_url = CASE WHEN ${hasDestination} THEN ${destinationUrl} ELSE destination_url END,
+        title = CASE WHEN ${hasTitle} THEN ${title} ELSE title END,
+        is_active = CASE WHEN ${hasActive} THEN ${isActive} ELSE is_active END,
+        updated_at = NOW()
+    WHERE id = ${id} AND account_key = ${accountKey}
+    RETURNING id, account_key, slug, destination_url, title, is_active, expires_at, created_at, updated_at
+  `
+  return rows[0] ? shortLinkFromRow(rows[0] as Record<string, unknown>) : null
 }
 
 export async function resolveShortLink(slugValue: string): Promise<{ id: number; destinationUrl: string } | null> {
