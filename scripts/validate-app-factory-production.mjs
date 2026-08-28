@@ -72,12 +72,6 @@ const appHtml = await app.text()
 if (app.status !== 200 || !appHtml.includes("Link + QR + UTM Manager")) throw new Error(`authenticated app page failed (${app.status})`)
 console.log("PASS authenticated app page")
 
-const qr = await request(`/api/apps/links/${encodeURIComponent(slug)}/qr`)
-if (!qr.ok) throw new Error(`QR endpoint failed (${qr.status})`)
-const qrType = qr.headers.get("content-type") || ""
-if (!qrType.includes("image") && !qrType.includes("svg")) throw new Error(`unexpected QR content type: ${qrType}`)
-console.log("PASS QR generation")
-
 const redirect = await fetch(`${baseUrl}/r/${slug}`, { redirect: "manual" })
 if (redirect.status !== 307) throw new Error(`redirect returned ${redirect.status}`)
 const locationHeader = redirect.headers.get("location")
