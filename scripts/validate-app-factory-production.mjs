@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto"
 
+// Production launch gate for the first App Factory product.
 const baseUrl = "https://vibecart.vercel.app"
 const origin = new URL(baseUrl).origin
 const stamp = `${Date.now()}-${randomBytes(4).toString("hex")}`
