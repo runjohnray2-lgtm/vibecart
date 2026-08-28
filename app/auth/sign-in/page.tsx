@@ -2,7 +2,6 @@
 
 import { FormEvent, Suspense, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { authClient } from "@/lib/auth/client"
 
 const DEFAULT_AFTER_AUTH = "/apps/links"
 
@@ -35,12 +34,14 @@ function SignInForm() {
     setBusy(true)
     setError(null)
     try {
-      const result = mode === "sign-in"
-        ? await authClient.signIn.email({ email, password })
-        : await authClient.signUp.email({ email, password, name: name || email.split("@")[0] })
-
-      if (result.error) {
-        setError(result.error.message || "Authentication failed")
+      const response = await fetch("/api/apps/auth", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode, email, password, name }),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        setError(result.error || "Authentication failed")
         return
       }
       router.push(next)
