@@ -46,3 +46,19 @@ test("link creation supports standard UTM parameters through the shared URL buil
   assert.match(route, /utmTerm/)
   assert.match(route, /utmContent/)
 })
+
+test("short-link editing is entitlement-gated, account-scoped, and keeps public slugs stable", async () => {
+  const store = await readFile("lib/app-library.ts", "utf8")
+  const route = await readFile("app/api/apps/links/[id]/route.ts", "utf8")
+
+  assert.match(store, /UPDATE short_links/)
+  assert.match(store, /WHERE id = \$\{id\} AND account_key = \$\{accountKey\}/)
+  assert.match(store, /destination_url = CASE WHEN/)
+  assert.match(store, /is_active = CASE WHEN/)
+  assert.match(route, /hasAppAccess\(account, APP_KEY\)/)
+  assert.match(route, /updateShortLink/)
+  assert.match(route, /withUtmParameters/)
+  assert.match(route, /status: 403/)
+  assert.match(route, /status: 404/)
+  assert.doesNotMatch(route, /slug:/)
+})
