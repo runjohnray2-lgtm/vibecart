@@ -3,6 +3,7 @@ import { getAuth } from "@/lib/auth/server"
 import { createShortLink, ensureInitialAppTrial, hasAppAccess, listShortLinks } from "@/lib/app-library"
 
 const APP_KEY = "links"
+const ALL_APPS_KEY = "all-apps"
 
 async function authenticatedAccount(): Promise<string | null> {
   const { data } = await getAuth().getSession()
@@ -11,6 +12,7 @@ async function authenticatedAccount(): Promise<string | null> {
 
 async function ensureAccess(account: string): Promise<boolean> {
   await ensureInitialAppTrial(account, APP_KEY)
+  if (await hasAppAccess(account, ALL_APPS_KEY)) return true
   return hasAppAccess(account, APP_KEY)
 }
 
