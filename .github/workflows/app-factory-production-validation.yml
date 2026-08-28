@@ -8,12 +8,18 @@ on:
 jobs:
   validate-production:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: 20
           package-manager-cache: false
-      - name: Exercise live first-app user flow
+      - name: Exercise live first-app backend flow
         run: node scripts/validate-app-factory-production.mjs
+      - name: Install browser test runtime
+        run: |
+          npm install --no-save @playwright/test@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Exercise live first-app browser flow
+        run: node scripts/validate-app-factory-browser.mjs
