@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { Link2, Sparkles } from "lucide-react"
+import { AppFactorySubscribeButton } from "@/components/app-factory-subscribe-button"
 
 const apps = [
   {
@@ -21,8 +22,17 @@ export default function AppLibraryPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-400">App Factory</p>
             <h1 className="mt-3 text-5xl font-bold leading-tight md:text-6xl">One account. A growing library of useful apps.</h1>
             <p className="mt-4 max-w-3xl text-lg leading-8 text-neutral-400">
-              VibeCart App Factory bundles focused web tools behind one shared account and entitlement system. We launch useful apps first, measure usage, then expand the library.
+              VibeCart App Factory bundles focused web tools behind one shared account and entitlement system. Start with a 7-day first-use trial, then one subscription keeps the whole library unlocked.
             </p>
+          </div>
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-900 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="font-semibold">All-app access</p>
+                <p className="mt-1 text-sm text-neutral-400">One Stripe subscription unlocks every current and future App Factory tool included in the plan.</p>
+              </div>
+              <AppFactorySubscribeButton />
+            </div>
           </div>
         </header>
 
@@ -43,7 +53,7 @@ export default function AppLibraryPage() {
           })}
 
           <div className="rounded-2xl border border-dashed border-neutral-800 bg-neutral-900/40 p-6 text-neutral-500">
-            <div className="rounded-xl bg-neutral-800 p-3 text-neutral-400 w-fit"><Sparkles size={24} /></div>
+            <div className="w-fit rounded-xl bg-neutral-800 p-3 text-neutral-400"><Sparkles size={24} /></div>
             <h2 className="mt-6 text-xl font-semibold text-neutral-300">More apps after usage data</h2>
             <p className="mt-2 text-sm leading-6">The factory expands from evidence instead of filling the library with weak tools.</p>
           </div>
