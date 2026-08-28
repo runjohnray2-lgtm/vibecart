@@ -1,0 +1,19 @@
+name: App Factory Production Validation
+
+on:
+  push:
+    branches:
+      - agent/app-factory-production-validation
+
+jobs:
+  validate-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+      - name: Exercise live first-app user flow
+        run: node scripts/validate-app-factory-production.mjs
