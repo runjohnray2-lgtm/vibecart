@@ -27,3 +27,25 @@ test("uptime monitor validates targets and bounded check settings", async () => 
   assert.match(migration, /timeout_ms BETWEEN 1000 AND 30000/)
   assert.match(migration, /expected_status BETWEEN 100 AND 599/)
 })
+
+test("uptime checker blocks private-network SSRF and revalidates redirects", async () => {
+  const store = await readFile("lib/uptime.ts", "utf8")
+
+  assert.match(store, /lookup\(hostname, \{ all: true, verbatim: true \}\)/)
+  assert.match(store, /Private network targets are not allowed/)
+  assert.match(store, /hostname === "localhost"/)
+  assert.match(store, /a === 10/)
+  assert.match(store, /a === 192 && b === 168/)
+  assert.match(store, /redirect: "manual"/)
+  assert.match(store, /current = await assertPublicTarget\(new URL\(location, current\)\.toString\(\)\)/)
+})
+
+test("uptime checker selects due monitors and persists every result", async () => {
+  const store = await readFile("lib/uptime.ts", "utf8")
+
+  assert.match(store, /last_checked_at <= NOW\(\) - \(interval_seconds \* INTERVAL '1 second'\)/)
+  assert.match(store, /INSERT INTO uptime_check_events/)
+  assert.match(store, /UPDATE uptime_monitors/)
+  assert.match(store, /runDueUptimeChecks/)
+  assert.match(store, /await persistCheckResult\(result\)/)
+})
