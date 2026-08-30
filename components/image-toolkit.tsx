@@ -18,7 +18,7 @@ type ProcessedImage = {
   id: string
   sourceName: string
   url: string
-  blob: Blob
+  format: OutputFormat
   width: number
   height: number
   bytesBefore: number
@@ -108,6 +108,26 @@ export function ImageToolkit() {
     })
   }
 
+  function changeResizeMode(value: ResizeMode) {
+    setResizeMode(value)
+    clearResults()
+  }
+
+  function changeResizeValue(value: number) {
+    setResizeValue(value)
+    clearResults()
+  }
+
+  function changeFormat(value: OutputFormat) {
+    setFormat(value)
+    clearResults()
+  }
+
+  function changeQuality(value: number) {
+    setQuality(value)
+    clearResults()
+  }
+
   function removeSource(id: string) {
     setSources(current => {
       const match = current.find(item => item.id === id)
@@ -147,6 +167,7 @@ export function ImageToolkit() {
     setError(null)
     clearResults()
     const finished: ProcessedImage[] = []
+    const processedFormat = format
 
     try {
       for (const source of sources) {
@@ -158,7 +179,7 @@ export function ImageToolkit() {
         const ctx = canvas.getContext("2d")
         if (!ctx) throw new Error("Your browser could not start the image processor.")
 
-        if (format === "image/jpeg") {
+        if (processedFormat === "image/jpeg") {
           ctx.fillStyle = "#ffffff"
           ctx.fillRect(0, 0, target.width, target.height)
         }
@@ -168,13 +189,13 @@ export function ImageToolkit() {
         bitmap.close()
 
         const blob = await new Promise<Blob>((resolve, reject) => {
-          canvas.toBlob(value => value ? resolve(value) : reject(new Error(`Could not export ${source.file.name}.`)), format, quality / 100)
+          canvas.toBlob(value => value ? resolve(value) : reject(new Error(`Could not export ${source.file.name}.`)), processedFormat, quality / 100)
         })
         finished.push({
           id: source.id,
           sourceName: source.file.name,
           url: URL.createObjectURL(blob),
-          blob,
+          format: processedFormat,
           width: target.width,
           height: target.height,
           bytesBefore: source.file.size,
@@ -193,7 +214,7 @@ export function ImageToolkit() {
   function download(result: ProcessedImage) {
     const anchor = document.createElement("a")
     anchor.href = result.url
-    anchor.download = `${safeBaseName(result.sourceName)}-vibecart.${extensionFor(format)}`
+    anchor.download = `${safeBaseName(result.sourceName)}-vibecart.${extensionFor(result.format)}`
     document.body.appendChild(anchor)
     anchor.click()
     anchor.remove()
@@ -243,10 +264,10 @@ export function ImageToolkit() {
           <div className="flex items-center gap-3"><div className="rounded-xl bg-cyan-500/10 p-2.5 text-cyan-300"><ImageDown size={20} /></div><div><h2 className="font-semibold">Output settings</h2><p className="text-xs text-neutral-500">One set of settings for the whole batch</p></div></div>
 
           <div className="mt-6 space-y-5">
-            <label className="block"><span className="mb-2 block text-sm font-medium">Resize</span><select value={resizeMode} onChange={event => setResizeMode(event.target.value as ResizeMode)} className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2.5 text-sm"><option value="original">Keep original dimensions</option><option value="width">Set width, keep aspect ratio</option><option value="height">Set height, keep aspect ratio</option><option value="percent">Scale by percent</option></select></label>
-            {resizeMode !== "original" && <label className="block"><span className="mb-2 block text-sm font-medium">{resizeMode === "percent" ? "Scale percent" : `${resizeMode[0].toUpperCase()}${resizeMode.slice(1)} in pixels`}</span><input type="number" min="1" max={resizeMode === "percent" ? 400 : 12000} value={resizeValue} onChange={event => setResizeValue(Number(event.target.value))} className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2.5 text-sm" /></label>}
-            <label className="block"><span className="mb-2 block text-sm font-medium">Convert to</span><select value={format} onChange={event => setFormat(event.target.value as OutputFormat)} className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2.5 text-sm"><option value="image/webp">WebP — smallest modern format</option><option value="image/jpeg">JPG — universal compatibility</option><option value="image/png">PNG — lossless / transparency</option></select></label>
-            {format !== "image/png" && <label className="block"><span className="mb-2 flex justify-between text-sm font-medium"><span>Quality</span><span className="text-neutral-400">{quality}%</span></span><input type="range" min="30" max="100" value={quality} onChange={event => setQuality(Number(event.target.value))} className="w-full accent-cyan-400" /></label>}
+            <label className="block"><span className="mb-2 block text-sm font-medium">Resize</span><select value={resizeMode} onChange={event => changeResizeMode(event.target.value as ResizeMode)} className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2.5 text-sm"><option value="original">Keep original dimensions</option><option value="width">Set width, keep aspect ratio</option><option value="height">Set height, keep aspect ratio</option><option value="percent">Scale by percent</option></select></label>
+            {resizeMode !== "original" && <label className="block"><span className="mb-2 block text-sm font-medium">{resizeMode === "percent" ? "Scale percent" : `${resizeMode[0].toUpperCase()}${resizeMode.slice(1)} in pixels`}</span><input type="number" min="1" max={resizeMode === "percent" ? 400 : 12000} value={resizeValue} onChange={event => changeResizeValue(Number(event.target.value))} className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2.5 text-sm" /></label>}
+            <label className="block"><span className="mb-2 block text-sm font-medium">Convert to</span><select value={format} onChange={event => changeFormat(event.target.value as OutputFormat)} className="w-full rounded-xl border border-neutral-700 bg-neutral-950 px-3 py-2.5 text-sm"><option value="image/webp">WebP — smallest modern format</option><option value="image/jpeg">JPG — universal compatibility</option><option value="image/png">PNG — lossless / transparency</option></select></label>
+            {format !== "image/png" && <label className="block"><span className="mb-2 flex justify-between text-sm font-medium"><span>Quality</span><span className="text-neutral-400">{quality}%</span></span><input type="range" min="30" max="100" value={quality} onChange={event => changeQuality(Number(event.target.value))} className="w-full accent-cyan-400" /></label>}
           </div>
 
           <button disabled={!sources.length || processing} onClick={processAll} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 py-3 font-semibold text-neutral-950 hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-40">{processing ? <><Loader2 className="animate-spin" size={18} /> Processing locally…</> : <><FileImage size={18} /> Process {sources.length || ""} image{sources.length === 1 ? "" : "s"}</>}</button>
@@ -259,7 +280,7 @@ export function ImageToolkit() {
         {results.length > 0 && (
           <div className="rounded-3xl border border-neutral-800 bg-neutral-900 p-5">
             <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">Ready to download</h2><p className="text-sm text-neutral-500">{humanBytes(totalBefore)} → {humanBytes(totalAfter)} · {totalBefore > 0 ? Math.round((1 - totalAfter / totalBefore) * 100) : 0}% size change</p></div><button onClick={downloadAll} className="flex items-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-sm font-medium text-cyan-200 hover:bg-cyan-500/20"><Download size={16} /> Download all</button></div>
-            <div className="mt-4 space-y-3">{results.map(result => <div key={result.id} className="flex items-center gap-3 rounded-2xl border border-neutral-800 bg-neutral-950/60 p-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-800 text-cyan-300"><FileImage size={19} /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{safeBaseName(result.sourceName)}-vibecart.{extensionFor(format)}</p><p className="text-xs text-neutral-500">{result.width}×{result.height} · {humanBytes(result.bytesAfter)}</p></div><button onClick={() => download(result)} className="rounded-lg p-2 text-cyan-300 hover:bg-cyan-500/10" aria-label={`Download ${result.sourceName}`}><Download size={18} /></button></div>)}</div>
+            <div className="mt-4 space-y-3">{results.map(result => <div key={result.id} className="flex items-center gap-3 rounded-2xl border border-neutral-800 bg-neutral-950/60 p-3"><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-800 text-cyan-300"><FileImage size={19} /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{safeBaseName(result.sourceName)}-vibecart.{extensionFor(result.format)}</p><p className="text-xs text-neutral-500">{result.width}×{result.height} · {humanBytes(result.bytesAfter)}</p></div><button onClick={() => download(result)} className="rounded-lg p-2 text-cyan-300 hover:bg-cyan-500/10" aria-label={`Download ${result.sourceName}`}><Download size={18} /></button></div>)}</div>
           </div>
         )}
       </section>
