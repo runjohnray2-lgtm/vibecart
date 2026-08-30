@@ -15,5 +15,6 @@ jobs:
         with:
           node-version: 20
       - run: npm install --no-audit --no-fund --legacy-peer-deps
+      - run: npm install --no-save --legacy-peer-deps playwright@1.62.1
       - run: npx playwright install --with-deps chromium
-      - run: npx -y -p playwright node scripts/smoke-app2-production.mjs
+      - run: node scripts/smoke-app2-production.mjs
