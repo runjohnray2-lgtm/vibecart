@@ -14,9 +14,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm install --no-save @playwright/test@1.55.0
+          package-manager-cache: false
+      - run: npm install --no-audit --no-fund
+      - run: npm install --no-save --no-audit --no-fund @playwright/test@1.55.0
       - run: npx playwright install --with-deps chromium
       - name: Validate live PDF Toolkit customer flow
         run: |
@@ -95,7 +95,7 @@ jobs:
 
             await browser.close();
             console.log(JSON.stringify({ ok: true, email, app: 'PDF Toolkit' }));
-          })().catch(async err => {
+          })().catch(err => {
             console.error(err);
             process.exit(1);
           });
