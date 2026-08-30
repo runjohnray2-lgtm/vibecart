@@ -1,0 +1,102 @@
+name: App 3 Production Validation
+
+on:
+  push:
+    branches:
+      - agent/app3-production-validation
+
+jobs:
+  browser-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save @playwright/test@1.55.0
+      - run: npx playwright install --with-deps chromium
+      - name: Validate live PDF Toolkit customer flow
+        run: |
+          node <<'EOF'
+          const { chromium } = require('@playwright/test');
+          const { PDFDocument } = require('pdf-lib');
+          const fs = require('fs');
+
+          const base = 'https://vibecart.vercel.app';
+          const stamp = Date.now();
+          const email = `appfactory-pdf-${stamp}@example.com`;
+          const password = `PdfSmoke-${stamp}-A!`;
+
+          async function makePdf(path, pages) {
+            const pdf = await PDFDocument.create();
+            for (let i = 0; i < pages; i++) pdf.addPage([300 + i * 10, 400 + i * 10]);
+            fs.writeFileSync(path, await pdf.save());
+          }
+
+          (async () => {
+            await makePdf('/tmp/a.pdf', 2);
+            await makePdf('/tmp/b.pdf', 1);
+
+            const browser = await chromium.launch();
+            const context = await browser.newContext({ acceptDownloads: true });
+            const page = await context.newPage();
+
+            await page.goto(`${base}/auth/sign-in?next=/apps/pdf`, { waitUntil: 'networkidle' });
+            await page.getByRole('button', { name: 'Need an account? Create one' }).click();
+            await page.getByText('Create your account').waitFor();
+            await page.getByLabel('Name').fill('App Factory PDF QA');
+            await page.getByLabel('Email').fill(email);
+            await page.getByLabel('Password').fill(password);
+            await Promise.all([
+              page.waitForURL('**/apps/pdf', { timeout: 30000 }),
+              page.getByRole('button', { name: 'Create account' }).click(),
+            ]);
+
+            await page.getByRole('heading', { name: 'PDF Toolkit' }).waitFor();
+            console.log('PASS browser account creation and PDF app entry');
+
+            const fileInput = page.locator('input[type=file]');
+            await fileInput.setInputFiles(['/tmp/a.pdf', '/tmp/b.pdf']);
+            await page.getByText('a.pdf').waitFor();
+            await page.getByText('b.pdf').waitFor();
+
+            const mergeDownload = page.waitForEvent('download');
+            await page.getByRole('button', { name: 'Merge & download' }).click();
+            const merged = await mergeDownload;
+            const mergedPath = await merged.path();
+            if (!mergedPath) throw new Error('Merged PDF download path missing');
+            const mergedPdf = await PDFDocument.load(fs.readFileSync(mergedPath));
+            if (mergedPdf.getPageCount() !== 3) throw new Error(`Expected merged PDF to have 3 pages, got ${mergedPdf.getPageCount()}`);
+            console.log('PASS merge PDFs and download');
+
+            await page.getByLabel('Pages to extract').fill('2');
+            const extractDownload = page.waitForEvent('download');
+            await page.getByRole('button', { name: 'Extract & download' }).click();
+            const extracted = await extractDownload;
+            const extractedPath = await extracted.path();
+            if (!extractedPath) throw new Error('Extracted PDF download path missing');
+            const extractedPdf = await PDFDocument.load(fs.readFileSync(extractedPath));
+            if (extractedPdf.getPageCount() !== 1) throw new Error(`Expected extracted PDF to have 1 page, got ${extractedPdf.getPageCount()}`);
+            console.log('PASS extract selected pages');
+
+            await page.getByLabel('Rotate page 1').click();
+            await page.getByLabel('Move page 2 left').click();
+            const organizedDownload = page.waitForEvent('download');
+            await page.getByRole('button', { name: 'Download organized PDF' }).click();
+            const organized = await organizedDownload;
+            const organizedPath = await organized.path();
+            if (!organizedPath) throw new Error('Organized PDF download path missing');
+            const organizedPdf = await PDFDocument.load(fs.readFileSync(organizedPath));
+            if (organizedPdf.getPageCount() !== 2) throw new Error(`Expected organized PDF to have 2 pages, got ${organizedPdf.getPageCount()}`);
+            console.log('PASS rotate/reorder and organized download');
+
+            await browser.close();
+            console.log(JSON.stringify({ ok: true, email, app: 'PDF Toolkit' }));
+          })().catch(async err => {
+            console.error(err);
+            process.exit(1);
+          });
+          EOF
