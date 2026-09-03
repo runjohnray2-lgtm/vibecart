@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { LegalPage } from "@/components/legal-page"
 
 export default function SupportPage() {
@@ -17,15 +18,15 @@ export default function SupportPage() {
       <section className="space-y-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-5">
         <h2 className="text-xl font-semibold text-neutral-100">Need VibeCart set up or managed for you?</h2>
         <p>
-          Businesses can request managed hosting or done-for-you help with installation, Stripe
-          configuration, webhook setup, authentication integration, and production checkout troubleshooting.
+          Businesses can request done-for-you help with installation, Stripe configuration, webhook setup,
+          authentication integration, fulfillment handoff, and production checkout troubleshooting.
         </p>
-        <a
+        <Link
           className="inline-flex rounded-lg bg-emerald-500 px-4 py-2 font-semibold text-neutral-950 hover:bg-emerald-400"
-          href="https://github.com/runjohnray2-lgtm/vibecart/issues/new?title=VibeCart%20Cloud%20managed%20setup"
+          href="/setup"
         >
-          Request setup or managed hosting
-        </a>
+          See Done-for-you Setup
+        </Link>
       </section>
       <p>Never include card numbers, Stripe secret keys, webhook secrets, or other credentials in an issue.</p>
     </LegalPage>
