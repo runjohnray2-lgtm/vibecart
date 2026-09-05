@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS source_rows (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id uuid NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
   import_id uuid NOT NULL REFERENCES source_imports(id) ON DELETE CASCADE,
+  source_system text NOT NULL,
   source_record_id text,
   row_number integer NOT NULL CHECK (row_number > 0),
   raw_data jsonb NOT NULL,
@@ -62,7 +63,7 @@ CREATE TABLE IF NOT EXISTS source_rows (
   UNIQUE (import_id, row_number)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS source_rows_record_dedupe_idx
-  ON source_rows (business_id, source_record_id)
+  ON source_rows (business_id, source_system, source_record_id)
   WHERE source_record_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS business_customers (
