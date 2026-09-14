@@ -22,9 +22,10 @@ test("verified Stripe webhook handles subscription lifecycle events", () => {
   assert.match(webhook, /setAllAppsAccess\(accountKey, accessStatus/)
 })
 
-test("subscription status mapping grants active access and removes canceled access", () => {
+test("subscription status mapping grants active access, pauses non-good-standing access, and removes canceled access", () => {
   assert.match(billing, /status === "active" \|\| status === "trialing"\) return "active"/)
   assert.match(billing, /status === "canceled" \|\| status === "incomplete_expired"\) return "expired"/)
+  assert.match(billing, /return "paused"/)
   assert.match(webhook, /customer\.subscription\.deleted"\s*\?\s*"expired"/)
 })
 
