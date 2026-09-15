@@ -1,5 +1,6 @@
 import Link from "next/link"
 import { FileText, Images, Link2, Sparkles } from "lucide-react"
+import { AppFactorySubscribeButton } from "@/components/app-factory-subscribe-button"
 
 const apps = [
   {
@@ -66,6 +67,19 @@ export default function AppLibraryPage() {
             </p>
           </div>
         </header>
+
+        <section className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 md:flex md:items-center md:justify-between md:gap-8">
+          <div className="max-w-2xl">
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-300">All-app subscription</p>
+            <h2 className="mt-2 text-2xl font-semibold">Unlock the App Factory with one subscription.</h2>
+            <p className="mt-2 text-sm leading-6 text-neutral-300">
+              Start with the live Link and Image tools, get access to the PDF beta, and keep access as new App Factory tools are added to the shared entitlement.
+            </p>
+          </div>
+          <div className="mt-5 shrink-0 md:mt-0">
+            <AppFactorySubscribeButton />
+          </div>
+        </section>
 
         <section className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
           {apps.map(app => {
