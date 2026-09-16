@@ -12,6 +12,12 @@ test("subscription checkout derives account identity from authenticated session"
   assert.doesNotMatch(checkout, /req\.json\(\)/)
 })
 
+test("subscription checkout keeps return destinations server-controlled", () => {
+  assert.match(checkout, /success_url:\s*`\$\{baseUrl\}\/apps\?subscription=success`/)
+  assert.match(checkout, /cancel_url:\s*`\$\{baseUrl\}\/apps\?subscription=cancelled`/)
+  assert.doesNotMatch(checkout, /return_url|redirect_url|successUrl|cancelUrl/)
+})
+
 test("subscription entitlement sync occurs only after Stripe signature verification", () => {
   const verification = webhook.indexOf("stripe.webhooks.constructEvent")
   const sync = webhook.indexOf("await syncAppFactorySubscription(event)")
