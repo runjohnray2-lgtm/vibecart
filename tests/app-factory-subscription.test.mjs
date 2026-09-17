@@ -6,6 +6,14 @@ const checkout = fs.readFileSync("app/api/apps/subscribe/route.ts", "utf8")
 const webhook = fs.readFileSync("app/api/webhook/stripe/route.ts", "utf8")
 const billing = fs.readFileSync("lib/app-factory-billing.ts", "utf8")
 
+test("App Factory checkout fails closed when billing configuration is missing", () => {
+  assert.match(checkout, /process\.env\.STRIPE_SECRET_KEY/)
+  assert.match(checkout, /process\.env\.APP_FACTORY_STRIPE_PRICE_ID\?\.trim\(\)/)
+  assert.match(checkout, /if \(!secretKey \|\| !priceId\)/)
+  assert.match(checkout, /App Factory billing is not configured/)
+  assert.match(checkout, /status:\s*501/)
+})
+
 test("App Factory checkout stamps account metadata onto Stripe subscription", () => {
   assert.match(checkout, /mode:\s*"subscription"/)
   assert.match(checkout, /vibecart_product:\s*"app-factory-all-access"/)
