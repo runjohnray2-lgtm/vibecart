@@ -263,7 +263,7 @@ function catalogFailure(error: unknown) {
 }
 
 async function listAgentVisibleProducts(): Promise<VibeProduct[]> {
-  const products = await listAgentVisibleProducts()
+  const products = await listCatalogProducts()
   if (catalogSourceMode() !== "reference" || hsnCheckoutReadiness().enabled) return products
   return products.filter(product => !isHsnProductId(product.id))
 }
@@ -334,7 +334,7 @@ async function normalizeCheckoutItems(args: Record<string, unknown>): Promise<{ 
 async function callTool(req: Request, name: string, args: Record<string, unknown>) {
   if (name === "vibecart.list_products") {
     try {
-      const products = await listCatalogProducts()
+      const products = await listAgentVisibleProducts()
       return completeToolResult(
         {
           success: true,
