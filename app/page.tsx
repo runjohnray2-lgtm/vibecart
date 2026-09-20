@@ -55,12 +55,12 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <a
-              href={cloudUrl}
+            <Link
+              href="/founding-merchant"
               className="rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-neutral-950 transition hover:bg-emerald-400"
             >
-              Start VibeCart Cloud — $29/month
-            </a>
+              Founding Merchant — $199 setup + $29/month
+            </Link>
             <Link
               href="/start"
               className="rounded-lg border border-neutral-700 px-5 py-3 font-semibold text-neutral-100 transition hover:border-neutral-500"
@@ -163,9 +163,9 @@ export default function Home() {
               <p className="mt-4 text-3xl font-bold">$29<span className="text-base font-normal text-neutral-400"> / month</span></p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <a href={cloudUrl} className="rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-neutral-950 hover:bg-emerald-400">
-                Open Cloud workspace
-              </a>
+              <Link href="/founding-merchant" className="rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-neutral-950 hover:bg-emerald-400">
+                Start Founding Merchant setup
+              </Link>
               <Link href="/cloud" className="rounded-lg border border-emerald-500/50 px-5 py-3 font-semibold text-emerald-200 hover:bg-emerald-500/10">
                 Compare options
               </Link>
