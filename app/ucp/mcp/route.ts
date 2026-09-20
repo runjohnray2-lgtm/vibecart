@@ -1,7 +1,7 @@
 import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
 import { NextResponse } from "next/server"
-import { CatalogSourceError, configuredMerchantName, listCatalogProducts } from "@/lib/catalog-source"
+import { CatalogSourceError, catalogSourceMode, configuredMerchantName, listCatalogProducts } from "@/lib/catalog-source"
 import type { VibeProduct } from "@/lib/products"
 import { getUcpOrder, ucpOrderRuntimeConfigured } from "@/lib/ucp-order-service"
 import {
@@ -12,7 +12,7 @@ import {
   ucpCartRuntimeConfigured,
   type UcpCartServiceResult,
 } from "@/lib/ucp-cart-service"
-import { mapCartErrorToUcp } from "@/lib/ucp-cart"
+import { mapCartErrorToUcp } from "@/lib/ucp-cart"\nimport { hsnCheckoutReadiness, isHsnProductId } from "@/lib/he-said-nothing-config"
 
 export const runtime = "nodejs"
 
@@ -79,6 +79,12 @@ function catalogResultError(capability: string, error: CatalogSourceError) {
       severity: recoverable ? "recoverable" : "unrecoverable",
     }],
   })
+}
+
+async function listAgentVisibleProducts(): Promise<VibeProduct[]> {
+  const products = await listAgentVisibleProducts()
+  if (catalogSourceMode() !== "reference" || hsnCheckoutReadiness().enabled) return products
+  return products.filter(product => !isHsnProductId(product.id))
 }
 
 function asUcpProduct(product: VibeProduct) {
@@ -384,7 +390,7 @@ export async function POST(req: Request) {
     let page: { offset: number; limit: number }
     try { page = searchPage(input.pagination) } catch (error) { return rpcError(message.id, -32602, error instanceof Error ? error.message : "invalid pagination") }
     try {
-      const catalogProducts = await listCatalogProducts()
+      const catalogProducts = await listAgentVisibleProducts()
       const query = typeof input.query === "string" ? input.query.trim().toLowerCase() : ""
       const matches = catalogProducts.filter(p => !query || `${p.name} ${p.description} ${p.variant ?? ""}`.toLowerCase().includes(query))
       const products = matches.slice(page.offset, page.offset + page.limit)
@@ -404,7 +410,7 @@ export async function POST(req: Request) {
     if (input.ids.some(id => typeof id !== "string" || id.trim().length === 0)) return rpcError(message.id, -32602, "catalog.ids must contain only non-empty strings")
     const ids = input.ids as string[]
     try {
-      const catalogProducts = await listCatalogProducts()
+      const catalogProducts = await listAgentVisibleProducts()
       const byId = new Map(catalogProducts.map(product => [product.id, product]))
       const found = ids.map(id => byId.get(id)).filter((p): p is VibeProduct => Boolean(p))
       const missing = ids.filter(id => !byId.has(id))
@@ -419,7 +425,7 @@ export async function POST(req: Request) {
   if (typeof input.id !== "string" || input.id.trim().length === 0) return rpcError(message.id, -32602, "catalog.id must be a non-empty string")
   const id = input.id
   try {
-    const catalogProducts = await listCatalogProducts()
+    const catalogProducts = await listAgentVisibleProducts()
     const product = catalogProducts.find(candidate => candidate.id === id)
     if (!product) return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY, "error"), messages: [{ type: "error", code: "not_found", content: `Product not found: ${id}`, severity: "unrecoverable" }] }))
     return rpc(message.id, structured({ ucp: ucp(LOOKUP_CAPABILITY), product: asUcpProduct(product) }))
