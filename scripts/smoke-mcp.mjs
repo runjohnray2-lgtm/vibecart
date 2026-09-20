@@ -53,18 +53,19 @@ const toolNames = listed.tools?.map(tool => tool.name) ?? []
 for (const expected of [
   "vibecart.list_products",
   "vibecart.get_product",
+  "vibecart.get_merchant",
   "vibecart.get_integration_instructions",
   "vibecart.create_checkout",
 ]) {
   assert(toolNames.includes(expected), `Missing MCP tool: ${expected}`)
 }
-assert(toolNames.length === 4, `Expected exactly four commerce tools, found ${toolNames.length}`)
+assert(toolNames.length === 5, `Expected exactly five commerce tools, found ${toolNames.length}`)
 for (const tool of listed.tools) {
   assert(tool.title && tool.description, `${tool.name} is missing review metadata`)
   assert(tool.inputSchema && tool.outputSchema, `${tool.name} is missing an explicit schema`)
   assert(tool.annotations, `${tool.name} is missing annotations`)
 }
-for (const name of ["vibecart.get_product", "vibecart.create_checkout"]) {
+for (const name of ["vibecart.get_product", "vibecart.get_merchant", "vibecart.create_checkout"]) {
   const tool = listed.tools.find(candidate => candidate.name === name)
   assert(tool.outputSchema.type === "object", `${name} outputSchema must have top-level object type`)
   assert(!tool.outputSchema.oneOf && !tool.outputSchema.anyOf, `${name} outputSchema must not use a top-level union`)

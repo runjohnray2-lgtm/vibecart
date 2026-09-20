@@ -14,5 +14,5 @@ test("quickstart exposes canonical adoption paths", async () => {
   assert.match(start, /Start Cloud — \$29\/month/)
   assert.match(start, /Self-host Core/)
   assert.match(home, /href="\/start"/)
-  assert.match(home, /Official MCP Registry \+ released UCP/)
+  assert.match(home, /MCP Registry \+ released UCP/)
 })
