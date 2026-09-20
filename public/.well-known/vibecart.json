@@ -1,6 +1,6 @@
 {
   "name": "VibeCart",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Protocol-first commerce adapter for custom/headless Stripe storefronts, with trusted catalog pricing, durable multi-item carts, and hosted checkout.",
   "homepage": "https://vibecart.vercel.app",
   "mcp": {
@@ -19,6 +19,7 @@
   "capabilities": [
     "list_products",
     "get_product",
+    "get_merchant",
     "get_integration_instructions",
     "create_checkout",
     "durable_multi_item_cart",
@@ -41,7 +42,8 @@
     "inventory management is not a VibeCart platform service",
     "automatic shipping-rate calculation is not a VibeCart platform service",
     "returns/refunds lifecycle is not a complete VibeCart platform service",
-    "public UCP order lookup is advertised only when its Cloud and permalink dependencies are configured"
+    "public UCP order lookup is advertised only when its Cloud and permalink dependencies are configured",
+    "merchant-network profiles currently expose public identity/catalog discovery; agent-native machine payment handlers are not yet advertised"
   ],
   "cart": {
     "durable": true,
@@ -54,5 +56,10 @@
     "endpoint": "https://vibecart.vercel.app/ucp/mcp",
     "released_target": "2026-04-08"
   },
-  "readiness": "https://vibecart.vercel.app/api/agent-readiness"
+  "readiness": "https://vibecart.vercel.app/api/agent-readiness",
+  "network": {
+    "merchant_lookup": "https://vibecart.vercel.app/mcp",
+    "merchant_profiles": "VibeCart Cloud subscriber-gated public profiles",
+    "profile_tool": "vibecart.get_merchant"
+  }
 }
