@@ -82,7 +82,7 @@ function catalogResultError(capability: string, error: CatalogSourceError) {
 }
 
 async function listAgentVisibleProducts(): Promise<VibeProduct[]> {
-  const products = await listAgentVisibleProducts()
+  const products = await listCatalogProducts()
   if (catalogSourceMode() !== "reference" || hsnCheckoutReadiness().enabled) return products
   return products.filter(product => !isHsnProductId(product.id))
 }
