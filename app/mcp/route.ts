@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 import { CatalogSourceError, catalogSourceMode, listCatalogProducts } from "@/lib/catalog-source"
 import type { VibeProduct } from "@/lib/products"
-import { POST as checkoutPost } from "@/app/api/checkout/route"\nimport { hsnCheckoutReadiness, isHsnProductId } from "@/lib/he-said-nothing-config"
+import { POST as checkoutPost } from "@/app/api/checkout/route"
+import { hsnCheckoutReadiness, isHsnProductId } from "@/lib/he-said-nothing-config"
 
 export const runtime = "nodejs"
 
