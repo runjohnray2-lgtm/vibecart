@@ -2,8 +2,6 @@ import Link from "next/link"
 import { PRODUCTS } from "@/lib/products"
 import { VibeCartButton } from "@/components/vibe-cart-button"
 
-const cloudUrl = "https://vibecart-cloud-uupzkh.v2.appdeploy.ai/"
-
 const promises = [
   "One backend for every agent",
   "Durable multi-item cart",
