@@ -8,7 +8,7 @@ test("homepage sells the shipped agent-commerce platform rather than the old che
   const source = await readFile("app/page.tsx", "utf8")
   assert.match(source, /Agent commerce for custom storefronts that already use Stripe/)
   assert.match(source, /Durable multi-item cart/)
-  assert.match(source, /Official MCP Registry \+ released UCP/)
+  assert.match(source, /MCP Registry \+ released UCP/)
   assert.match(source, /trusted multi-item checkout/i)
   assert.doesNotMatch(source, /Deliberately not a commerce platform/)
   assert.doesNotMatch(source, /no shared multi-item cart/i)
