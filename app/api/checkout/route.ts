@@ -92,6 +92,15 @@ function untrustedPricingEnabled(): boolean {
   return process.env.VIBECART_ALLOW_UNTRUSTED_PRICING === "true"
 }
 
+function stripeSecretKey(): { value: string | null; validShape: boolean } {
+  const value = process.env.STRIPE_SECRET_KEY?.trim() ?? ""
+  if (!value) return { value: null, validShape: false }
+  return {
+    value,
+    validShape: value.startsWith("sk_") || value.startsWith("rk_"),
+  }
+}
+
 // Only allow redirecting back to the same origin the request came from by
 // default. A merchant CAN pass their own successUrl/cancelUrl, but it must
 // be same-origin — this prevents the checkout endpoint from being used as
@@ -234,7 +243,8 @@ export async function POST(req: Request) {
       ? `${origin}/he-said-nothing?checkout=cancelled`
       : safeRedirectUrl(body.cancelUrl, origin, "/?checkout=cancelled")
 
-    const secretKey = process.env.STRIPE_SECRET_KEY
+    const stripeCredential = stripeSecretKey()
+    const secretKey = stripeCredential.value
 
     // DEMO MODE — no Stripe key configured. Returns a fake session so the
     // integration can be tested end-to-end before a merchant connects a real
@@ -249,6 +259,14 @@ export async function POST(req: Request) {
         totalCents: total,
         untrustedPricing: resolved.some(r => !r.trusted),
       })
+    }
+
+    if (!stripeCredential.validShape) {
+      return err(
+        "STRIPE_KEY_INVALID",
+        "Stripe checkout is not configured correctly on this merchant. The server must use the Stripe secret/restricted key value, not an API-key ID.",
+        503
+      )
     }
 
     const stripe = new Stripe(secretKey)
@@ -350,6 +368,18 @@ export async function POST(req: Request) {
     if (error instanceof CatalogSourceError) {
       console.error(`[vibecart checkout] ${error.code}`, error.message)
       return err(error.code, "Trusted merchant catalog is unavailable. Retry after the merchant catalog is healthy.", 503)
+    }
+    if (error && typeof error === "object") {
+      const stripeError = error as { type?: unknown; code?: unknown; statusCode?: unknown }
+      const type = typeof stripeError.type === "string" ? stripeError.type : ""
+      if (type === "StripeAuthenticationError") {
+        console.error("[vibecart checkout] Stripe authentication failed")
+        return err("STRIPE_AUTHENTICATION_FAILED", "The merchant Stripe credential is invalid or expired.", 503)
+      }
+      if (type === "StripePermissionError") {
+        console.error("[vibecart checkout] Stripe permission denied")
+        return err("STRIPE_PERMISSION_DENIED", "The merchant Stripe credential does not allow Checkout Session creation.", 503)
+      }
     }
     console.error("[vibecart checkout] Internal checkout error", error)
     return err("INTERNAL_ERROR", "Checkout could not be created. Check server logs for details.", 500)
