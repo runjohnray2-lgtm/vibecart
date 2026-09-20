@@ -20,7 +20,7 @@ test("generic MCP multi-item checkout resolves products through the trusted cata
   const normalizeEnd = source.indexOf("async function callTool", normalizeStart)
   const normalize = source.slice(normalizeStart, normalizeEnd)
   assert.ok(normalizeStart >= 0)
-  assert.match(normalize, /await getCatalogProduct\(line\.productId\)/)
+  assert.match(normalize, /await getAgentVisibleProduct\(line\.productId\)/)
   assert.doesNotMatch(normalize, /priceCents|unitPrice|amount|price:/)
   assert.doesNotMatch(source, /allowInlineProduct|trustClientPrice|allowUntrustedPricing/)
   assert.doesNotMatch(source, /PRODUCTS|\bgetProduct\(/)
