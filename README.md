@@ -4,7 +4,7 @@
 
 VibeCart lets a merchant keep their existing app and Stripe account while adding a small, inspectable commerce layer that AI agents can discover and use. Payments settle directly to the merchant's Stripe account; VibeCart does not need to become merchant of record.
 
-The architecture is protocol-first: one trusted commerce backend, then thin MCP/UCP/client adapters around it.
+The architecture is protocol-first: one trusted commerce backend and merchant network, then thin MCP/UCP/client adapters around it.
 
 ## Live production surface
 
@@ -16,12 +16,19 @@ Tools:
 
 - `vibecart.list_products`
 - `vibecart.get_product`
+- `vibecart.get_merchant`
 - `vibecart.get_integration_instructions`
 - `vibecart.create_checkout`
 
 `vibecart.create_checkout` supports both the legacy single-product input and a trusted multi-item `items[]` input. Product prices are resolved on the server; callers do not supply real transaction prices.
 
 Generic MCP clients should use `/mcp`.
+
+### Merchant network
+
+`vibecart.get_merchant` resolves a subscriber-published VibeCart Cloud merchant by stable slug. The public profile contains only business identity, website, and an explicitly public catalog feed; it does not expose Stripe keys, catalog bearer tokens, Cloud integration keys, or fulfillment secrets.
+
+This is the first shared-network layer: generic MCP clients can learn the merchant identity through the same VibeCart endpoint instead of treating every merchant as a separate plugin. Remote merchant purchasing is still constrained by the payment/checkout capabilities VibeCart actually advertises; this merchant-profile release does not claim agent-native machine payment completion.
 
 ### Durable cart
 
