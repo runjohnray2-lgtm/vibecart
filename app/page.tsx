@@ -3,10 +3,10 @@ import { PRODUCTS } from "@/lib/products"
 import { VibeCartButton } from "@/components/vibe-cart-button"
 
 const promises = [
-  "One backend for every agent",
+  "Built for custom / headless stores",
   "Durable multi-item cart",
   "Merchant-owned Stripe account",
-  "Official MCP Registry + released UCP",
+  "MCP Registry + released UCP",
 ]
 
 const surfaces = [
@@ -45,10 +45,10 @@ export default function Home() {
 
           <div className="max-w-5xl space-y-5">
             <h1 className="text-5xl font-bold leading-[1.02] md:text-7xl">
-              Commerce infrastructure for AI-built apps and the agents that use them.
+              Agent commerce for custom storefronts that already use Stripe.
             </h1>
             <p className="max-w-3xl text-lg leading-8 text-neutral-400 md:text-xl">
-              Give every AI client one trusted commerce backend for catalog, cart, and checkout—without moving the merchant off their existing app or Stripe account.
+              Add a trusted catalog, durable cart, and Stripe Checkout path for AI clients through MCP and UCP—without migrating the store or rebuilding commerce logic for every agent.
             </p>
           </div>
 
