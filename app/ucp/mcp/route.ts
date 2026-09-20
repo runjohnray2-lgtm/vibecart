@@ -12,7 +12,8 @@ import {
   ucpCartRuntimeConfigured,
   type UcpCartServiceResult,
 } from "@/lib/ucp-cart-service"
-import { mapCartErrorToUcp } from "@/lib/ucp-cart"\nimport { hsnCheckoutReadiness, isHsnProductId } from "@/lib/he-said-nothing-config"
+import { mapCartErrorToUcp } from "@/lib/ucp-cart"
+import { hsnCheckoutReadiness, isHsnProductId } from "@/lib/he-said-nothing-config"
 
 export const runtime = "nodejs"
 
