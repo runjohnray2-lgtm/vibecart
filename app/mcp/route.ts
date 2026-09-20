@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
-import { CatalogSourceError, getCatalogProduct, listCatalogProducts } from "@/lib/catalog-source"
+import { CatalogSourceError, catalogSourceMode, listCatalogProducts } from "@/lib/catalog-source"
 import type { VibeProduct } from "@/lib/products"
-import { POST as checkoutPost } from "@/app/api/checkout/route"
+import { POST as checkoutPost } from "@/app/api/checkout/route"\nimport { hsnCheckoutReadiness, isHsnProductId } from "@/lib/he-said-nothing-config"
 
 export const runtime = "nodejs"
 
@@ -262,6 +262,17 @@ function catalogFailure(error: unknown) {
   return toolError("Trusted merchant catalog is unavailable. Retry after the merchant catalog is healthy.", error.code)
 }
 
+async function listAgentVisibleProducts(): Promise<VibeProduct[]> {
+  const products = await listAgentVisibleProducts()
+  if (catalogSourceMode() !== "reference" || hsnCheckoutReadiness().enabled) return products
+  return products.filter(product => !isHsnProductId(product.id))
+}
+
+async function getAgentVisibleProduct(productId: string): Promise<VibeProduct | null> {
+  const products = await listAgentVisibleProducts()
+  return products.find(product => product.id === productId) ?? null
+}
+
 function getStringArg(args: Record<string, unknown>, key: string): string | null {
   const value = args[key]
   return typeof value === "string" && value.length > 0 ? value : null
@@ -312,7 +323,7 @@ async function normalizeCheckoutItems(args: Record<string, unknown>): Promise<{ 
   const items = [...combined.entries()].map(([productId, quantity]) => ({ productId, quantity }))
   const products: VibeProduct[] = []
   for (const line of items) {
-    const product = await getCatalogProduct(line.productId)
+    const product = await getAgentVisibleProduct(line.productId)
     if (!product) throw new Error(`Unknown productId \"${line.productId}\". Call vibecart.list_products and retry with a returned ID.`)
     products.push(product)
   }
@@ -343,7 +354,7 @@ async function callTool(req: Request, name: string, args: Record<string, unknown
     if (!productId) return toolError("productId is required", "INVALID_ARGUMENT")
 
     try {
-      const product = await getCatalogProduct(productId)
+      const product = await getAgentVisibleProduct(productId)
       if (!product) {
         return toolError(
           `Unknown productId \"${productId}\". Call vibecart.list_products and retry with a returned ID.`,
