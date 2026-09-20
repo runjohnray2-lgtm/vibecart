@@ -53,5 +53,6 @@
     "discovery": "https://vibecart.vercel.app/.well-known/ucp",
     "endpoint": "https://vibecart.vercel.app/ucp/mcp",
     "released_target": "2026-04-08"
-  }
+  },
+  "readiness": "https://vibecart.vercel.app/api/agent-readiness"
 }
