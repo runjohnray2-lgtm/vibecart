@@ -1,10 +1,29 @@
 "use client"
 import { useEffect, useState } from "react"
 
+type CustomerRow = {
+  id: string
+  display_name?: string | null
+  company_name?: string | null
+  email?: string | null
+  phone?: string | null
+  source_system?: string | null
+  source_name?: string | null
+}
+
+type ImportRow = {
+  id: string
+  source_system?: string | null
+  source_name?: string | null
+  status?: string | null
+  accepted_count?: number | string | null
+  rejected_count?: number | string | null
+}
+
 type Snapshot = {
   workspace: null | { id:string; name:string; accountKey:string }
-  customers: Array<Record<string,unknown>>
-  imports: Array<Record<string,unknown>>
+  customers: CustomerRow[]
+  imports: ImportRow[]
 }
 
 export function BusinessBrainPanel() {
