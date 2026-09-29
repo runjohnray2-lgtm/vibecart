@@ -1,1 +1,55 @@
-import { NextRequest, NextResponse } from "next/server"\nimport { getAuth } from "@/lib/auth/server"\nimport { ensureWorkspace, getWorkspaceSnapshot, importCustomerCsv } from "@/lib/business-brain"\n\nasync function account() {\n  const { data } = await getAuth().getSession()\n  return data?.user?.id ? String(data.user.id) : null\n}\n\nfunction sameOrigin(req: NextRequest) {\n  const origin = req.headers.get("origin")\n  if (!origin) return true\n  try { return new URL(origin).host === req.nextUrl.host } catch { return false }\n}\n\nexport async function GET() {\n  const key = await account()\n  if (!key) return NextResponse.json({ error:"Sign in required" }, { status:401 })\n  return NextResponse.json(await getWorkspaceSnapshot(key))\n}\n\nexport async function POST(req: NextRequest) {\n  const key = await account()\n  if (!key) return NextResponse.json({ error:"Sign in required" }, { status:401 })\n  if (!sameOrigin(req)) return NextResponse.json({ error:"Invalid request origin" }, { status:403 })\n  try {\n    const body = await req.json()\n    const action = String(body.action ?? "")\n    if (action === "ensure-workspace") {\n      const workspace = await ensureWorkspace(key, String(body.businessName ?? "SeekPwr Co."))\n      return NextResponse.json({ workspace }, { status:201 })\n    }\n    if (action === "import-customers") {\n      const result = await importCustomerCsv({\n        accountKey:key,\n        businessName:String(body.businessName ?? "SeekPwr Co."),\n        sourceSystem:String(body.sourceSystem ?? "csv"),\n        sourceName:String(body.sourceName ?? "customer-import.csv"),\n        csvText:String(body.csvText ?? ""),\n      })\n      return NextResponse.json(result, { status:201 })\n    }\n    return NextResponse.json({ error:"Unknown action" }, { status:400 })\n  } catch (error) {\n    return NextResponse.json({ error:error instanceof Error ? error.message : "Business Brain request failed" }, { status:400 })\n  }\n}
+import { NextRequest, NextResponse } from "next/server"
+import { getAuth } from "@/lib/auth/server"
+import { ensureWorkspace, getWorkspaceSnapshot, importCustomerCsv } from "@/lib/business-brain"
+
+async function account() {
+  const { data } = await getAuth().getSession()
+  return data?.user?.id ? String(data.user.id) : null
+}
+
+function sameOrigin(req: NextRequest) {
+  const origin = req.headers.get("origin")
+  if (!origin) return true
+  try {
+    return new URL(origin).host === req.nextUrl.host
+  } catch {
+    return false
+  }
+}
+
+export async function GET() {
+  const key = await account()
+  if (!key) return NextResponse.json({ error: "Sign in required" }, { status: 401 })
+  return NextResponse.json(await getWorkspaceSnapshot(key))
+}
+
+export async function POST(req: NextRequest) {
+  const key = await account()
+  if (!key) return NextResponse.json({ error: "Sign in required" }, { status: 401 })
+  if (!sameOrigin(req)) return NextResponse.json({ error: "Invalid request origin" }, { status: 403 })
+
+  try {
+    const body = await req.json()
+    const action = String(body.action ?? "")
+    if (action === "ensure-workspace") {
+      const workspace = await ensureWorkspace(key, String(body.businessName ?? "SeekPwr Co."))
+      return NextResponse.json({ workspace }, { status: 201 })
+    }
+    if (action === "import-customers") {
+      const result = await importCustomerCsv({
+        accountKey: key,
+        businessName: String(body.businessName ?? "SeekPwr Co."),
+        sourceSystem: String(body.sourceSystem ?? "csv"),
+        sourceName: String(body.sourceName ?? "customer-import.csv"),
+        csvText: String(body.csvText ?? ""),
+      })
+      return NextResponse.json(result, { status: 201 })
+    }
+    return NextResponse.json({ error: "Unknown action" }, { status: 400 })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Business Brain request failed" },
+      { status: 400 },
+    )
+  }
+}
