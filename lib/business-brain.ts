@@ -105,5 +105,29 @@ export async function getWorkspaceSnapshot(accountValue:string, businessName="Se
   const id = String((found[0] as Record<string,unknown>).id)
   const customers = await sql.query("SELECT c.id::text,c.display_name,c.company_name,c.email,c.phone,c.source_system,c.source_record_id,c.created_at,c.updated_at,i.id::text AS import_id,i.source_name,i.created_at AS imported_at FROM business_customers c LEFT JOIN source_rows r ON r.id=c.source_row_id LEFT JOIN source_imports i ON i.id=r.import_id WHERE c.business_id=$1::uuid ORDER BY c.display_name LIMIT 1000", [id])
   const imports = await sql.query("SELECT id::text,source_system,source_name,status,row_count,accepted_count,rejected_count,created_at,completed_at FROM source_imports WHERE business_id=$1::uuid ORDER BY created_at DESC LIMIT 100", [id])
-  return { workspace:{id,name:String((found[0] as Record<string,unknown>).name),accountKey:account}, customers, imports }
+  const rules = await sql.query("SELECT id::text,rule_text,source,is_active,effective_from,created_at FROM business_rules WHERE business_id=$1::uuid AND is_active=true AND (effective_until IS NULL OR effective_until>NOW()) ORDER BY effective_from DESC LIMIT 200", [id])
+  const memories = await sql.query("SELECT id::text,memory_type,content,source,effective_from,created_at FROM business_memories WHERE business_id=$1::uuid AND (effective_until IS NULL OR effective_until>NOW()) ORDER BY effective_from DESC LIMIT 500", [id])
+  return { workspace:{id,name:String((found[0] as Record<string,unknown>).name),accountKey:account}, customers, imports, rules, memories }
+}
+
+export async function saveBusinessRule(input:{accountKey:string; businessName?:string; ruleText:string; source?:string}) {
+  const workspace = await ensureWorkspace(input.accountKey, input.businessName)
+  const ruleText = clean(input.ruleText, "", 4000)
+  if (!ruleText) throw new Error("Rule text is required")
+  const source = clean(input.source, "manual", 200)
+  const sql = db()
+  const rows = await sql.query("INSERT INTO business_rules (business_id,rule_text,source) VALUES ($1::uuid,$2,$3) RETURNING id::text,rule_text,source,is_active,effective_from,created_at", [workspace.id,ruleText,source])
+  return { workspace, rule:rows[0] }
+}
+
+export async function saveBusinessMemory(input:{accountKey:string; businessName?:string; memoryType:string; content:string; source?:string}) {
+  const workspace = await ensureWorkspace(input.accountKey, input.businessName)
+  const memoryType = clean(input.memoryType, "fact", 40).toLowerCase()
+  if (!["decision","note","preference","fact"].includes(memoryType)) throw new Error("Invalid memory type")
+  const content = clean(input.content, "", 4000)
+  if (!content) throw new Error("Memory content is required")
+  const source = clean(input.source, "manual", 200)
+  const sql = db()
+  const rows = await sql.query("INSERT INTO business_memories (business_id,memory_type,content,source) VALUES ($1::uuid,$2,$3,$4) RETURNING id::text,memory_type,content,source,effective_from,created_at", [workspace.id,memoryType,content,source])
+  return { workspace, memory:rows[0] }
 }
