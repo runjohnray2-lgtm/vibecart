@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth/server"
-import { ensureWorkspace, getWorkspaceSnapshot, importCustomerCsv } from "@/lib/business-brain"
+import { ensureWorkspace, getWorkspaceSnapshot, importCustomerCsv, saveBusinessMemory, saveBusinessRule } from "@/lib/business-brain"
 
 async function account() {
   const { data } = await getAuth().getSession()
@@ -44,6 +44,14 @@ export async function POST(req: NextRequest) {
         csvText: String(body.csvText ?? ""),
       })
       return NextResponse.json(result, { status: 201 })
+    }
+    if (action === "save-rule") {
+      const result = await saveBusinessRule({ accountKey:key, businessName:String(body.businessName ?? "SeekPwr Co."), ruleText:String(body.ruleText ?? ""), source:"manual" })
+      return NextResponse.json(result, { status:201 })
+    }
+    if (action === "save-memory") {
+      const result = await saveBusinessMemory({ accountKey:key, businessName:String(body.businessName ?? "SeekPwr Co."), memoryType:String(body.memoryType ?? "fact"), content:String(body.content ?? ""), source:"manual" })
+      return NextResponse.json(result, { status:201 })
     }
     return NextResponse.json({ error: "Unknown action" }, { status: 400 })
   } catch (error) {
