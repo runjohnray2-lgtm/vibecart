@@ -131,3 +131,33 @@ export async function saveBusinessMemory(input:{accountKey:string; businessName?
   const rows = await sql.query("INSERT INTO business_memories (business_id,memory_type,content,source) VALUES ($1::uuid,$2,$3,$4) RETURNING id::text,memory_type,content,source,effective_from,created_at", [workspace.id,memoryType,content,source])
   return { workspace, memory:rows[0] }
 }
+
+
+export async function getBusinessQuestionContext(input:{accountKey:string; businessName?:string; question:string}) {
+  const account = accountKey(input.accountKey)
+  const name = clean(input.businessName, "SeekPwr Co.", 200)
+  const question = clean(input.question, "", 1200)
+  if (!question) throw new Error("Question is required")
+  const sql = db()
+  const found = await sql.query("SELECT id::text,name FROM businesses WHERE account_key=$1 AND name=$2 LIMIT 1", [account,name])
+  if (!found[0]) throw new Error("Create the business workspace first")
+  const id = String((found[0] as Record<string,unknown>).id)
+  const terms = Array.from(new Set(question.toLowerCase().split(/[^a-z0-9@.+-]+/).filter(term => term.length >= 3))).slice(0,12)
+  const patterns = terms.map(term => `%${term}%`)
+  const customers = patterns.length
+    ? await sql.query("SELECT id::text,display_name,company_name,email,phone,source_system,source_record_id FROM business_customers WHERE business_id=$1::uuid AND EXISTS (SELECT 1 FROM unnest($2::text[]) p WHERE lower(coalesce(display_name,'') || ' ' || coalesce(company_name,'') || ' ' || coalesce(email,'') || ' ' || coalesce(phone,'')) LIKE p) ORDER BY updated_at DESC LIMIT 25", [id,patterns])
+    : []
+  const rules = await sql.query("SELECT id::text,rule_text,source FROM business_rules WHERE business_id=$1::uuid AND is_active=true AND (effective_until IS NULL OR effective_until>NOW()) ORDER BY effective_from DESC LIMIT 50", [id])
+  const memories = await sql.query("SELECT id::text,memory_type,content,source FROM business_memories WHERE business_id=$1::uuid AND (effective_until IS NULL OR effective_until>NOW()) ORDER BY effective_from DESC LIMIT 80", [id])
+  const imports = await sql.query("SELECT source_system,source_name,status,accepted_count,rejected_count,completed_at FROM source_imports WHERE business_id=$1::uuid ORDER BY created_at DESC LIMIT 10", [id])
+  const counts = await sql.query("SELECT count(*)::int AS customer_count FROM business_customers WHERE business_id=$1::uuid", [id])
+  return {
+    workspace:{id,name:String((found[0] as Record<string,unknown>).name)},
+    question,
+    customers,
+    rules,
+    memories,
+    imports,
+    customerCount:Number((counts[0] as Record<string,unknown>)?.customer_count ?? 0),
+  }
+}
