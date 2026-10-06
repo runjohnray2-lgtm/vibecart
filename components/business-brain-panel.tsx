@@ -37,6 +37,8 @@ export function BusinessBrainPanel() {
   const [ruleText,setRuleText] = useState("")
   const [memoryText,setMemoryText] = useState("")
   const [memoryType,setMemoryType] = useState("fact")
+  const [question,setQuestion] = useState("")
+  const [answer,setAnswer] = useState<{answer:string;known:string[];unknown:string[];evidence:string[];model:string|null;usage:{inputTokens:number;outputTokens:number;estimatedCostUsd:number}|null}|null>(null)
 
   async function refresh() {
     const res = await fetch("/api/business-brain", { cache:"no-store" })
@@ -68,6 +70,16 @@ export function BusinessBrainPanel() {
       setMessage(data.idempotentReplay ? "This exact file was already imported; no duplicates were created." : `Imported ${data.acceptedCount} customers; ${data.rejectedCount} rows rejected.`)
       await refresh()
     } catch (e) { setMessage(e instanceof Error ? e.message : "Import failed") } finally { setBusy(false) }
+  }
+
+  async function askBusiness() {
+    setBusy(true); setMessage(""); setAnswer(null)
+    try {
+      const res = await fetch("/api/business-brain",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"ask-business",businessName:"SeekPwr Co.",question})})
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Business Brain could not answer")
+      setAnswer(data)
+    } catch(e) { setMessage(e instanceof Error ? e.message : "Business Brain could not answer") } finally { setBusy(false) }
   }
 
   async function save(action:"save-rule"|"save-memory") {
