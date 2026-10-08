@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth/server"
-import { ensureWorkspace, getBusinessQuestionContext, getWorkspaceSnapshot, importCustomerCsv, saveBusinessMemory, saveBusinessRule } from "@/lib/business-brain"\nimport { answerBusinessQuestion } from "@/lib/business-brain-ai"
+import { ensureWorkspace, getBusinessQuestionContext, getWorkspaceSnapshot, importCustomerCsv, saveBusinessMemory, saveBusinessRule } from "@/lib/business-brain"
+import { answerBusinessQuestion } from "@/lib/business-brain-ai"
 
 async function account() {
   const { data } = await getAuth().getSession()
