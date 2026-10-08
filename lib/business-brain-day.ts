@@ -73,7 +73,7 @@ export async function startMyDay(accountValue: string, businessName = "SeekPwr C
     liveOrdersChecked: false,
   })
   const auditRows = await sql.query(
-    "INSERT INTO business_action_log (business_id,actor_account_key,action_type,target_type,target_id,status,provider,request_summary,result_summary,completed_at) VALUES ($1::uuid,$2,'start_my_day','business',$1,'succeeded','business_brain',$3::jsonb,$4::jsonb,NOW()) RETURNING id::text,created_at",
+    "INSERT INTO business_action_log (business_id,actor_account_key,action_type,target_type,target_id,status,provider,request_summary,result_summary,completed_at) VALUES ($1::uuid,$2,'start_my_day','business',$1::text,'succeeded','business_brain',$3::jsonb,$4::jsonb,NOW()) RETURNING id::text,created_at",
     [id, accountKey, JSON.stringify({ mode: "stored_records_only" }), auditSummary],
   )
   const audit = (auditRows[0] ?? {}) as Row
