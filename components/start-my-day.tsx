@@ -54,7 +54,7 @@ export function StartMyDay() {
   const items = (rows:Item[], field:string) => rows.map((row,index)=>
     <div key={String(row.id ?? index)} className="rounded-lg border border-neutral-700 p-3 text-sm">
       <p>{String(row[field] ?? "Unknown")}</p>
-      {row.status && <p className="text-neutral-400">Status: {String(row.status)}</p>}
+      {row.status != null && <p className="text-neutral-400">Status: {String(row.status)}</p>}
     </div>
   )
 
