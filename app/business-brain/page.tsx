@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { getAuth } from "@/lib/auth/server"
 import { BusinessBrainPanel } from "@/components/business-brain-panel"
+import { StartMyDay } from "@/components/start-my-day"
 
 export const dynamic = "force-dynamic"
 
@@ -17,10 +18,11 @@ export default async function BusinessBrainPage() {
           </p>
           <h1 className="mt-3 text-4xl font-bold">SeekPwr</h1>
           <p className="mt-3 max-w-2xl text-neutral-400">
-            Persistent business workspace, customer imports, and source history.
+            Start the day with stored business facts, an action history, and explicit connection status.
           </p>
           <p className="mt-2 text-sm text-neutral-500">Signed in as {data.user.email}</p>
         </header>
+        <StartMyDay />
         <BusinessBrainPanel />
       </div>
     </main>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth/server"
+import { startMyDay } from "@/lib/business-brain-day"
 import { ensureWorkspace, getWorkspaceSnapshot, importCustomerCsv, saveBusinessMemory, saveBusinessRule } from "@/lib/business-brain"
 
 async function account() {
@@ -31,6 +32,11 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const action = String(body.action ?? "")
+    if (action === "start-day") {
+      // Signed-in, same-origin request; no external emails or orders are modified.
+      const result = await startMyDay(key, String(body.businessName ?? "SeekPwr Co."))
+      return NextResponse.json(result, { headers: { "cache-control": "no-store" } })
+    }
     if (action === "ensure-workspace") {
       const workspace = await ensureWorkspace(key, String(body.businessName ?? "SeekPwr Co."))
       return NextResponse.json({ workspace }, { status: 201 })
