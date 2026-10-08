@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getAuth } from "@/lib/auth/server"
-import { ensureWorkspace, getWorkspaceSnapshot, importCustomerCsv, saveBusinessMemory, saveBusinessRule } from "@/lib/business-brain"
+import { ensureWorkspace, getBusinessQuestionContext, getWorkspaceSnapshot, importCustomerCsv, saveBusinessMemory, saveBusinessRule } from "@/lib/business-brain"
+import { answerBusinessQuestion } from "@/lib/business-brain-ai"
 
 async function account() {
   const { data } = await getAuth().getSession()
@@ -44,6 +45,11 @@ export async function POST(req: NextRequest) {
         csvText: String(body.csvText ?? ""),
       })
       return NextResponse.json(result, { status: 201 })
+    }
+    if (action === "ask-business") {
+      const context = await getBusinessQuestionContext({ accountKey:key, businessName:String(body.businessName ?? "SeekPwr Co."), question:String(body.question ?? "") })
+      const result = await answerBusinessQuestion(context)
+      return NextResponse.json(result)
     }
     if (action === "save-rule") {
       const result = await saveBusinessRule({ accountKey:key, businessName:String(body.businessName ?? "SeekPwr Co."), ruleText:String(body.ruleText ?? ""), source:"manual" })
