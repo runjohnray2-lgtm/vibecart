@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/shopify-*.test.mjs tests/ai-readiness.test.mjs tests/radiantz-pilot.test.mjs"
   },
   "dependencies": {
     "@neondatabase/auth": "0.4.2-beta",
