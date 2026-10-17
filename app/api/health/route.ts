@@ -45,6 +45,8 @@ export async function GET() {
           : "reference-catalog-with-stripe-credential"
         : "no-stripe-credential",
       webhookConfigured: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+      durableOrderStoreConfigured: Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL),
+      cloudOutboxRetryEnabled: process.env.VIBECART_CLOUD_OUTBOX_CRON_ENABLED?.trim().toLowerCase() === "true",
       cloudConfigured: Boolean(
         process.env.VIBECART_CLOUD_INGEST_URL && process.env.VIBECART_CLOUD_INGEST_KEY
       ),

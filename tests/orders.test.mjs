@@ -32,13 +32,15 @@ test("trusted catalog product identity survives Stripe Checkout", async () => {
   assert.match(orders, /return product\.id/)
 })
 
-test("verified payment events forward normalized orders to durable Cloud ingest", async () => {
-  const cloud = await readFile("lib/cloud-events.ts", "utf8")
+test("verified payment events persist normalized Core orders before optional Cloud delivery", async () => {
+  const durability = await readFile("lib/payment-durability.ts", "utf8")
   const webhook = await readFile("app/api/webhook/stripe/route.ts", "utf8")
-  assert.match(cloud, /buildNormalizedOrder\(stripe, session\)/)
-  assert.match(cloud, /order,/)
-  assert.match(cloud, /reason:\s*"order_normalization"/)
+  const store = await readFile("lib/order-store.ts", "utf8")
+  assert.match(durability, /buildNormalizedOrder\(stripe, session\)/)
+  assert.match(durability, /storeVerifiedOrder/)
+  assert.match(store, /db\.transaction\(queries\)/)
   assert.match(webhook, /checkout\.session\.async_payment_succeeded/)
-  assert.match(webhook, /forwardVerifiedCheckoutEvent\(event, session, stripe\)/)
-  assert.match(webhook, /status:\s*503/)
+  assert.match(webhook, /persistVerifiedCheckoutEvent\(event, session, stripe\)/)
+  assert.match(webhook, /attemptCloudOutboxForOrder\(orderId\)/)
+  assert.match(webhook, /Durable order persistence temporarily unavailable/)
 })

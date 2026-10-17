@@ -3,9 +3,6 @@ import { readFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import test from "node:test"
 
-// These tests execute the real route.ts / stripe-mode.ts source (transpiled with
-// the repo's TypeScript) against in-memory stand-ins for Stripe and Cloud ingest.
-// They verify the webhook's acknowledgement contract, not Neon or Stripe itself.
 const require = createRequire(import.meta.url)
 const ts = require("typescript")
 
@@ -28,7 +25,10 @@ function evaluate(code, shims) {
 
 const routeCode = await transpile("app/api/webhook/stripe/route.ts")
 
-function loadRoute(forwardVerifiedCheckoutEvent) {
+function loadRoute({
+  persistVerifiedCheckoutEvent = async (_event, session) => ({ id: `ord_${session.id}` }),
+  attemptCloudOutboxForOrder = async () => null,
+} = {}) {
   class FakeStripe {
     constructor() {
       this.webhooks = {
@@ -39,10 +39,12 @@ function loadRoute(forwardVerifiedCheckoutEvent) {
       }
     }
   }
+
   return evaluate(routeCode, {
     "next/server": { NextResponse: { json: (body, init) => Response.json(body, init) } },
     stripe: { __esModule: true, default: FakeStripe },
-    "@/lib/cloud-events": { forwardVerifiedCheckoutEvent },
+    "@/lib/payment-durability": { persistVerifiedCheckoutEvent },
+    "@/lib/cloud-outbox": { attemptCloudOutboxForOrder },
   })
 }
 
@@ -50,6 +52,7 @@ function paidEvent(overrides = {}) {
   return {
     id: "evt_1",
     type: "checkout.session.completed",
+    created: 1_700_000_000,
     data: { object: { id: "cs_test_1", payment_status: "paid", amount_total: 1200 } },
     ...overrides,
   }
@@ -70,100 +73,146 @@ test.after(() => {
   process.env = originalEnv
 })
 
-test("Cloud unconfigured: verified paid event is NOT acknowledged with 200", async () => {
-  const route = loadRoute(async () => ({ configured: false, delivered: false, retryable: false }))
+test("Core durable storage failure returns 503 so Stripe retries", async () => {
+  let cloudCalls = 0
+  const route = loadRoute({
+    persistVerifiedCheckoutEvent: async () => {
+      throw new Error("database unavailable")
+    },
+    attemptCloudOutboxForOrder: async () => {
+      cloudCalls += 1
+      return null
+    },
+  })
+
   const response = await deliver(route, paidEvent())
   assert.equal(response.status, 503)
-  const body = await response.json()
-  assert.equal(body.received, false)
-  assert.equal(body.retry, true)
-})
-
-test("Cloud misconfigured or rejecting: non-2xx so Stripe retries", async () => {
-  for (const reason of ["incomplete_config", "cloud_rejected", "timeout", "network", "order_normalization"]) {
-    const route = loadRoute(async () => ({ configured: true, delivered: false, retryable: true, reason }))
-    const response = await deliver(route, paidEvent())
-    assert.equal(response.status, 503, reason)
-    assert.equal((await response.json()).received, false, reason)
-  }
-})
-
-test("Even a non-retryable failed delivery cannot produce 200", async () => {
-  const route = loadRoute(async () => ({ configured: true, delivered: false, retryable: false }))
-  assert.equal((await deliver(route, paidEvent())).status, 503)
-})
-
-test("Successful ingestion acknowledges with 200 for completed and async-success events", async () => {
-  const forwarded = []
-  const route = loadRoute(async (event, session) => {
-    forwarded.push([event.id, session.id])
-    return { configured: true, delivered: true, retryable: false, status: 201 }
+  assert.deepEqual(await response.json(), {
+    received: false,
+    retry: true,
+    error: "Durable order persistence temporarily unavailable.",
   })
-  const completed = await deliver(route, paidEvent())
-  assert.equal(completed.status, 200)
-  assert.deepEqual(await completed.json(), { received: true })
+  assert.equal(cloudCalls, 0)
+})
 
-  const async = await deliver(route, paidEvent({
+test("Cloud is optional: unconfigured Cloud still acknowledges after Core persists", async () => {
+  let persisted = 0
+  const route = loadRoute({
+    persistVerifiedCheckoutEvent: async (_event, session) => {
+      persisted += 1
+      return { id: `ord_${session.id}` }
+    },
+    attemptCloudOutboxForOrder: async () => null,
+  })
+
+  const response = await deliver(route, paidEvent())
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { received: true })
+  assert.equal(persisted, 1)
+})
+
+test("Cloud delivery failure does not replay a Core-persisted payment", async () => {
+  let persisted = 0
+  let attempts = 0
+  const route = loadRoute({
+    persistVerifiedCheckoutEvent: async (_event, session) => {
+      persisted += 1
+      return { id: `ord_${session.id}` }
+    },
+    attemptCloudOutboxForOrder: async () => {
+      attempts += 1
+      return { configured: true, delivered: false, retryable: true, reason: "network" }
+    },
+  })
+
+  const response = await deliver(route, paidEvent())
+  assert.equal(response.status, 200)
+  assert.equal(persisted, 1)
+  assert.equal(attempts, 1)
+})
+
+test("Successful Core persistence acknowledges completed and async-success events", async () => {
+  const persisted = []
+  const route = loadRoute({
+    persistVerifiedCheckoutEvent: async (event, session) => {
+      persisted.push([event.id, session.id])
+      return { id: `ord_${session.id}` }
+    },
+  })
+
+  assert.equal((await deliver(route, paidEvent())).status, 200)
+  assert.equal((await deliver(route, paidEvent({
     id: "evt_2",
     type: "checkout.session.async_payment_succeeded",
-    data: { object: { id: "cs_test_2", payment_status: "unpaid" } },
-  }))
-  assert.equal(async.status, 200)
-  assert.deepEqual(forwarded, [["evt_1", "cs_test_1"], ["evt_2", "cs_test_2"]])
+    data: { object: { id: "cs_test_2", payment_status: "unpaid", amount_total: 1200 } },
+  }))).status, 200)
+
+  assert.deepEqual(persisted, [["evt_1", "cs_test_1"], ["evt_2", "cs_test_2"]])
 })
 
-test("Duplicate delivery and retry after outage persist exactly one order", async () => {
-  // Stand-in for Cloud ingest + storeVerifiedOrder: unique on checkout session, like
-  // the real ON CONFLICT (checkout_session_id) upsert.
+test("Duplicate Stripe delivery can persist exactly one durable order", async () => {
   const orders = new Map()
-  let cloudUp = false
-  const route = loadRoute(async (event, session) => {
-    if (!cloudUp) return { configured: true, delivered: false, retryable: true, reason: "network" }
-    orders.set(session.id, event.id)
-    return { configured: true, delivered: true, retryable: false, status: 201 }
+  const route = loadRoute({
+    persistVerifiedCheckoutEvent: async (event, session) => {
+      if (!orders.has(session.id)) orders.set(session.id, event.id)
+      return { id: `ord_${session.id}` }
+    },
   })
 
-  assert.equal((await deliver(route, paidEvent())).status, 503, "outage must trigger a Stripe retry")
-  assert.equal(orders.size, 0)
-
-  cloudUp = true
-  assert.equal((await deliver(route, paidEvent())).status, 200, "retry succeeds once Cloud is back")
-  assert.equal((await deliver(route, paidEvent())).status, 200, "duplicate delivery is acknowledged")
-  assert.equal(orders.size, 1, "duplicate delivery must not create a second order")
+  assert.equal((await deliver(route, paidEvent())).status, 200)
+  assert.equal((await deliver(route, paidEvent())).status, 200)
+  assert.equal(orders.size, 1)
 })
 
-test("Signature verification still gates everything: bad signature returns 400 and never forwards", async () => {
-  let calls = 0
-  const route = loadRoute(async () => {
-    calls += 1
-    return { configured: true, delivered: true, retryable: false }
+test("Signature verification gates durable storage and Cloud delivery", async () => {
+  let persistCalls = 0
+  let cloudCalls = 0
+  const route = loadRoute({
+    persistVerifiedCheckoutEvent: async () => {
+      persistCalls += 1
+      return { id: "ord_1" }
+    },
+    attemptCloudOutboxForOrder: async () => {
+      cloudCalls += 1
+      return null
+    },
   })
+
   assert.equal((await deliver(route, paidEvent(), "forged")).status, 400)
   const missing = await route.POST(new Request("https://example.test/api/webhook/stripe", {
     method: "POST",
     body: JSON.stringify(paidEvent()),
   }))
   assert.equal(missing.status, 400)
-  assert.equal(calls, 0)
+  assert.equal(persistCalls, 0)
+  assert.equal(cloudCalls, 0)
 })
 
-test("Events that are not payment-ready or not order events still return 200 without forwarding", async () => {
-  let calls = 0
-  const route = loadRoute(async () => {
-    calls += 1
-    return { configured: false, delivered: false, retryable: false }
+test("Events that are not payment-ready or not order events still return 200 without persistence", async () => {
+  let persistCalls = 0
+  const route = loadRoute({
+    persistVerifiedCheckoutEvent: async () => {
+      persistCalls += 1
+      return { id: "ord_1" }
+    },
   })
+
   const unpaid = await deliver(route, paidEvent({
     data: { object: { id: "cs_test_3", payment_status: "unpaid" } },
   }))
   assert.equal(unpaid.status, 200)
-  const other = await deliver(route, { id: "evt_3", type: "charge.succeeded", data: { object: { id: "ch_1" } } })
+
+  const other = await deliver(route, {
+    id: "evt_3",
+    type: "charge.succeeded",
+    data: { object: { id: "ch_1" } },
+  })
   assert.equal(other.status, 200)
-  assert.equal(calls, 0)
+  assert.equal(persistCalls, 0)
 })
 
-test("Webhook still returns 501 when Stripe secrets are missing", async () => {
-  const route = loadRoute(async () => ({ configured: true, delivered: true, retryable: false }))
+test("Webhook returns 501 when Stripe secrets are missing", async () => {
+  const route = loadRoute()
   const saved = process.env.STRIPE_WEBHOOK_SECRET
   delete process.env.STRIPE_WEBHOOK_SECRET
   try {
@@ -171,6 +220,15 @@ test("Webhook still returns 501 when Stripe secrets are missing", async () => {
   } finally {
     process.env.STRIPE_WEBHOOK_SECRET = saved
   }
+})
+
+test("Webhook source persists Core before attempting optional Cloud delivery", async () => {
+  const source = await readFile("app/api/webhook/stripe/route.ts", "utf8")
+  const persist = source.indexOf("persistVerifiedCheckoutEvent(event, session, stripe)")
+  const cloud = source.indexOf("attemptCloudOutboxForOrder(orderId)")
+  assert.ok(persist >= 0)
+  assert.ok(cloud > persist)
+  assert.match(source, /Core order storage is authoritative/)
 })
 
 test("stripeKeyMode classifies by prefix and never echoes the key", async () => {
@@ -189,8 +247,10 @@ test("Checkout labels sessions by key mode instead of hardcoding live; MCP schem
   assert.match(checkout, /import \{ stripeKeyMode \} from "@\/lib\/stripe-mode"/)
   assert.match(checkout, /mode: stripeKeyMode\(secretKey\) === "test" \? "test" : "live"/)
   assert.doesNotMatch(checkout, /^\s*mode: "live",\s*$/m)
+
   const mcp = await readFile("app/mcp/route.ts", "utf8")
   assert.match(mcp, /enum: \["demo", "test", "live"\]/)
+
   const health = await readFile("app/api/health/route.ts", "utf8")
   assert.match(health, /stripeKeyMode\(value\)/)
 })
