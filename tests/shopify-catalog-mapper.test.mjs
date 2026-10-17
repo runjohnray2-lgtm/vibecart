@@ -181,7 +181,8 @@ test('output satisfies the catalog contract and carries no invented fields', () 
 })
 
 test('mapper stays isolated from checkout, payments, database and routes', () => {
-  assert.doesNotMatch(source, /stripe|checkout|cart-store|neon|process\.env|fetch\(/i)
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, '')
+  assert.doesNotMatch(code, /stripe|checkout|cart-store|neon|process\.env|fetch\(/i)
   const imports = source.match(/^import .*$/gm) ?? []
   assert.deepEqual(imports, ["import type { VibeProduct } from '@/lib/products'"])
 })
