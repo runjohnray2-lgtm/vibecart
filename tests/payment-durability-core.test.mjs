@@ -150,7 +150,7 @@ test("migration 007 and order-store make Core + optional Cloud state recoverable
   assert.match(store, /INSERT INTO vibecart_cloud_outbox/)
   assert.match(outbox, /FOR UPDATE SKIP LOCKED/)
   assert.match(outbox, /MAX_OUTBOX_ATTEMPTS = 12/)
-  assert.match(outbox, /status = 'dead_letter'/)
+  assert.match(outbox, /deadLetter \\? "dead_letter" : "pending"/)
   assert.match(cron, /VIBECART_CLOUD_OUTBOX_CRON_ENABLED/)
   assert.match(cron, /CRON_SECRET/)
   assert.match(vercel, /"schedule": "\*\/5 \* \* \* \*"/)
