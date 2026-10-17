@@ -1,7 +1,24 @@
-// Minimal in-memory product catalog for the VibeCart MVP demo.
-// A real integration would swap this for a DB call or the merchant's own
-// product source — the point of VibeCart is the checkout mechanism, not
-// product management.
+// Minimal reference catalog used by the public VibeCart demo.
+// Real merchants should configure VIBECART_CATALOG_URL. The reference products
+// are fictional/demo data and deliberately do not claim inventory or fitment.
+
+export const PRODUCT_AVAILABILITY_STATUSES = [
+  "in_stock",
+  "out_of_stock",
+  "preorder",
+  "made_to_order",
+  "unknown",
+] as const
+
+export type ProductAvailabilityStatus = typeof PRODUCT_AVAILABILITY_STATUSES[number]
+
+export interface ProductCompatibility {
+  mode: "not_required" | "structured"
+  required?: string[]
+  attributes?: Record<string, string[]>
+  questions?: Record<string, string>
+  statement?: string
+}
 
 export interface VibeProduct {
   id: string
@@ -9,7 +26,9 @@ export interface VibeProduct {
   description: string
   priceCents: number
   image: string
-  variant?: string // e.g. "Size: L", "Color: Black" — optional, purely informational
+  variant?: string
+  availability: ProductAvailabilityStatus
+  compatibility?: ProductCompatibility
 }
 
 export const PRODUCTS: VibeProduct[] = [
@@ -19,6 +38,7 @@ export const PRODUCTS: VibeProduct[] = [
     description: "He Said Nothing mystery gift box — $39 pilot tier. Final contents are selected from the shopper's clues before fulfillment opens.",
     priceCents: 3900,
     image: "",
+    availability: "unknown",
   },
   {
     id: "hsn-nothing-box-59",
@@ -26,6 +46,7 @@ export const PRODUCTS: VibeProduct[] = [
     description: "He Said Nothing mystery gift box — $59 pilot tier. Final contents are selected from the shopper's clues before fulfillment opens.",
     priceCents: 5900,
     image: "",
+    availability: "unknown",
   },
   {
     id: "hsn-nothing-box-89",
@@ -33,6 +54,7 @@ export const PRODUCTS: VibeProduct[] = [
     description: "He Said Nothing mystery gift box — $89 pilot tier. Final contents are selected from the shopper's clues before fulfillment opens.",
     priceCents: 8900,
     image: "",
+    availability: "unknown",
   },
   {
     id: "sticker-pack-nw",
@@ -40,6 +62,7 @@ export const PRODUCTS: VibeProduct[] = [
     description: "5 regional stickers — Bigfoot, raccoon, mermaid, pirate ship, buck.",
     priceCents: 1200,
     image: "https://placehold.co/400x400/1a1a2e/ffffff?text=Sticker+Pack",
+    availability: "unknown",
   },
   {
     id: "led-plate-frame",
@@ -47,6 +70,7 @@ export const PRODUCTS: VibeProduct[] = [
     description: "Custom Flex LED array license plate frame.",
     priceCents: 4900,
     image: "https://placehold.co/400x400/16213e/ffffff?text=LED+Frame",
+    availability: "unknown",
   },
   {
     id: "shirt-custom-dtf",
@@ -55,6 +79,7 @@ export const PRODUCTS: VibeProduct[] = [
     priceCents: 2200,
     image: "https://placehold.co/400x400/0f3460/ffffff?text=Custom+Shirt",
     variant: "Size: L",
+    availability: "unknown",
   },
 ]
 
