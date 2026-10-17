@@ -1,6 +1,6 @@
 # Shopify catalog integration (Issue #94): offline slice
 
-Status: **library code and tests only. Not connected to Shopify, not wired into any route, off by default.**
+Status: **library code and tests only. Not connected to Shopify, not wired into any route, no caller. Nothing here syncs anything yet.**
 
 ## What exists
 
@@ -16,16 +16,19 @@ Status: **library code and tests only. Not connected to Shopify, not wired into 
 - **Prices** are decimal strings converted to integer cents with integer math. Floats, more than two decimals and negatives are rejected, never rounded.
 - **Currency is never assumed.** The caller must pass the shop currency (`shop.currencyCode`). Embedded price currencies must match. The sync additionally requires it to equal the merchant catalog currency. Currencies without two minor-unit digits (for example JPY, KWD) are rejected.
 - **Nothing invented.** No inventory counts, fitment, SKUs or default prices are created.
-- **Skipped with a reason:** archived or draft products, unpublished products, products with a truncated variant list, variants with a deny policy and zero stock, missing ids, missing or invalid prices, duplicate variant ids.
+- **Publication is positively verified in the sync.** A product whose `publishedAt` is not returned at all is skipped (`publication status unknown`) and removed from the snapshot. An explicit `null` is skipped as `not published`. `includeUnpublished` is the only bypass. The mapper alone (used with REST data) treats only an explicit `null` as unpublished.
+- **Made-to-order is respected.** Only a variant with inventory policy `DENY` and zero or negative stock is skipped. `CONTINUE` variants, and variants with no quantity reported, are kept.
+- **Skipped with a reason:** archived or draft products, unpublished products, products with a truncated variant list, out-of-stock deny-policy variants, missing ids, missing or invalid prices, duplicate variant ids. Every skip is returned to the caller so it can be shown to the merchant.
 - **Fail safe on update:** if a product no longer maps to any sellable variant, it is removed from the snapshot and feed.
+- **Last known good:** a failed or guarded sync throws and leaves the base snapshot untouched. The caller keeps serving it and must track its age (the readiness report flags stale data).
 
 ## Keeping identifiers for order write-back
 
 `lib/catalog-source.ts` keeps only `id, name, description, priceCents, image, variant` and drops everything else, including `sku` and the Shopify product id. So the feed alone cannot support order or fulfillment mapping. `buildVariantIndex(snapshot)` returns a server-side map from catalog id to `{ productId, variantId, sku? }`. Downstream order code must use that index, keyed by the catalog id on the order line. It must never be exposed publicly. Persisting it per tenant is future work.
 
-## Feature flag
+## Reserved feature flag
 
-`VIBECART_SHOPIFY_SYNC_ENABLED=true` enables the sync (`isShopifySyncEnabled(env)`). It is unset by default. Nothing calls it today.
+`VIBECART_SHOPIFY_SYNC_ENABLED` is **reserved**. `isShopifySyncEnabled(env)` exists, but nothing calls it, so setting it today does nothing.
 
 ## Not done, and what gates it
 
@@ -41,6 +44,6 @@ Status: **library code and tests only. Not connected to Shopify, not wired into 
 
 ## Known limits
 
-- `variants(first: 100)`: products with more variants are skipped, not truncated. Paging variants per product is not implemented.
+- `variants(first: 100)`: products with more variants are skipped with a visible reason, not truncated. Paging variants per product is not implemented.
 - Images beyond the first 20 per product are ignored; they are only a fallback.
 - A product mapped to zero variants is dropped even if the cause is transient bad data. That is deliberate (fail closed).

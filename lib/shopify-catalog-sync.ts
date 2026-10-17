@@ -6,11 +6,13 @@ import { mapShopifyProducts, normalizeCurrency, shopifyId, type ShopifyCatalogPr
  *
  * - No network, no credentials, no database. The caller injects fetchPage, so every
  *   behavior here is testable without Shopify.
- * - Off by default: isShopifySyncEnabled reads VIBECART_SHOPIFY_SYNC_ENABLED from an
- *   env object the caller passes in. Nothing in the app calls this module yet.
+ * - VIBECART_SHOPIFY_SYNC_ENABLED is a reserved flag. isShopifySyncEnabled reads it from
+ *   an env object the caller passes in, but nothing in the app calls it or this module yet.
  * - Output for the catalog feed contains only fields lib/catalog-source.ts accepts.
  *   That parser strips sku and shopify ids, so order write-back must use
  *   buildVariantIndex, a server-side lookup keyed by catalog id.
+ * - Publication must be positively verified: a product whose publishedAt is not returned at
+ *   all is not exposed (reason: publication status unknown).
  * - Live use is gated on merchant auth and tenant isolation (#56) and on real
  *   credentials. Do not expose a tenant-unscoped endpoint built on this.
  *
@@ -89,11 +91,22 @@ export function shopifyNumericId(id: string): string | undefined {
   return /^\d+$/.test(tail) ? tail : undefined
 }
 
-function productKey(raw: unknown): string | undefined {
+function rawProductId(raw: unknown): string | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const entry = raw as Record<string, unknown>
-  const id = shopifyId(entry.admin_graphql_api_id) ?? shopifyId(entry.id)
+  return shopifyId(entry.admin_graphql_api_id) ?? shopifyId(entry.id)
+}
+
+function productKey(raw: unknown): string | undefined {
+  const id = rawProductId(raw)
   return id ? (shopifyNumericId(id) ?? id) : undefined
+}
+
+/** True when neither publishedAt nor published_at was returned at all (explicit null is handled by the mapper). */
+function publicationUnknown(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false
+  const entry = raw as Record<string, unknown>
+  return entry.publishedAt === undefined && entry.published_at === undefined
 }
 
 export function createSnapshot(currencyCode: string): ShopifyCatalogSnapshot {
@@ -102,8 +115,9 @@ export function createSnapshot(currencyCode: string): ShopifyCatalogSnapshot {
 
 /**
  * Upserts products into a copy of the snapshot. A product that no longer maps to any
- * sellable variant (archived, unpublished, invalid price, out of stock) is removed, so
- * the feed fails safe instead of offering something Shopify says is not sellable.
+ * sellable variant (archived, unpublished, publication unknown, invalid price, out of stock)
+ * is removed, so the feed fails safe instead of offering something Shopify does not
+ * positively say is sellable.
  */
 export function applyProducts(
   snapshot: ShopifyCatalogSnapshot,
@@ -117,6 +131,16 @@ export function applyProducts(
   let removed = 0
 
   for (const raw of rawProducts) {
+    if (!options.includeUnpublished && publicationUnknown(raw)) {
+      const id = rawProductId(raw)
+      skipped.push({
+        ...(id ? { productId: id } : {}),
+        reason: 'publication status unknown: publishedAt was not returned, so the product is not exposed',
+      })
+      const unknownKey = productKey(raw)
+      if (unknownKey && next.delete(unknownKey)) removed += 1
+      continue
+    }
     const mapped = mapShopifyProducts([raw], {
       currencyCode: snapshot.currencyCode,
       includeUnpublished: options.includeUnpublished,
@@ -190,7 +214,8 @@ export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string,
 
 /**
  * Pages through products and returns a new snapshot. Atomic: if any page fails or a
- * guard trips, it throws and the base snapshot is untouched.
+ * guard trips, it throws and the base snapshot is untouched, so callers keep serving
+ * the last known-good snapshot and should track its age.
  */
 export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<ShopifySyncResult> {
   const shopCurrency = normalizeCurrency(options.shopCurrencyCode)
