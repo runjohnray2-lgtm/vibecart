@@ -20,13 +20,16 @@ import type { VibeProduct } from '@/lib/products'
  *   arithmetic only. Floats, more than two decimals and negatives are rejected,
  *   never rounded or converted.
  * - Nothing is invented: no fitment, SKU, price or availability defaults.
- *   Unpublished products, truncated variant lists and variants Shopify reports as
- *   out of stock with a deny policy are skipped with a reason.
+ *   Unpublished products and truncated variant lists are skipped with a reason.
+ * - Inventory quantity NEVER excludes a variant. Made-to-order products legitimately
+ *   report zero on hand. The actual Shopify inventory policy (DENY or CONTINUE) is
+ *   carried through unchanged in shopify.inventoryPolicy for server-side use. The
+ *   quantity itself is not copied.
  */
 
 export type ShopifyCatalogProduct = VibeProduct & {
   sku?: string
-  shopify: { productId: string; variantId: string }
+  shopify: { productId: string; variantId: string; inventoryPolicy?: 'DENY' | 'CONTINUE' }
 }
 
 export type ShopifyMapSkip = { productId?: string; variantId?: string; reason: string }
@@ -162,16 +165,6 @@ function variantPriceCents(variant: Json, expectedCurrency: string): number {
   return priceToCents(raw)
 }
 
-/** Returns the stock quantity when Shopify says the variant cannot be sold (deny policy and no stock). */
-function unsellableQuantity(variant: Json): number | undefined {
-  const policy = text(variant.inventoryPolicy ?? variant.inventory_policy)
-  const quantity = variant.inventoryQuantity ?? variant.inventory_quantity
-  if (policy && policy.toLowerCase() === 'deny' && typeof quantity === 'number' && Number.isFinite(quantity) && quantity <= 0) {
-    return quantity
-  }
-  return undefined
-}
-
 function productList(input: unknown): unknown[] {
   if (Array.isArray(input)) return input
   if (isObject(input)) return asList(input.products)
@@ -245,11 +238,6 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
         skip(productId, variantId, 'duplicate variant id')
         continue
       }
-      const unsellable = unsellableQuantity(variant)
-      if (unsellable !== undefined) {
-        skip(productId, variantId, 'variant is out of stock (inventory policy DENY, quantity ' + unsellable + ')')
-        continue
-      }
       let priceCents: number
       try {
         priceCents = variantPriceCents(variant, expectedCurrency)
@@ -267,6 +255,13 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
       const sku = rawSku && rawSku.length <= LIMITS.sku ? rawSku : undefined
       if (rawSku && !sku) result.warnings.push('variant ' + variantId + ' sku is longer than ' + LIMITS.sku + ' and was dropped')
 
+      const rawPolicy = text(variant.inventoryPolicy ?? variant.inventory_policy)
+      const policyUpper = rawPolicy ? rawPolicy.toUpperCase() : undefined
+      const inventoryPolicy = policyUpper === 'DENY' || policyUpper === 'CONTINUE' ? policyUpper : undefined
+      if (rawPolicy && !inventoryPolicy) {
+        result.warnings.push('variant ' + variantId + ' has unrecognized inventory policy ' + rawPolicy + ' and it was not carried through')
+      }
+
       seen.add(variantId)
       result.products.push({
         id: variantId,
@@ -276,7 +271,7 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
         image: variantImage(variant, images) ?? fallbackImage ?? '',
         ...(variantTitle ? { variant: variantTitle } : {}),
         ...(sku ? { sku } : {}),
-        shopify: { productId, variantId },
+        shopify: { productId, variantId, ...(inventoryPolicy ? { inventoryPolicy } : {}) },
       })
     }
   }

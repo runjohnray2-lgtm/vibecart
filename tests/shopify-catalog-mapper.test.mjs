@@ -161,23 +161,41 @@ test('unpublished products are skipped unless explicitly included', () => {
   assert.equal(mapShopifyProducts([{ id: 1, title: 'No field', variants: [{ id: 2, price: '1.00' }] }], USD).products.length, 1)
 })
 
-test('variants Shopify reports as out of stock with a deny policy are skipped', () => {
+test('zero quantity never excludes a variant; the Shopify inventory policy is preserved as reported', () => {
   const product = {
     id: 1,
-    title: 'Stock',
+    title: 'Made to order',
     variants: [
       { id: 10, price: '1.00', inventoryPolicy: 'DENY', inventoryQuantity: 0 },
       { id: 11, price: '1.00', inventoryPolicy: 'DENY', inventoryQuantity: -2 },
       { id: 12, price: '1.00', inventory_policy: 'deny', inventory_quantity: 0 },
       { id: 13, price: '1.00', inventoryPolicy: 'CONTINUE', inventoryQuantity: 0 },
       { id: 14, price: '1.00', inventoryPolicy: 'DENY' },
-      { id: 15, price: '1.00', inventoryPolicy: 'DENY', inventoryQuantity: 3 },
+      { id: 15, price: '1.00', inventoryPolicy: 'continue', inventoryQuantity: 3 },
+      { id: 16, price: '1.00' },
+      { id: 17, price: '1.00', inventoryPolicy: 'WEIRD' },
     ],
   }
   const result = mapShopifyProducts([product], USD)
-  assert.deepEqual(result.products.map(p => p.id), ['13', '14', '15'])
-  assert.equal(result.skipped.filter(s => /out of stock/.test(s.reason)).length, 3)
-  for (const p of result.products) assert.equal('inventoryQuantity' in p, false, 'inventory must not be invented')
+  assert.deepEqual(result.products.map(p => p.id), ['10', '11', '12', '13', '14', '15', '16', '17'])
+  assert.equal(result.skipped.length, 0, 'nothing may be excluded for quantity')
+  const policies = Object.fromEntries(result.products.map(p => [p.id, p.shopify.inventoryPolicy]))
+  assert.deepEqual(policies, {
+    10: 'DENY',
+    11: 'DENY',
+    12: 'DENY',
+    13: 'CONTINUE',
+    14: 'DENY',
+    15: 'CONTINUE',
+    16: undefined,
+    17: undefined,
+  })
+  assert.equal(result.warnings.length, 1)
+  assert.match(result.warnings[0], /WEIRD/)
+  for (const p of result.products) {
+    assert.equal('inventoryQuantity' in p, false, 'quantity must not be copied')
+    assert.equal('inventoryQuantity' in p.shopify, false, 'quantity must not be copied')
+  }
 })
 
 test('products with a truncated variant list are skipped whole', () => {

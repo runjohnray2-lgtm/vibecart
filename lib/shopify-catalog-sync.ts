@@ -13,6 +13,9 @@ import { mapShopifyProducts, normalizeCurrency, shopifyId, type ShopifyCatalogPr
  *   buildVariantIndex, a server-side lookup keyed by catalog id.
  * - Publication must be positively verified: a product whose publishedAt is not returned at
  *   all is not exposed (reason: publication status unknown).
+ * - Inventory quantity never removes a product or variant. Made-to-order products report
+ *   zero on hand. The Shopify inventory policy is kept on each snapshot entry
+ *   (shopify.inventoryPolicy) and is not interpreted here.
  * - Live use is gated on merchant auth and tenant isolation (#56) and on real
  *   credentials. Do not expose a tenant-unscoped endpoint built on this.
  *
@@ -115,9 +118,9 @@ export function createSnapshot(currencyCode: string): ShopifyCatalogSnapshot {
 
 /**
  * Upserts products into a copy of the snapshot. A product that no longer maps to any
- * sellable variant (archived, unpublished, publication unknown, invalid price, out of stock)
- * is removed, so the feed fails safe instead of offering something Shopify does not
- * positively say is sellable.
+ * variant (archived, unpublished, publication unknown, invalid price) is removed, so the
+ * feed fails safe instead of offering something Shopify does not positively say is
+ * sellable. Inventory quantity is never a reason to remove anything.
  */
 export function applyProducts(
   snapshot: ShopifyCatalogSnapshot,
