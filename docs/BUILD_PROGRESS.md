@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-17
 
-This file is the durable checkpoint for the autonomous build-to-revenue mission. Read it before starting a new work session and update it with verified repository/CI/runtime evidence.
+This file is the durable checkpoint for the autonomous build-to-revenue mission. Read it before each work session, verify repository/runtime state, and update it with facts rather than plans.
 
 ## Mission order
 
@@ -15,53 +15,75 @@ This file is the durable checkpoint for the autonomous build-to-revenue mission.
 7. #96 ShipStation fulfillment
 8. #98 MCP/UCP multi-merchant distribution
 
-Do not reorder without a dependency reason.
+Do not reorder unless a dependency requires it.
 
-## Current milestone — #99 Payment durability
+## #99 Payment durability
 
-Status: **IN PROGRESS on PR #91**
+Status: **IMPLEMENTED AND VERIFIED ON PR #91; NOT MERGED / NOT DEPLOYED**
 
-Existing PR:
-- #91 `fix/webhook-require-durable-order-persistence`
-- Before the #99 extension, PR #91 changed the webhook to depend on Cloud delivery. That protected against silent loss but incorrectly made optional Cloud a prerequisite for Core.
+PR: #91 `fix/webhook-require-durable-order-persistence`
 
-Verified baseline from GitHub Actions on PR #91 head `135620178dfb985edb8b6df018d0a83df0b59820`:
+Verified implementation:
+- Stripe signature verification remains before all order work.
+- Payment-ready Stripe events persist directly to VibeCart Core's existing Neon order store.
+- Core does not require a VibeCart Cloud subscription or Cloud availability.
+- Order header, line items, payment event, merchant-scoped cart conversion, and optional Cloud outbox are committed through one Neon transaction.
+- Checkout Session identity and Stripe event identity preserve idempotency.
+- Hosted merchant identity mismatch fails closed.
+- Cart conversion is scoped by cart ID + merchant ID.
+- Optional Cloud delivery happens only after the Core transaction commits.
+- Cloud outage after Core persistence does not ask Stripe to replay an already-durable order.
+- Migration 007 adds replayable Cloud outbox state with lease, attempt count, backoff, delivery state, and dead-letter state.
+- Cloud retry endpoint is disabled by default and requires `CRON_SECRET` when enabled.
+- Quickstart includes a merchant-facing payment-durability flow.
+
+Latest fully verified code before the final Quickstart/checkpoint-only commit: `efb69d3cd5859c9f8ad053479c842c9ff031f004`.
+
+GitHub Actions run #538:
 - Build: PASS
 - Typecheck: PASS
 - Lint: PASS
-- Unit suite: 142 pass / 5 fail
-- The five failures are pre-existing expectation/copy mismatches also identified before this milestone: homepage copy x2, generic MCP multi-item checkout expectation, public discovery metadata, and quickstart paths.
-- UCP Cart Conformance stopped at the same unit-test failures, before schema validation.
+- Unit tests: PASS (all)
+- Production server start: PASS
+- MCP commerce smoke: PASS
+- UCP discovery/profile generation: PASS
+- Official UCP validator 1.4.1: PASS
+- MCP production transport / official Inspector: PASS
+- Disposable PostgreSQL payment-durability job: PASS
+  - migrations 001, 004, 005, 007 applied
+  - duplicate Checkout Session -> exactly one durable order
+  - payment-event idempotency checked
+  - Cloud outbox uniqueness checked
+  - merchant-scoped cart conversion checked
+  - outbox lease/index schema checked
 
-Current #99 implementation being added to PR #91:
-- Core persists verified paid Stripe events directly to existing Neon durable orders.
-- Core persistence is independent of optional Cloud.
-- Order + line items + payment event + merchant-scoped cart conversion + optional Cloud outbox are committed in one Neon transaction.
-- New migration 007 adds replayable Cloud outbox state with leases, attempt counters, backoff, and dead-letter state.
-- Immediate Cloud delivery happens only after the Core transaction commits.
-- Cloud failures no longer cause Stripe to replay a Core-persisted payment.
-- A guarded cron route can retry pending Cloud deliveries; it is disabled by default.
-- Hosted merchant identity mismatch fails closed before persistence.
-- Cart conversion is scoped by both cart ID and merchant ID.
-- Tests are being updated to prove the new acknowledgement contract and tenant behavior.
+UCP Cart Conformance run #122: PASS.
 
-## Required verification before #99 can merge
+Vercel preview status for `efb69d3...`: PASS.
 
-- GitHub CI build/typecheck/lint/unit tests must run on the new commit.
-- Fix the five baseline unit-test failures if they remain and block CI.
-- Apply migrations 005 and 007 to a non-production Neon branch and run SQL smoke checks.
-- Run Stripe test-mode duplicate-delivery acceptance: one paid Checkout Session -> exactly one durable Core order.
-- Verify Core creates the order with Cloud absent.
-- Verify Cloud outage leaves a retryable outbox row without changing Stripe acknowledgement after Core persistence.
-- Do not change live Stripe credentials, enable real-money billing, or merge unverified payment changes.
+No production database migration, production environment change, real payment, or production deployment was performed.
+
+### Production gate
+
+Do **not** merge PR #91 yet. Merging main is expected to trigger a production deployment and this mission requires explicit owner approval for risky production payment changes.
+
+A future controlled production rollout must separately confirm migration availability and use Stripe test-mode / controlled pilot evidence before live commerce is accepted.
+
+## Current independent work
+
+Next milestone: **#93 AI salesperson**.
+
+Work on #93 should be stacked on the verified #99 branch until #91 receives owner approval and lands in main. Preserve:
+- trusted server-side catalog truth,
+- no invented compatibility/availability/pricing,
+- tenant isolation,
+- cart/checkout idempotency,
+- auditable AI attribution.
 
 ## Next executable task
 
-After the #99 code commit reaches PR #91:
-1. inspect GitHub Actions;
-2. fix any regression caused by #99;
-3. address the five known baseline unit-test failures if still blocking;
-4. run the non-production Neon migration/smoke test;
-5. update issue #99 and PR #91 with exact results.
-
-Only then advance to #93.
+1. Let the final #99 Quickstart/checkpoint commit pass CI.
+2. Create a stacked #93 branch from PR #91 head.
+3. Inventory existing MCP/UCP catalog/cart/checkout primitives and implement verified conversational discovery + compatibility-question behavior without adding an ungrounded LLM decision path.
+4. Add AI-sales attribution metadata into carts/orders.
+5. Keep PR #91 unmerged until explicit production-deployment approval.
