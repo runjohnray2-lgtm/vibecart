@@ -142,7 +142,7 @@ const tools = [
       type: "object",
       properties: {
         success: { type: "boolean" },
-        mode: { type: "string", enum: ["demo", "live"] },
+        mode: { type: "string", enum: ["demo", "test", "live"] },
         checkoutUrl: { type: ["string", "null"] },
         message: { type: "string" },
         totalCents: { type: "integer" },
