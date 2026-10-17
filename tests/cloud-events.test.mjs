@@ -20,7 +20,7 @@ test("Cloud bridge uses stable Stripe event IDs and server-side integration key"
 
 test("temporary Cloud delivery failures ask Stripe to retry", async () => {
   const source = await readFile("app/api/webhook/stripe/route.ts", "utf8")
-  assert.match(source, /cloud\.configured && !cloud\.delivered && cloud\.retryable/)
+  assert.match(source, /if \(!cloud\.delivered\)/)
   assert.match(source, /status:\s*503/)
 })
 

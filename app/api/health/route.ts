@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { stripeKeyMode } from "@/lib/stripe-mode"
 import { orderPermalinkConfigured } from "@/lib/order-permalink"
 import { hostedMerchantAuthConfigured, hostedModeEnabled } from "@/lib/merchant-auth"
 import { hsnCheckoutReadiness } from "@/lib/he-said-nothing-config"
@@ -12,11 +13,7 @@ function stripeCredentialInfo() {
     return { configured: false, mode: "none", credentialType: "none" }
   }
 
-  const mode = value.startsWith("sk_live_") || value.startsWith("rk_live_")
-    ? "live"
-    : value.startsWith("sk_test_") || value.startsWith("rk_test_")
-      ? "test"
-      : "unknown"
+  const mode = stripeKeyMode(value)
 
   const credentialType = value.startsWith("rk_")
     ? "restricted"
