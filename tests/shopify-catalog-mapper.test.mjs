@@ -1,17 +1,14 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
-import ts from 'typescript'
 import * as fixtures from './fixtures/shopify-products.mjs'
+import { assertCatalogContract, loadTsModules } from './helpers/shopify-test-utils.mjs'
 
-// The repo has no TS test loader on Node 20, so transpile the real source file and import it.
 const sourcePath = 'lib/shopify-catalog-mapper.ts'
 const source = fs.readFileSync(sourcePath, 'utf8')
-const { outputText } = ts.transpileModule(source, {
-  compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-})
-const mapper = await import('data:text/javascript;base64,' + Buffer.from(outputText).toString('base64'))
-const { mapShopifyProducts, priceToCents, shopifyId } = mapper
+const modules = await loadTsModules([sourcePath])
+const { mapShopifyProducts, normalizeCurrency, priceToCents, shopifyId } = modules['shopify-catalog-mapper']
+const USD = { currencyCode: 'USD' }
 
 const ALL = [
   fixtures.restMultiVariant,
@@ -27,24 +24,8 @@ function byId(result, id) {
   return result.products.find(product => product.id === id)
 }
 
-// Mirrors the rules enforced by parseProduct in lib/catalog-source.ts.
-function assertCatalogContract(products) {
-  const seen = new Set()
-  for (const p of products) {
-    assert.ok(typeof p.id === 'string' && p.id.length >= 1 && p.id.length <= 200)
-    assert.ok(typeof p.name === 'string' && p.name.length >= 1 && p.name.length <= 500)
-    assert.ok(Number.isSafeInteger(p.priceCents) && p.priceCents >= 0)
-    assert.equal(typeof p.description, 'string')
-    assert.ok(p.description.length <= 5000)
-    assert.ok(p.image === '' || new URL(p.image).protocol === 'https:')
-    assert.ok(p.variant === undefined || (typeof p.variant === 'string' && p.variant.length <= 500))
-    assert.ok(!seen.has(p.id), 'duplicate id ' + p.id)
-    seen.add(p.id)
-  }
-}
-
 test('REST multi-variant product keeps real ids, SKUs and exact cents', () => {
-  const result = mapShopifyProducts([fixtures.restMultiVariant])
+  const result = mapShopifyProducts([fixtures.restMultiVariant], USD)
   assert.equal(result.skipped.length, 0)
   assert.equal(result.products.length, 3)
 
@@ -67,7 +48,7 @@ test('REST multi-variant product keeps real ids, SKUs and exact cents', () => {
 })
 
 test('missing optional fields are left empty, never invented', () => {
-  const result = mapShopifyProducts([fixtures.defaultTitleOnly])
+  const result = mapShopifyProducts([fixtures.defaultTitleOnly], USD)
   assert.equal(result.skipped.length, 0)
   const [only] = result.products
   assert.equal(only.id, '42000000000001')
@@ -80,7 +61,7 @@ test('missing optional fields are left empty, never invented', () => {
 })
 
 test('GraphQL edges/nodes, Money objects and image precedence', () => {
-  const result = mapShopifyProducts({ products: { edges: [{ node: fixtures.graphqlEdges }] } })
+  const result = mapShopifyProducts({ products: { edges: [{ node: fixtures.graphqlEdges }] } }, USD)
   assert.equal(result.skipped.length, 0)
   const gold = byId(result, 'gid://shopify/ProductVariant/43000000000001')
   const silver = byId(result, 'gid://shopify/ProductVariant/43000000000002')
@@ -109,7 +90,7 @@ test('price conversion is exact where parseFloat * 100 is not', () => {
     [' 12.30 ', 1230],
   ]
   for (const [input, expected] of table) assert.equal(priceToCents(input), expected, input)
-  assert.equal(mapShopifyProducts([fixtures.floatTraps]).products.map(p => p.priceCents).join(','), '1999,115,29,435')
+  assert.equal(mapShopifyProducts([fixtures.floatTraps], USD).products.map(p => p.priceCents).join(','), '1999,115,29,435')
 })
 
 test('price conversion rejects anything it cannot represent exactly', () => {
@@ -122,7 +103,7 @@ test('price conversion rejects anything it cannot represent exactly', () => {
 })
 
 test('unmappable items are skipped with a reason and valid siblings survive', () => {
-  const result = mapShopifyProducts(ALL)
+  const result = mapShopifyProducts(ALL, USD)
   const reasons = result.skipped.map(item => item.reason)
   assert.ok(reasons.some(r => /more than two decimal/.test(r)))
   assert.ok(reasons.some(r => /price is missing/.test(r)))
@@ -139,25 +120,81 @@ test('unmappable items are skipped with a reason and valid siblings survive', ()
   assert.equal(ok.priceCents, 500)
   assert.equal(byId(result, '46000000000001'), undefined)
   assert.equal(byId(result, '45000000000001'), undefined)
-  // the duplicate must not overwrite the first float-trap entry
   assert.equal(byId(result, '44000000000001').priceCents, 1999)
 })
 
-test('a different expected currency is honored but never converted', () => {
+test('a different shop currency is honored but embedded currencies are never converted', () => {
   const eur = { id: 1, title: 'EU', variants: [{ id: 2, title: 'x', price: { amount: '10.00', currencyCode: 'EUR' } }] }
-  assert.equal(mapShopifyProducts([eur]).products.length, 0)
+  assert.equal(mapShopifyProducts([eur], USD).products.length, 0)
   const mapped = mapShopifyProducts([eur], { currencyCode: 'eur' })
   assert.equal(mapped.products[0].priceCents, 1000)
 })
 
+test('currencyCode is required and must use two minor-unit digits', () => {
+  assert.throws(() => mapShopifyProducts([], {}), /currencyCode is required/)
+  assert.throws(() => mapShopifyProducts([]), /currencyCode is required/)
+  assert.throws(() => mapShopifyProducts([], { currencyCode: 'US' }), /currencyCode is required/)
+  for (const code of ['JPY', 'krw', 'KWD', 'BHD']) assert.throws(() => normalizeCurrency(code), /two minor-unit/)
+  assert.equal(normalizeCurrency(' usd '), 'USD')
+  assert.equal(normalizeCurrency('EUR'), 'EUR')
+})
+
+test('global ids from admin_graphql_api_id win over numeric ids', () => {
+  const product = {
+    id: 111,
+    admin_graphql_api_id: 'gid://shopify/Product/111',
+    title: 'T',
+    variants: [{ id: 222, admin_graphql_api_id: 'gid://shopify/ProductVariant/222', title: 'v', price: '1.00' }],
+  }
+  const [mapped] = mapShopifyProducts([product], USD).products
+  assert.equal(mapped.id, 'gid://shopify/ProductVariant/222')
+  assert.deepEqual(mapped.shopify, { productId: 'gid://shopify/Product/111', variantId: 'gid://shopify/ProductVariant/222' })
+})
+
+test('unpublished products are skipped unless explicitly included', () => {
+  const product = { id: 1, title: 'U', published_at: null, variants: [{ id: 2, price: '1.00' }] }
+  const hidden = mapShopifyProducts([product], USD)
+  assert.equal(hidden.products.length, 0)
+  assert.match(hidden.skipped[0].reason, /not published/)
+  assert.equal(mapShopifyProducts([product], { ...USD, includeUnpublished: true }).products.length, 1)
+  assert.equal(mapShopifyProducts([{ ...product, published_at: '2026-01-01T00:00:00Z' }], USD).products.length, 1)
+  assert.equal(mapShopifyProducts([{ id: 1, title: 'No field', variants: [{ id: 2, price: '1.00' }] }], USD).products.length, 1)
+})
+
+test('variants Shopify reports as out of stock with a deny policy are skipped', () => {
+  const product = {
+    id: 1,
+    title: 'Stock',
+    variants: [
+      { id: 10, price: '1.00', inventoryPolicy: 'DENY', inventoryQuantity: 0 },
+      { id: 11, price: '1.00', inventoryPolicy: 'DENY', inventoryQuantity: -2 },
+      { id: 12, price: '1.00', inventory_policy: 'deny', inventory_quantity: 0 },
+      { id: 13, price: '1.00', inventoryPolicy: 'CONTINUE', inventoryQuantity: 0 },
+      { id: 14, price: '1.00', inventoryPolicy: 'DENY' },
+      { id: 15, price: '1.00', inventoryPolicy: 'DENY', inventoryQuantity: 3 },
+    ],
+  }
+  const result = mapShopifyProducts([product], USD)
+  assert.deepEqual(result.products.map(p => p.id), ['13', '14', '15'])
+  assert.equal(result.skipped.filter(s => /out of stock/.test(s.reason)).length, 3)
+  for (const p of result.products) assert.equal('inventoryQuantity' in p, false, 'inventory must not be invented')
+})
+
+test('products with a truncated variant list are skipped whole', () => {
+  const product = { id: 1, title: 'Big', variants: { pageInfo: { hasNextPage: true }, nodes: [{ id: 2, price: '1.00' }] } }
+  const result = mapShopifyProducts([product], USD)
+  assert.equal(result.products.length, 0)
+  assert.match(result.skipped[0].reason, /truncated/)
+})
+
 test('accepted input wrappers: array, { products: [] }, { products: { nodes } }', () => {
   const p = fixtures.defaultTitleOnly
-  assert.equal(mapShopifyProducts([p]).products.length, 1)
-  assert.equal(mapShopifyProducts({ products: [p] }).products.length, 1)
-  assert.equal(mapShopifyProducts({ products: { nodes: [p] } }).products.length, 1)
-  assert.equal(mapShopifyProducts(null).products.length, 0)
-  assert.equal(mapShopifyProducts('nope').products.length, 0)
-  assert.equal(mapShopifyProducts([42]).skipped.length, 1)
+  assert.equal(mapShopifyProducts([p], USD).products.length, 1)
+  assert.equal(mapShopifyProducts({ products: [p] }, USD).products.length, 1)
+  assert.equal(mapShopifyProducts({ products: { nodes: [p] } }, USD).products.length, 1)
+  assert.equal(mapShopifyProducts(null, USD).products.length, 0)
+  assert.equal(mapShopifyProducts('nope', USD).products.length, 0)
+  assert.equal(mapShopifyProducts([42], USD).skipped.length, 1)
 })
 
 test('shopifyId preserves identifiers exactly and rejects unsafe numbers', () => {
@@ -170,7 +207,7 @@ test('shopifyId preserves identifiers exactly and rejects unsafe numbers', () =>
 })
 
 test('output satisfies the catalog contract and carries no invented fields', () => {
-  const result = mapShopifyProducts(ALL)
+  const result = mapShopifyProducts(ALL, USD)
   assert.ok(result.products.length > 0)
   assertCatalogContract(result.products)
   const allowed = new Set(['id', 'name', 'description', 'priceCents', 'image', 'variant', 'sku', 'shopify'])
@@ -180,7 +217,7 @@ test('output satisfies the catalog contract and carries no invented fields', () 
   assert.doesNotThrow(() => JSON.stringify({ products: result.products }))
 })
 
-test('mapper stays isolated from checkout, payments, database and routes', () => {
+test('mapper stays isolated from payments, database, env and routes', () => {
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '')
   assert.doesNotMatch(code, /stripe|checkout|cart-store|neon|process\.env|fetch\(/i)
   const imports = source.match(/^import .*$/gm) ?? []
