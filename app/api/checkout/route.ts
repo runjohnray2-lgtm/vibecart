@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import Stripe from "stripe"
+import { stripeKeyMode } from "@/lib/stripe-mode"
 import { CatalogSourceError, getCatalogProduct } from "@/lib/catalog-source"
 import type { VibeProduct } from "@/lib/products"
 import { getCart, markCartConverted, type VibeCart } from "@/lib/cart-store"
@@ -360,7 +361,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      mode: "live",
+      // Unknown key shapes are labeled live so a real-money session is never understated.
+      mode: stripeKeyMode(secretKey) === "test" ? "test" : "live",
       checkoutUrl: session.url,
       checkoutSessionId: session.id,
     })

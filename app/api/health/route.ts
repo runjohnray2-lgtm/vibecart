@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { stripeKeyMode } from "@/lib/stripe-mode"
 import { orderPermalinkConfigured } from "@/lib/order-permalink"
 import { hostedMerchantAuthConfigured, hostedModeEnabled } from "@/lib/merchant-auth"
 import { hsnCheckoutReadiness } from "@/lib/he-said-nothing-config"
@@ -12,11 +13,7 @@ function stripeCredentialInfo() {
     return { configured: false, mode: "none", credentialType: "none" }
   }
 
-  const mode = value.startsWith("sk_live_") || value.startsWith("rk_live_")
-    ? "live"
-    : value.startsWith("sk_test_") || value.startsWith("rk_test_")
-      ? "test"
-      : "unknown"
+  const mode = stripeKeyMode(value)
 
   const credentialType = value.startsWith("rk_")
     ? "restricted"
@@ -48,6 +45,8 @@ export async function GET() {
           : "reference-catalog-with-stripe-credential"
         : "no-stripe-credential",
       webhookConfigured: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+      durableOrderStoreConfigured: Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL),
+      cloudOutboxRetryEnabled: process.env.VIBECART_CLOUD_OUTBOX_CRON_ENABLED?.trim().toLowerCase() === "true",
       cloudConfigured: Boolean(
         process.env.VIBECART_CLOUD_INGEST_URL && process.env.VIBECART_CLOUD_INGEST_KEY
       ),
