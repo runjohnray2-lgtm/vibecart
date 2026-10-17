@@ -14,6 +14,15 @@ const HOSTED_MERCHANT_POST_PATHS = new Set([
   "/api/cart",
 ])
 
+const MCP_CHECKOUT_TOOLS = new Set([
+  "vibecart.create_checkout",
+  "vibecart.checkout_sales_cart",
+])
+
+const MCP_COMMERCE_WRITE_TOOLS = new Set([
+  "vibecart.create_sales_cart",
+])
+
 const UCP_MUTATING_TOOLS = new Set([
   "create_cart",
   "update_cart",
@@ -138,8 +147,11 @@ async function classifyRateLimit(req: NextRequest): Promise<{ policy: RateLimitP
   if ((path === "/mcp" || path === "/ucp/mcp") && req.method === "POST") {
     const envelope = await rpcEnvelope(req)
     const name = envelope?.method === "tools/call" ? envelope.params?.name : undefined
-    if (path === "/mcp" && name === "vibecart.create_checkout") {
+    if (path === "/mcp" && name && MCP_CHECKOUT_TOOLS.has(name)) {
       return { policy: RATE_LIMIT_POLICIES.checkout, rpcId: envelope?.id }
+    }
+    if (path === "/mcp" && name && MCP_COMMERCE_WRITE_TOOLS.has(name)) {
+      return { policy: RATE_LIMIT_POLICIES.commerceWrite, rpcId: envelope?.id }
     }
     if (path === "/ucp/mcp" && name && UCP_MUTATING_TOOLS.has(name)) {
       return { policy: RATE_LIMIT_POLICIES.commerceWrite, rpcId: envelope?.id }

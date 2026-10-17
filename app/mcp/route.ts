@@ -2,6 +2,15 @@ import { NextResponse } from "next/server"
 import { CatalogSourceError, catalogSourceMode, listCatalogProducts } from "@/lib/catalog-source"
 import type { VibeProduct } from "@/lib/products"
 import { POST as checkoutPost } from "@/app/api/checkout/route"
+import { POST as cartCheckoutPost } from "@/app/api/cart/[id]/checkout/route"
+import { discoverSalesProducts, SalesAssistantInputError } from "@/lib/sales-assistant"
+import {
+  aiSalespersonEnabled,
+  createAttributedSalesCart,
+  newSalesSessionId,
+  normalizeSalesSessionId,
+  SalespersonDisabledError,
+} from "@/lib/sales-cart"
 import { hsnCheckoutReadiness, isHsnProductId } from "@/lib/he-said-nothing-config"
 
 export const runtime = "nodejs"
@@ -34,6 +43,24 @@ interface CheckoutItem {
 
 const rateBuckets = new Map<string, RateBucket>()
 
+const compatibilitySchema = {
+  type: "object",
+  properties: {
+    mode: { type: "string", enum: ["not_required", "structured"] },
+    required: { type: "array", items: { type: "string" } },
+    attributes: { type: "object", additionalProperties: { type: "array", items: { type: "string" } } },
+    questions: { type: "object", additionalProperties: { type: "string" } },
+    statement: { type: "string" },
+  },
+  required: ["mode"],
+  additionalProperties: false,
+} as const
+
+const compatibilityInputSchema = {
+  type: "object",
+  additionalProperties: { type: "string" },
+} as const
+
 const productSchema = {
   type: "object",
   properties: {
@@ -43,8 +70,34 @@ const productSchema = {
     priceCents: { type: "integer", minimum: 0, description: "Trusted unit price in USD cents." },
     image: { type: "string" },
     variant: { type: "string" },
+    availability: { type: "string", enum: ["in_stock", "out_of_stock", "preorder", "made_to_order", "unknown"] },
+    compatibility: compatibilitySchema,
   },
-  required: ["id", "name", "description", "priceCents", "image"],
+  required: ["id", "name", "description", "priceCents", "image", "availability"],
+  additionalProperties: false,
+} as const
+
+const salesCompatibilityEvidenceSchema = {
+  type: "object",
+  properties: {
+    status: { type: "string", enum: ["verified", "not_required", "needs_clarification", "unknown", "incompatible"] },
+    statement: { type: "string" },
+    matched: compatibilityInputSchema,
+    missingFields: { type: "array", items: { type: "string" } },
+  },
+  required: ["status", "matched", "missingFields"],
+  additionalProperties: false,
+} as const
+
+const salesMatchSchema = {
+  type: "object",
+  properties: {
+    product: productSchema,
+    availability: { type: "string", enum: ["in_stock", "out_of_stock", "preorder", "made_to_order", "unknown"] },
+    compatibility: salesCompatibilityEvidenceSchema,
+    matchedTerms: { type: "array", items: { type: "string" } },
+  },
+  required: ["product", "availability", "compatibility", "matchedTerms"],
   additionalProperties: false,
 } as const
 
@@ -105,6 +158,47 @@ const tools = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
+    name: "vibecart.find_products",
+    title: "Find grounded product recommendations",
+    description: "Searches only the trusted merchant catalog. Returns exact price/availability evidence, asks merchant-defined compatibility questions when required, and never invents fitment or inventory.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", minLength: 1, maxLength: 500 },
+        compatibility: compatibilityInputSchema,
+        salesSessionId: { type: "string", description: "Optional VibeCart sales session returned by a prior call." },
+        limit: { type: "integer", minimum: 1, maximum: 20, default: 10 },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", const: true },
+        salesSessionId: { type: "string" },
+        status: { type: "string", enum: ["matches", "needs_clarification", "no_match"] },
+        query: { type: "string" },
+        compatibility: compatibilityInputSchema,
+        matches: { type: "array", items: salesMatchSchema },
+        candidates: { type: "array", items: salesMatchSchema },
+        clarifyingQuestions: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { field: { type: "string" }, question: { type: "string" } },
+            required: ["field", "question"],
+            additionalProperties: false,
+          },
+        },
+        message: { type: "string" },
+      },
+      required: ["success", "salesSessionId", "status", "query", "compatibility", "matches", "candidates", "clarifyingQuestions", "message"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
     name: "vibecart.get_integration_instructions",
     title: "Get secure integration instructions",
     description: "Returns concise Next.js App Router guidance for installing VibeCart with trusted catalog pricing, multi-item checkout, and the shared MCP endpoint.",
@@ -120,6 +214,66 @@ const tools = [
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: "vibecart.create_sales_cart",
+    title: "Create an attributed AI sales cart",
+    description: "Creates a durable, server-priced cart from trusted product IDs after required compatibility checks. Known out-of-stock products are rejected. Requires the AI salesperson feature flag.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        items: { type: "array", minItems: 1, maxItems: MAX_CHECKOUT_LINE_ITEMS, items: checkoutItemSchema },
+        idempotencyKey: { type: "string", minLength: 8, maxLength: 200 },
+        salesSessionId: { type: "string" },
+        channel: { type: "string", minLength: 1, maxLength: 80 },
+        query: { type: "string", maxLength: 500 },
+        compatibility: compatibilityInputSchema,
+      },
+      required: ["items", "idempotencyKey", "salesSessionId"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", const: true },
+        salesSessionId: { type: "string" },
+        cart: { type: "object" },
+        cartAccessToken: { type: ["string", "null"] },
+      },
+      required: ["success", "salesSessionId", "cart", "cartAccessToken"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: "vibecart.checkout_sales_cart",
+    title: "Create checkout for an attributed AI sales cart",
+    description: "Creates hosted Stripe Checkout from an existing VibeCart AI sales cart. Prices are re-resolved server-side by the normal cart checkout path. Requires the AI salesperson feature flag.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cartId: { type: "string", minLength: 1, maxLength: 200 },
+        cartAccessToken: { type: "string", minLength: 1, maxLength: 500 },
+      },
+      required: ["cartId"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean" },
+        mode: { type: "string", enum: ["demo", "test", "live"] },
+        checkoutUrl: { type: ["string", "null"] },
+        message: { type: "string" },
+        totalCents: { type: "integer" },
+        untrustedPricing: { type: "boolean" },
+        code: errorProperties.code,
+        error: errorProperties.error,
+      },
+      required: ["success"],
+      additionalProperties: true,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
   {
     name: "vibecart.create_checkout",
@@ -160,6 +314,17 @@ const tools = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
 ] as const
+
+const SALESPERSON_TOOL_NAMES = new Set([
+  "vibecart.find_products",
+  "vibecart.create_sales_cart",
+  "vibecart.checkout_sales_cart",
+])
+
+function activeTools() {
+  if (aiSalespersonEnabled()) return tools
+  return tools.filter(tool => !SALESPERSON_TOOL_NAMES.has(tool.name))
+}
 
 function allowedOrigin(req: Request): boolean {
   const origin = req.headers.get("origin")
@@ -333,6 +498,84 @@ async function normalizeCheckoutItems(args: Record<string, unknown>): Promise<{ 
 }
 
 async function callTool(req: Request, name: string, args: Record<string, unknown>) {
+  if (SALESPERSON_TOOL_NAMES.has(name) && !aiSalespersonEnabled()) {
+    return toolError("AI salesperson is not enabled for this merchant.", "SALESPERSON_DISABLED")
+  }
+
+  if (name === "vibecart.find_products") {
+    try {
+      const products = await listAgentVisibleProducts()
+      const requestedSession = args.salesSessionId
+      const salesSessionId = requestedSession === undefined
+        ? newSalesSessionId()
+        : normalizeSalesSessionId(requestedSession)
+      const discovery = discoverSalesProducts(products, {
+        query: args.query as string,
+        compatibility: args.compatibility as Record<string, string> | undefined,
+        limit: args.limit as number | undefined,
+      })
+      return completeToolResult(
+        { success: true, salesSessionId, ...discovery },
+        JSON.stringify({ salesSessionId, ...discovery })
+      )
+    } catch (error) {
+      const failure = catalogFailure(error)
+      if (failure) return failure
+      if (error instanceof SalesAssistantInputError) return toolError(error.message, "INVALID_ARGUMENT")
+      throw error
+    }
+  }
+
+  if (name === "vibecart.create_sales_cart") {
+    try {
+      const checkout = await normalizeCheckoutItems({ items: args.items })
+      const salesSessionId = normalizeSalesSessionId(args.salesSessionId)
+      const result = await createAttributedSalesCart({
+        items: checkout.items,
+        idempotencyKey: args.idempotencyKey as string,
+        salesSessionId,
+        channel: args.channel as string | undefined,
+        query: args.query as string | undefined,
+        compatibility: args.compatibility as Record<string, string> | undefined,
+      })
+      return completeToolResult({
+        success: true,
+        salesSessionId,
+        cart: result.cart,
+        cartAccessToken: result.cartAccessToken,
+      })
+    } catch (error) {
+      const failure = catalogFailure(error)
+      if (failure) return failure
+      if (error instanceof SalespersonDisabledError) return toolError(error.message, "SALESPERSON_DISABLED")
+      if (error instanceof SalesAssistantInputError) return toolError(error.message, "INVALID_ARGUMENT")
+      const message = error instanceof Error ? error.message : "Sales cart could not be created"
+      return toolError(message, "SALES_CART_FAILED")
+    }
+  }
+
+  if (name === "vibecart.checkout_sales_cart") {
+    const cartId = getStringArg(args, "cartId")
+    if (!cartId || cartId.length > 200) return toolError("cartId is required", "INVALID_ARGUMENT")
+    const token = getStringArg(args, "cartAccessToken")
+    if (token && token.length > 500) return toolError("cartAccessToken is invalid", "INVALID_ARGUMENT")
+    const origin = new URL(req.url).origin
+    const headers: Record<string, string> = { "content-type": "application/json", origin }
+    if (token) headers.authorization = `Bearer ${token}`
+    const checkoutRequest = new Request(`${origin}/api/cart/${encodeURIComponent(cartId)}/checkout`, {
+      method: "POST",
+      headers,
+    })
+    const response = await cartCheckoutPost(checkoutRequest, { params: Promise.resolve({ id: cartId }) })
+    const data = await response.json() as Record<string, unknown>
+    if (!response.ok || data.success !== true) {
+      const code = typeof data.code === "string" ? data.code : "CHECKOUT_FAILED"
+      const message = typeof data.error === "string" ? data.error : "Sales cart checkout failed"
+      return toolError(message, code, data)
+    }
+    return completeToolResult(data)
+  }
+
   if (name === "vibecart.list_products") {
     try {
       const products = await listAgentVisibleProducts()
@@ -383,6 +626,7 @@ async function callTool(req: Request, name: string, args: Record<string, unknown
         "Configure VIBECART_CATALOG_URL for a merchant-controlled HTTPS JSON catalog; the built-in catalog is demo-only.",
         "Use product IDs returned by the trusted merchant catalog for checkout.",
         "vibecart.create_checkout accepts legacy productId + quantity or a multi-item items[] list.",
+        "When VIBECART_AI_SALESPERSON_ENABLED=true, use vibecart.find_products before vibecart.create_sales_cart; never claim fitment unless compatibility.status is verified or not_required.",
         "Never expose STRIPE_SECRET_KEY or VIBECART_CATALOG_BEARER_TOKEN in client code.",
         "Never send prices through the generic MCP checkout tool; VibeCart resolves trusted prices server-side.",
       ],
@@ -449,7 +693,7 @@ export async function GET(req: Request) {
     version: SERVER_VERSION,
     endpoint: `${origin}/mcp`,
     protocols: [MODERN_PROTOCOL, LEGACY_PROTOCOL, MCP_STANDARD_PROTOCOL],
-    tools: tools.map(tool => tool.name),
+    tools: activeTools().map(tool => tool.name),
     spec: `${origin}/llms.txt`,
   })
 }
@@ -536,7 +780,7 @@ export async function POST(req: Request) {
   if (message.method === "tools/list") {
     return rpcResult(message.id, {
       resultType: "complete",
-      tools,
+      tools: activeTools(),
       ttlMs: 300_000,
       cacheScope: "public",
     })
