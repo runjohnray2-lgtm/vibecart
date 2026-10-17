@@ -130,3 +130,40 @@ jobs:
       - name: Show server log on failure
         if: failure()
         run: cat /tmp/vibecart-next.log || true
+
+  payment-durability-db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vibecart_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vibecart_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Apply payment durability migrations
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d vibecart_test -f migrations/001_durable_carts.sql
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d vibecart_test -f migrations/004_cart_metadata.sql
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d vibecart_test -f migrations/005_durable_orders.sql
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d vibecart_test -f migrations/007_core_order_outbox.sql
+
+      - name: Verify idempotency, merchant isolation, and Cloud outbox schema
+        env:
+          PGPASSWORD: postgres
+        run: psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d vibecart_test -f tests/payment-durability-smoke.sql
+
