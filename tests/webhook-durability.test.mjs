@@ -17,13 +17,13 @@ async function transpile(path) {
 }
 
 function evaluate(code, shims) {
-  const module = { exports: {} }
+  const testModule = { exports: {} }
   const shimRequire = (name) => {
     if (name in shims) return shims[name]
     throw new Error(`Unexpected import in module under test: ${name}`)
   }
-  new Function("require", "exports", "module", code)(shimRequire, module.exports, module)
-  return module.exports
+  new Function("require", "exports", "module", code)(shimRequire, testModule.exports, testModule)
+  return testModule.exports
 }
 
 const routeCode = await transpile("app/api/webhook/stripe/route.ts")
