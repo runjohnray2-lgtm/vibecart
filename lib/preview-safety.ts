@@ -30,6 +30,7 @@ export function previewSafetyFailure(env: NodeJS.ProcessEnv = process.env): stri
 export function previewRouteAllowed(path: string): boolean {
   if (!path.startsWith("/api/")) return true
   return path === "/api/health" || path === "/api/checkout"
+    || path === "/api/pilot/catalog"
     || path === "/api/webhook/stripe" || path === "/api/cart"
     || /^\/api\/cart\/[^/]+(?:\/checkout)?$/.test(path)
 }

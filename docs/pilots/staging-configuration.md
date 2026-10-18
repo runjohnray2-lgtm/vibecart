@@ -70,7 +70,7 @@ Sources: [organization management](https://neon.com/docs/manage/orgs-manage),
 ## Vercel Preview variables
 
 Use sensitive server variables for credentials, Preview only, restricted to the
-reviewed pilot branch (`agent/checkout-quote-retry` for this PR). Never select
+reviewed pilot branch (`agent/private-pilot-feed` for this PR). Never select
 Production or Development. `.env.staging.example` is a blank template only.
 
 Verified UI detail: **Add Environment Variable defaults to Production**. Selecting
@@ -93,6 +93,8 @@ Never edit the existing production DATABASE_URL or Stripe rows.
 | `VIBECART_MERCHANT_API_KEY` | New staging-only random secret, at least 24 characters; do not reuse production. |
 | `VIBECART_CART_ACCESS_SECRET` | New staging-only random secret, at least 32 characters. |
 | `VIBECART_CATALOG_URL` | Approved HTTPS limited feed, preserving real variant IDs and exact USD cents; no credentials embedded in the URL. |
+| `VIBECART_PILOT_CATALOG_ENABLED` | `true` only for the controlled private snapshot in Preview; computes its own immutable deployment HTTPS feed URL. Leave explicit catalog URL empty for this path. |
+| `VIBECART_PILOT_CATALOG_JSON` | Sensitive JSON `{ merchantId, capturedAt, products }`, 1–20 verified variants, at most 48 KB, no customer/credential data. Captured timestamp must be within 24h (at most 30s future clock skew). Refresh via the authorized read-only source when stale. |
 | `VIBECART_MERCHANT_NAME` | `Radiantz LED Lighting (TEST pilot)` |
 | `VIBECART_AI_SALESPERSON_ENABLED` | `true`; existing deterministic grounded tools, no metered LLM call required. |
 | `VIBECART_CLOUD_INGEST_URL`, `VIBECART_CLOUD_INGEST_KEY` | Empty; remove inherited outbound configuration in this branch. |
@@ -107,6 +109,16 @@ migration, securely verify the effective fresh deployment connection's resource
 IDs and role grants against the approved staging resource. Health is configuration
 only and cannot prove target identity or grants. Do not probe production with
 staging credentials merely to claim a negative test.
+
+The private snapshot endpoint `/api/pilot/catalog` requires Preview, the isolation
+gate, merchant authentication and fresh validated JSON. Production returns 404.
+The catalog client sends same-project short-lived OIDC and merchant headers only
+to this exact deployment/path, never to external URLs. Existing HTTPS/DNS/private-IP,
+size, timeout, redirect and product validation remain in force. No export is
+committed or publicly hosted; this is a controlled snapshot, not Shopify sync.
+Actual protected runtime feed access remains to be verified after secure import.
+The current capture expires for feed use October 19 at 3:49 PM Pacific; revalidate
+the source rather than editing the timestamp. Database lifetime is separate.
 
 ## Authenticated client and protected test webhook delivery
 

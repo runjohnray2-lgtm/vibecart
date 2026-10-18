@@ -23,7 +23,18 @@ type CacheEntry = {
 let cache: CacheEntry | null = null
 
 export function catalogSourceMode(): "reference" | "remote" {
-  return process.env.VIBECART_CATALOG_URL?.trim() ? "remote" : "reference"
+  return configuredCatalogUrl() ? "remote" : "reference"
+}
+
+function configuredCatalogUrl(): string | undefined {
+  if (process.env.VERCEL_ENV === "preview" && process.env.VIBECART_PILOT_CATALOG_ENABLED === "true") {
+    const host = process.env.VERCEL_URL
+    if (!host || !/^[a-z0-9-]+\.vercel\.app$/.test(host)) {
+      throw new CatalogSourceError("Private pilot feed needs the deployment's VERCEL_URL", "CATALOG_CONFIG_INVALID")
+    }
+    return `https://${host}/api/pilot/catalog`
+  }
+  return process.env.VIBECART_CATALOG_URL?.trim()
 }
 
 export function configuredMerchantName(): string {
@@ -224,7 +235,7 @@ function parseProduct(value: unknown): VibeProduct {
   }
 }
 
-function parseCatalogDocument(value: unknown): VibeProduct[] {
+export function parseCatalogDocument(value: unknown): VibeProduct[] {
   const rawProducts = Array.isArray(value)
     ? value
     : value && typeof value === "object" && Array.isArray((value as Record<string, unknown>).products)
@@ -246,6 +257,14 @@ function parseCatalogDocument(value: unknown): VibeProduct[] {
 async function fetchRemoteCatalog(rawUrl: string): Promise<VibeProduct[]> {
   const url = await validatedCatalogUrl(rawUrl)
   const headers: Record<string, string> = { accept: "application/json" }
+  if (process.env.VERCEL_ENV === "preview" && process.env.VIBECART_PILOT_CATALOG_ENABLED === "true"
+    && url.hostname === process.env.VERCEL_URL && url.pathname === "/api/pilot/catalog" && !url.search && !url.hash) {
+    if (!process.env.VERCEL_OIDC_TOKEN || !process.env.VIBECART_MERCHANT_API_KEY) {
+      throw new CatalogSourceError("Private pilot feed authentication is unavailable", "CATALOG_CONFIG_INVALID")
+    }
+    headers["x-vercel-trusted-oidc-idp-token"] = process.env.VERCEL_OIDC_TOKEN
+    headers["x-vibecart-merchant-key"] = process.env.VIBECART_MERCHANT_API_KEY
+  }
   const bearer = process.env.VIBECART_CATALOG_BEARER_TOKEN?.trim()
   if (bearer) headers.authorization = `Bearer ${bearer}`
 
@@ -281,7 +300,7 @@ async function fetchRemoteCatalog(rawUrl: string): Promise<VibeProduct[]> {
 }
 
 export async function listCatalogProducts(): Promise<VibeProduct[]> {
-  const rawUrl = process.env.VIBECART_CATALOG_URL?.trim()
+  const rawUrl = configuredCatalogUrl()
   if (!rawUrl) return PRODUCTS
 
   if (cache && cache.url === rawUrl && cache.expiresAt > Date.now()) return cache.products
