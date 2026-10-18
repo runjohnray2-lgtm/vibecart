@@ -78,8 +78,12 @@ function normalizeCompatibility(value: unknown): Record<string, string> {
     throw new SalesAssistantInputError(`compatibility cannot exceed ${MAX_COMPATIBILITY_FIELDS} fields`)
   }
   const result: Record<string, string> = {}
+  const seen = new Set<string>()
   for (const [rawKey, rawValue] of entries) {
     const key = normalizeKey(rawKey)
+    const foldedKey = key.toLowerCase()
+    if (seen.has(foldedKey)) throw new SalesAssistantInputError("Duplicate compatibility field")
+    seen.add(foldedKey)
     if (typeof rawValue !== "string") {
       throw new SalesAssistantInputError(`compatibility.${key} must be a string`)
     }
@@ -202,7 +206,7 @@ function evaluateCompatibility(
 
   for (const [lowerKey, supplied] of provided) {
     const rule = attributes.get(lowerKey)
-    if (!rule) continue
+    if (!rule) return { status: "unknown", matched, missingFields: [] }
     const accepted = rule.values.some(value => normalized(value) === normalized(supplied.value))
     if (!accepted) {
       return {
@@ -273,6 +277,10 @@ export function discoverSalesProducts(
   for (const entry of ranked) {
     const record = matchRecord(entry.product, input.compatibility, entry.matchedTerms)
     if (record.compatibility.status === "incompatible") continue
+    if (record.availability === "out_of_stock") {
+      candidates.push(record)
+      continue
+    }
     if (record.compatibility.status === "needs_clarification") {
       candidates.push(record)
       continue
@@ -330,8 +338,10 @@ export function discoverSalesProducts(
     matches: [],
     candidates: candidates.slice(0, input.limit),
     clarifyingQuestions: [],
-    message: compatibilityProvided && candidates.length > 0
-      ? "Catalog products matched the request, but the merchant has not provided structured compatibility data for those products. Do not claim fitment."
+    message: candidates.length > 0 && candidates.every(candidate => candidate.availability === "out_of_stock")
+      ? "Matching products are out of stock. Do not offer checkout."
+      : compatibilityProvided && candidates.length > 0
+      ? "Catalog products matched the request, but the merchant has not provided structured compatibility data covering every supplied attribute. Do not claim fitment."
       : "No trusted catalog match was found. Do not invent a product, fitment, price, discount, or availability.",
   }
 }

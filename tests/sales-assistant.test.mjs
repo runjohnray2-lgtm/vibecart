@@ -185,3 +185,31 @@ test("sales input is bounded and malformed compatibility is rejected", async () 
     /limit must be/
   )
 })
+
+test("unverified extra fitment attributes never produce a verified match or cart", async () => {
+  const { discoverSalesProducts, assertSalesCompatibility } = await loadSalesAssistant()
+  const attributes = { make: "Honda", model: "Grom", year: "2015", trim: "unverified-trim" }
+  const result = discoverSalesProducts([fitmentProduct], { query: "Grom bracket", compatibility: attributes })
+  assert.equal(result.status, "no_match")
+  assert.equal(result.matches.length, 0)
+  assert.equal(result.candidates[0].compatibility.status, "unknown")
+  assert.throws(() => assertSalesCompatibility(fitmentProduct, attributes), /does not have trusted compatibility data/)
+})
+
+test("conflicting case variants of a shopper attribute cannot hide a mismatch", async () => {
+  const { discoverSalesProducts } = await loadSalesAssistant()
+  assert.throws(() => discoverSalesProducts([fitmentProduct], {
+    query: "Grom bracket", compatibility: { make: "Yamaha", MAKE: "Honda", model: "Grom", year: "2015" },
+  }), /duplicate compatibility field/i)
+})
+
+test("known out-of-stock matches stay visible as candidates but are not recommended", async () => {
+  const { discoverSalesProducts } = await loadSalesAssistant()
+  const result = discoverSalesProducts([{ ...fitmentProduct, availability: "out_of_stock" }], {
+    query: "Grom bracket", compatibility: { make: "Honda", model: "Grom", year: "2015" },
+  })
+  assert.equal(result.status, "no_match")
+  assert.equal(result.matches.length, 0)
+  assert.equal(result.candidates[0].availability, "out_of_stock")
+  assert.match(result.message, /out of stock/i)
+})
