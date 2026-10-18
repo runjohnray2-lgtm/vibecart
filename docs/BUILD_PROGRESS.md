@@ -87,3 +87,14 @@ Work on #93 should be stacked on the verified #99 branch until #91 receives owne
 3. Inventory existing MCP/UCP catalog/cart/checkout primitives and implement verified conversational discovery + compatibility-question behavior without adding an ungrounded LLM decision path.
 4. Add AI-sales attribution metadata into carts/orders.
 5. Keep PR #91 unmerged until explicit production-deployment approval.
+
+
+## 2026-10-18 payment retry review — PR #109
+
+- Found and fixed stale-worker writes after a Cloud outbox lease is reclaimed. Claims now carry random ownership tokens; completion and failure updates require ownership.
+- Added migration 008, CI migration wiring, behavioral overlap regressions for stale success/failure, and PostgreSQL ownership assertions.
+- Local verification: build PASS; typecheck PASS; lint PASS with one pre-existing img warning; all 155 unit tests PASS; MCP production-server smoke PASS; live UCP catalog/discovery capture and order mapper generation PASS.
+- Migrations 001/004/005/007/008 and payment durability SQL assertions PASS in local PGlite PostgreSQL. This is not Neon runtime evidence.
+- Official UCP validator and service PostgreSQL checks: GitHub CI pending when checkpoint written.
+- PR #109 is stacked on #91. Neither PR merged or production deployed. No production credentials, live payment activation, or paid services changed.
+- Remaining gates: non-production Neon + signed Stripe test checkout/replay/outage evidence; #56 managed merchant user sessions, credential provisioning and shared-runtime isolation; #58 authorized real merchant catalog and pilot. Then Shopify #94, merchant billing #97, and grounded AI sales #93 as dependencies permit.
