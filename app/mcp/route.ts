@@ -408,6 +408,7 @@ async function callTool(req: Request, name: string, args: Record<string, unknown
       headers: {
         "content-type": "application/json",
         origin,
+        ...(req.headers.get("x-vibecart-merchant-key") ? { "x-vibecart-merchant-key": req.headers.get("x-vibecart-merchant-key")! } : {}),
       },
       body: JSON.stringify({ items: checkout.items }),
     })

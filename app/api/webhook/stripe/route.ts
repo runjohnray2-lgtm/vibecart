@@ -34,8 +34,8 @@ export async function POST(req: Request) {
   try {
     if (!signature) throw new Error("Missing stripe-signature header")
     event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret)
-  } catch (error) {
-    console.warn("[vibecart webhook] Stripe signature verification failed", error)
+  } catch {
+    console.warn("[vibecart webhook] Stripe signature verification failed")
     return NextResponse.json({ success: false, error: "Signature verification failed." }, { status: 400 })
   }
 

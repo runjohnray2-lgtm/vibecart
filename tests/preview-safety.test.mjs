@@ -99,3 +99,31 @@ test("Preview webhook rejects live or unclassified events after signature verifi
     Object.assign(process.env, previous)
   }
 })
+
+test("health explicitly distinguishes Preview configuration from transaction readiness", async () => {
+  const previous = { ...process.env }
+  process.env.VERCEL_ENV = "preview"
+  delete process.env.VIBECART_STAGING_ISOLATION_VERIFIED
+  try {
+    const health = await load("app/api/health/route.ts", {
+      "next/server": { NextResponse: { json: (body, init) => Response.json(body, init) } },
+      "@/lib/preview-safety": safety,
+      "@/lib/stripe-mode": { stripeKeyMode: () => "none" },
+      "@/lib/order-permalink": { orderPermalinkConfigured: () => false },
+      "@/lib/merchant-auth": { hostedMerchantAuthConfigured: () => false, hostedModeEnabled: () => true },
+      "@/lib/he-said-nothing-config": { hsnCheckoutReadiness: () => ({ enabled: false, mode: null }) },
+      "@/lib/catalog-source": { catalogSourceMode: () => "reference", configuredMerchantName: () => "Offline" },
+    })
+    let body = await (await health.GET()).json()
+    assert.equal(body.ok, true)
+    assert.equal(body.stagingSafetyConfigured, false)
+    assert.equal(body.readinessScope, "configuration-only")
+    Object.assign(process.env, valid)
+    body = await (await health.GET()).json()
+    assert.equal(body.stagingSafetyConfigured, true)
+    assert.equal(body.readinessScope, "configuration-only")
+  } finally {
+    for (const key of Object.keys(process.env)) if (!(key in previous)) delete process.env[key]
+    Object.assign(process.env, previous)
+  }
+})

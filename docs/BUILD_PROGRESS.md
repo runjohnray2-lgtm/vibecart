@@ -109,3 +109,14 @@ Work on #93 should be stacked on the verified #99 branch until #91 receives owne
 - #109 CI fully PASS, including service PostgreSQL and official UCP validation.
 - Blockers: dedicated empty/schema-only staging database and zero incremental cost not verified; shared Preview DATABASE_URL unresolved; staging Stripe test credentials absent. No migration, database write, checkout, deployment or paid resource created in this follow-up.
 - Next: establish and verify secure branch-specific staging env with zero extra cost, then execute authorized Radiantz test-only checkout/replay/outage/cross-tenant acceptance under #108. Keep production unchanged.
+
+## 2026-10-18 #56/#99 hosted checkout tenant binding
+
+- Read full #105/#108 and latest comments; coordinated file claims with VibeCart Hourly Build and posted claim to #105. Shopify/pagination/readiness stack untouched.
+- Confirmed #91/#109/#110 green; #100 fails build (missing required availability on inline checkout product), separately from Shopify baseline failures. #106 closed/unmerged, #107 remains stacked on its head branch.
+- Fixed generic cart sessions stamped default instead of configured merchant. All sessions/PaymentIntents now carry merchant identity; hosted webhook rejects absent/conflicting identity before Stripe reads.
+- Generic cart checkout validates tenant, active state and exact items/quantities, including duplicate-line substitution. Handler auth protects internal calls; MCP/cart adapters preserve caller auth.
+- Added actual-code offline PostgreSQL + Stripe-signature integration acceptance for auth/cart/checkout/payment transaction, replay and rollback/recovery. Removed raw Stripe signature error payload logging. Added configuration-only staging health signals.
+- Local build, typecheck, lint (one existing img warning) and 178 tests PASS. Tests are synthetic/offline and do not prove live Neon/Stripe/Radiantz acceptance. CI pending at checkpoint.
+- No production or merchant data changes, real checkout, environment mutation, database provisioning, paid services or metered AI calls.
+- Next: fix #100 compile/test integration and verify grounded external-agent flow; staging runtime tests remain blocked by unverified isolated DB, zero-incremental-cost allowance and Preview-only test Stripe credentials.

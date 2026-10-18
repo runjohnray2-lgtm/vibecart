@@ -1,3 +1,4 @@
+import { previewSafetyFailure } from "@/lib/preview-safety"
 import { NextResponse } from "next/server"
 import { stripeKeyMode } from "@/lib/stripe-mode"
 import { orderPermalinkConfigured } from "@/lib/order-permalink"
@@ -33,6 +34,8 @@ export async function GET() {
     {
       service: "vibecart",
       ok: true,
+      readinessScope: "configuration-only",
+      stagingSafetyConfigured: process.env.VERCEL_ENV === "preview" ? previewSafetyFailure() === null : null,
       catalogMode,
       merchantName: configuredMerchantName(),
       referenceCatalog: catalogMode === "reference",

@@ -25,20 +25,21 @@ export async function persistVerifiedCheckoutEvent(
   session: Stripe.Checkout.Session,
   stripe: Stripe
 ): Promise<StoredOrder> {
-  const order = await buildNormalizedOrder(stripe, session)
   const configuredId = configuredMerchantId()
   const sessionId = sessionMerchantId(session)
 
-  if (hostedModeEnabled() && sessionId && sessionId !== configuredId) {
+  if (hostedModeEnabled() && sessionId !== configuredId) {
     throw new Error("Stripe Checkout merchant identity does not match this hosted merchant")
   }
 
+  const order = await buildNormalizedOrder(stripe, session)
   let merchantId = sessionId ?? configuredId
   let metadata: Record<string, string> = {}
 
   if (order.cartId) {
     const cart = await getCart(order.cartId, merchantId)
     if (cart) {
+      if (cart.merchantId !== merchantId) throw new Error("Cart merchant identity mismatch")
       merchantId = cart.merchantId
       metadata = cart.metadata
     }

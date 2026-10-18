@@ -28,7 +28,11 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     const origin = req.headers.get("origin") ?? new URL(req.url).origin
     const checkoutRequest = new Request(`${origin}/api/checkout`, {
       method: "POST",
-      headers: { "content-type": "application/json", origin },
+      headers: {
+        "content-type": "application/json", origin,
+        ...(req.headers.get("authorization") ? { authorization: req.headers.get("authorization")! } : {}),
+        ...(req.headers.get("x-vibecart-merchant-key") ? { "x-vibecart-merchant-key": req.headers.get("x-vibecart-merchant-key")! } : {}),
+      },
       body: JSON.stringify({
         cartId: cart.id,
         items: cart.items.map(item => ({ productId: item.productId, quantity: item.quantity })),
