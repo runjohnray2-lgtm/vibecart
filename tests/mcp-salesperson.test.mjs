@@ -27,18 +27,25 @@ test("salesperson discovery uses trusted catalog and grounded compatibility outp
   assert.match(assistant, /merchant has not provided structured compatibility data/)
 })
 
-test("AI sales cart never accepts caller-controlled transaction pricing", async () => {
-  const source = await readFile("app/mcp/route.ts", "utf8")
-  const start = source.indexOf('name: "vibecart.create_sales_cart"')
-  const end = source.indexOf('name: "vibecart.checkout_sales_cart"', start)
-  assert.ok(start >= 0 && end > start)
-  const schema = source.slice(start, end)
-
-  assert.match(schema, /items/)
-  assert.match(schema, /productId/)
-  assert.match(schema, /quantity/)
-  assert.doesNotMatch(schema, /priceCents|unitPrice|amountTotal|discount/)
-  assert.match(source, /createAttributedSalesCart/)
+test("AI sales cart schema exposes only trusted IDs and quantities", async () => {
+  const { default: ts } = await import("typescript")
+  const code = ts.transpileModule(await readFile("app/mcp/route.ts", "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  const testModule = { exports: {} }
+  new Function("require", "exports", "module", code)(name => {
+    if (name === "next/server") return { NextResponse: { json: (body, init) => Response.json(body, init) } }
+    if (name === "@/lib/sales-cart") return { aiSalespersonEnabled: () => true }
+    if (name === "@/lib/he-said-nothing-config") return { hsnCheckoutReadiness: () => ({ enabled: false }) }
+    if (["@/lib/catalog-source", "@/app/api/checkout/route", "@/app/api/cart/[id]/checkout/route", "@/lib/sales-assistant"].includes(name)) return {}
+    throw new Error("Unexpected import: " + name)
+  }, testModule.exports, testModule)
+  const response = await testModule.exports.POST(new Request("https://offline.invalid/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) }))
+  assert.equal(response.status, 200)
+  const tool = (await response.json()).result.tools.find(tool => tool.name === "vibecart.create_sales_cart")
+  assert.ok(tool)
+  const schema = tool.inputSchema.properties.items.items
+  assert.deepEqual(Object.keys(schema.properties).sort(), ["productId", "quantity"])
+  assert.equal(schema.additionalProperties, false)
+  assert.ok(schema.required.includes("productId"))
 })
 
 test("attributed cart checkout reuses the normal server-priced cart checkout path", async () => {

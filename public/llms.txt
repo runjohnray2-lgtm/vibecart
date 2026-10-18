@@ -31,7 +31,7 @@ The AI salesperson tools are activation-gated. `vibecart.find_products` searches
 
 ## Merchant catalog source
 
-The built-in reference catalog is fictional/demo data only. A real merchant should configure `VIBECART_CATALOG_URL` to a merchant-controlled, public-routable HTTPS JSON feed. Optional server-only settings are `VIBECART_CATALOG_BEARER_TOKEN` for private feeds and `VIBECART_MERCHANT_NAME` for merchant display identity.
+The built-in reference catalog is fictional reference/demo data only. A real merchant should configure `VIBECART_CATALOG_URL` to a merchant-controlled, public-routable HTTPS JSON feed. Optional server-only settings are `VIBECART_CATALOG_BEARER_TOKEN` for private feeds and `VIBECART_MERCHANT_NAME` for merchant display identity.
 
 The feed may be either a product array or `{ "products": [...] }`. Every product requires a stable `id`, `name`, and non-negative integer `priceCents`; `description`, HTTPS `image`, and `variant` are supported. `availability` is one of `in_stock`, `out_of_stock`, `preorder`, `made_to_order`, or `unknown` and defaults to `unknown`. Optional `compatibility` is merchant-controlled structured evidence; missing compatibility data must never be inferred from marketing prose.
 

@@ -67,9 +67,9 @@ const unknownProduct = {
   availability: "unknown",
 }
 
-function loadSalesCart(products = new Map()) {
+async function loadSalesCart(products = new Map()) {
   const createCalls = []
-  const module = evaluate(await transpile("lib/sales-cart.ts"), {
+  const salesCartModule = evaluate(await transpile("lib/sales-cart.ts"), {
     "@/lib/cart-store": {
       createCart: async (items, key, merchantId, metadata) => {
         createCalls.push({ items, key, merchantId, metadata })
@@ -96,7 +96,7 @@ function loadSalesCart(products = new Map()) {
     },
     "@/lib/sales-assistant": salesAssistant,
   })
-  return { module, createCalls }
+  return { module: salesCartModule, createCalls }
 }
 
 const originalEnabled = process.env.VIBECART_AI_SALESPERSON_ENABLED
@@ -107,7 +107,7 @@ test.after(() => {
 
 test("sales cart is disabled by default", async () => {
   delete process.env.VIBECART_AI_SALESPERSON_ENABLED
-  const { module, createCalls } = loadSalesCart(new Map([[fitmentProduct.id, fitmentProduct]]))
+  const { module, createCalls } = await loadSalesCart(new Map([[fitmentProduct.id, fitmentProduct]]))
 
   await assert.rejects(
     () => module.createAttributedSalesCart({
@@ -123,7 +123,7 @@ test("sales cart is disabled by default", async () => {
 
 test("verified fitment creates a server-priced cart with durable AI attribution", async () => {
   process.env.VIBECART_AI_SALESPERSON_ENABLED = "true"
-  const { module, createCalls } = loadSalesCart(new Map([[fitmentProduct.id, fitmentProduct]]))
+  const { module, createCalls } = await loadSalesCart(new Map([[fitmentProduct.id, fitmentProduct]]))
   const salesSessionId = module.newSalesSessionId()
 
   const result = await module.createAttributedSalesCart({
@@ -149,7 +149,7 @@ test("verified fitment creates a server-priced cart with durable AI attribution"
 
 test("sales cart cannot bypass required fitment questions", async () => {
   process.env.VIBECART_AI_SALESPERSON_ENABLED = "true"
-  const { module, createCalls } = loadSalesCart(new Map([[fitmentProduct.id, fitmentProduct]]))
+  const { module, createCalls } = await loadSalesCart(new Map([[fitmentProduct.id, fitmentProduct]]))
 
   await assert.rejects(
     () => module.createAttributedSalesCart({
@@ -165,7 +165,7 @@ test("sales cart cannot bypass required fitment questions", async () => {
 
 test("known out-of-stock product cannot enter an AI sales cart", async () => {
   process.env.VIBECART_AI_SALESPERSON_ENABLED = "true"
-  const { module, createCalls } = loadSalesCart(new Map([[outOfStockProduct.id, outOfStockProduct]]))
+  const { module, createCalls } = await loadSalesCart(new Map([[outOfStockProduct.id, outOfStockProduct]]))
 
   await assert.rejects(
     () => module.createAttributedSalesCart({
@@ -180,7 +180,7 @@ test("known out-of-stock product cannot enter an AI sales cart", async () => {
 
 test("fitment request cannot use a product with unknown merchant compatibility data", async () => {
   process.env.VIBECART_AI_SALESPERSON_ENABLED = "true"
-  const { module, createCalls } = loadSalesCart(new Map([[unknownProduct.id, unknownProduct]]))
+  const { module, createCalls } = await loadSalesCart(new Map([[unknownProduct.id, unknownProduct]]))
 
   await assert.rejects(
     () => module.createAttributedSalesCart({
@@ -196,7 +196,7 @@ test("fitment request cannot use a product with unknown merchant compatibility d
 
 test("sales cart requires bounded server-format session and idempotency identifiers", async () => {
   process.env.VIBECART_AI_SALESPERSON_ENABLED = "true"
-  const { module } = loadSalesCart(new Map([[unknownProduct.id, unknownProduct]]))
+  const { module } = await loadSalesCart(new Map([[unknownProduct.id, unknownProduct]]))
 
   await assert.rejects(
     () => module.createAttributedSalesCart({

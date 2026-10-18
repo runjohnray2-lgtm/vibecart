@@ -188,6 +188,7 @@ export async function POST(req: Request) {
         }
         resolved.push({
           product: {
+            availability: "unknown",
             id: p.id,
             name: p.name,
             description: p.description ?? "",
