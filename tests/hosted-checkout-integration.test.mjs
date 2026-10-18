@@ -29,6 +29,7 @@ test("hosted merchant checkout -> signed payment -> atomic order, replay and iso
   let failLineWrite = false
   const sessions = new Map()
   const sessionRequests = []
+  const idempotentSessions = new Map()
   const key = "a".repeat(32)
   const signingSecret = "whsec_offline_integration"
   Object.assign(process.env, {
@@ -67,12 +68,19 @@ test("hosted merchant checkout -> signed payment -> atomic order, replay and iso
     class OfflineStripe {
       webhooks = signer.webhooks
       checkout = { sessions: {
-        create: async params => {
+        create: async (params, options) => {
+          const requestKey = options?.idempotencyKey
+          const previous = requestKey && idempotentSessions.get(requestKey)
+          if (previous) {
+            if (previous.params !== JSON.stringify(params)) throw { type: "StripeIdempotencyError" }
+            return previous.session
+          }
           sessionRequests.push(params)
           const id = `cs_test_offline_${sessionRequests.length}`
           const total = params.line_items.reduce((sum, line) => sum + line.quantity * line.price_data.unit_amount, 0)
           const session = { id, object: "checkout.session", livemode: false, payment_status: "paid", amount_subtotal: total, amount_total: total, currency: "usd", client_reference_id: params.client_reference_id, metadata: params.metadata, payment_intent: `pi_${id}`, url: `https://checkout.stripe.com/offline/${id}` }
           sessions.set(id, { session, lines: params.line_items.map((line, index) => ({ id: `li_${index}`, quantity: line.quantity, description: line.price_data.product_data.name, currency: "usd", amount_subtotal: line.quantity * line.price_data.unit_amount, amount_total: line.quantity * line.price_data.unit_amount, amount_tax: 0, amount_discount: 0, price: { unit_amount: line.price_data.unit_amount, product: { id: `prod_${index}`, metadata: line.price_data.product_data.metadata } } })) })
+          if (requestKey) idempotentSessions.set(requestKey, { params: JSON.stringify(params), session })
           return session
         },
         listLineItems: async id => ({ data: sessions.get(id).lines, has_more: false }),
@@ -273,6 +281,40 @@ test("hosted merchant checkout -> signed payment -> atomic order, replay and iso
         assert.equal(order.length, 1)
         assert.equal(order[0].amount_total, 2400)
         assert.equal(order[0].metadata["vibecart.sales.channel"], "radiantz-pilot-mcp")
+      })
+      await t.test("catalog price changes require a refreshed quote before Stripe session creation", async () => {
+        const quoted = await carts.createCart([{ productId: "sku_a", quantity: 1 }], "offline-price-quote")
+        const before = sessionRequests.length
+        const product = products.get("sku_a")
+        try {
+          for (const priceCents of [product.priceCents + 100, product.priceCents - 100]) {
+            products.set("sku_a", { ...product, priceCents })
+            const response = await checkout.POST(request([{ productId: "sku_a", quantity: 1 }], quoted.id))
+            assert.equal(response.status, 409)
+            assert.equal((await response.json()).code, "CART_PRICE_CHANGED")
+            assert.equal(sessionRequests.length, before)
+          }
+          // Explicitly refreshing the cart produces a new server-priced quote.
+          const refreshed = await carts.replaceCartItems(quoted.id, [{ productId: "sku_a", quantity: 1 }], quoted.version)
+          assert.equal(refreshed.subtotalCents, product.priceCents - 100)
+          assert.equal((await checkout.POST(request([{ productId: "sku_a", quantity: 1 }], quoted.id))).status, 200)
+        } finally { products.set("sku_a", product) }
+      })
+      await t.test("unchanged checkout retries reuse the existing session and changed parameters return a safe conflict", async () => {
+        const items = [{ productId: "sku_a", quantity: 1 }]
+        const cart = await carts.createCart(items, "offline-checkout-retry")
+        const first = await (await checkout.POST(request(items, cart.id))).json()
+        const before = sessionRequests.length
+        const second = await (await checkout.POST(request(items, cart.id))).json()
+        assert.equal(first.checkoutSessionId, second.checkoutSessionId)
+        assert.equal(sessionRequests.length, before)
+        const changed = await checkout.POST(new Request("https://offline.invalid/api/checkout", {
+          method: "POST", headers: { "content-type": "application/json", "x-vibecart-merchant-key": key },
+          body: JSON.stringify({ items, cartId: cart.id, successUrl: "https://offline.invalid/different" }),
+        }))
+        assert.equal(changed.status, 409)
+        assert.equal((await changed.json()).code, "CHECKOUT_RETRY_CONFLICT")
+        assert.equal(sessionRequests.length, before)
       })
     })
 
