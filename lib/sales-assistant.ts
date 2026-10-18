@@ -273,6 +273,12 @@ export function discoverSalesProducts(
   for (const entry of ranked) {
     const record = matchRecord(entry.product, input.compatibility, entry.matchedTerms)
     if (record.compatibility.status === "incompatible") continue
+    // Do not recommend items the trusted merchant catalog marks unavailable.
+    // Keep them visible as candidates with their explicit stock state.
+    if (record.availability === "out_of_stock") {
+      candidates.push(record)
+      continue
+    }
     if (record.compatibility.status === "needs_clarification") {
       candidates.push(record)
       continue
@@ -330,9 +336,11 @@ export function discoverSalesProducts(
     matches: [],
     candidates: candidates.slice(0, input.limit),
     clarifyingQuestions: [],
-    message: compatibilityProvided && candidates.length > 0
-      ? "Catalog products matched the request, but the merchant has not provided structured compatibility data for those products. Do not claim fitment."
-      : "No trusted catalog match was found. Do not invent a product, fitment, price, discount, or availability.",
+    message: candidates.length > 0 && candidates.every(candidate => candidate.availability === "out_of_stock")
+      ? "Matching products are marked out of stock by the merchant. Do not recommend checkout for them."
+      : compatibilityProvided && candidates.length > 0
+        ? "Catalog products matched the request, but the merchant has not provided structured compatibility data for those products. Do not claim fitment."
+        : "No trusted catalog match was found. Do not invent a product, fitment, price, discount, or availability.",
   }
 }
 
