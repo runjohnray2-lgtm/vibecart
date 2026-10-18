@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { neon } from "@neondatabase/serverless"
 import { cloudDeliveryRequested, forwardStoredOrderEvent, type CloudForwardResult } from "@/lib/cloud-events"
 import { getStoredOrder } from "@/lib/order-store"
@@ -25,6 +26,7 @@ type CloudOutboxRow = {
   status: CloudOutboxStatus
   attempt_count: number
   next_attempt_at: string | Date
+  lease_token: string | null
   lease_until: string | Date | null
   last_attempt_at: string | Date | null
   delivered_at: string | Date | null
@@ -65,6 +67,7 @@ async function claimOutboxForOrder(orderId: string): Promise<CloudOutboxRow | nu
   const rows = await sql()`
     UPDATE vibecart_cloud_outbox
     SET status = 'processing',
+        lease_token = ${randomUUID()},
         lease_until = now() + (${LEASE_SECONDS} * interval '1 second'),
         last_attempt_at = now(),
         updated_at = now()
@@ -95,6 +98,7 @@ async function claimDueOutbox(limit: number): Promise<CloudOutboxRow[]> {
     )
     UPDATE vibecart_cloud_outbox AS outbox
     SET status = 'processing',
+        lease_token = ${randomUUID()},
         lease_until = now() + (${LEASE_SECONDS} * interval '1 second'),
         last_attempt_at = now(),
         updated_at = now()
@@ -111,11 +115,13 @@ async function markDelivered(row: CloudOutboxRow, result: CloudForwardResult) {
     SET status = 'delivered',
         attempt_count = ${row.attempt_count + 1},
         lease_until = NULL,
+        lease_token = NULL,
         delivered_at = now(),
         last_status_code = ${result.status ?? null},
         last_error = '',
         updated_at = now()
     WHERE id = ${row.id} AND status = 'processing'
+      AND lease_token = ${row.lease_token}
   `
 }
 
@@ -131,10 +137,12 @@ async function markFailed(row: CloudOutboxRow, result: CloudForwardResult | null
         attempt_count = ${nextAttemptCount},
         next_attempt_at = ${nextAttemptAt},
         lease_until = NULL,
+        lease_token = NULL,
         last_status_code = ${result?.status ?? null},
         last_error = ${reason},
         updated_at = now()
     WHERE id = ${row.id} AND status = 'processing'
+      AND lease_token = ${row.lease_token}
   `
   return deadLetter
 }

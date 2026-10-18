@@ -161,6 +161,7 @@ jobs:
           psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d vibecart_test -f migrations/004_cart_metadata.sql
           psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d vibecart_test -f migrations/005_durable_orders.sql
           psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d vibecart_test -f migrations/007_core_order_outbox.sql
+          psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U postgres -d vibecart_test -f migrations/008_outbox_lease_ownership.sql
 
       - name: Verify idempotency, merchant isolation, and Cloud outbox schema
         env:
