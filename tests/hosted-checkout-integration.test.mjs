@@ -53,7 +53,7 @@ test("hosted merchant checkout -> signed payment -> atomic order, replay and iso
       return results
     })
     const auth = await load("lib/merchant-auth.ts", {})
-    const products = new Map(["sku_a", "sku_b"].map((id, index) => [id, { id, name: `Synthetic product ${index}`, priceCents: 1200 + index * 100, description: "Offline fixture", image: "" }]))
+    const products = new Map(["sku_a", "sku_b"].map((id, index) => [id, { id, name: `Synthetic product ${index}`, priceCents: 1200 + index * 100, description: "Offline fixture", image: "", availability: "made_to_order", compatibility: { mode: "not_required" } }]))
     const catalog = { getCatalogProduct: async id => products.get(id), CatalogSourceError: class extends Error {} }
     const carts = await load("lib/cart-store.ts", { "@neondatabase/serverless": { neon: () => sql }, "@/lib/catalog-source": catalog, "@/lib/merchant-auth": auth })
     const orders = await load("lib/order-store.ts", { "@neondatabase/serverless": { neon: () => sql } })
@@ -78,9 +78,11 @@ test("hosted merchant checkout -> signed payment -> atomic order, replay and iso
       } }
     }
     const next = { NextResponse: { json: (body, init) => Response.json(body, init) } }
+    const assistant = await load("lib/sales-assistant.ts", {})
     const checkout = await load("app/api/checkout/route.ts", {
       "next/server": next, stripe: OfflineStripe, "@/lib/stripe-mode": { stripeKeyMode: () => "test" },
       "@/lib/catalog-source": catalog, "@/lib/cart-store": carts, "@/lib/merchant-auth": auth,
+      "@/lib/sales-assistant": assistant,
       "@/lib/he-said-nothing-config": { isHsnProductId: () => false },
     })
     const handoff = await load("app/api/cart/[id]/checkout/route.ts", {
@@ -177,6 +179,66 @@ test("hosted merchant checkout -> signed payment -> atomic order, replay and iso
       assert.equal(response.status, 200)
       assert.equal(sessionRequests.at(-1).metadata.vibecart_merchant_id, "merchant_a")
     })
+    await t.test("MCP protocol sales discover -> attributed cart -> signed durable order", async () => {
+      process.env.VIBECART_AI_SALESPERSON_ENABLED = "true"
+      const sales = await load("lib/sales-cart.ts", {
+        "@/lib/cart-store": carts, "@/lib/catalog-source": catalog,
+        "@/lib/merchant-auth": auth, "@/lib/sales-assistant": assistant,
+      })
+      const mcp = await load("app/mcp/route.ts", {
+        "next/server": next,
+        "@/lib/catalog-source": { ...catalog, catalogSourceMode: () => "remote", listCatalogProducts: async () => [...products.values()] },
+        "@/app/api/checkout/route": checkout, "@/app/api/cart/[id]/checkout/route": handoff,
+        "@/lib/sales-assistant": assistant, "@/lib/sales-cart": sales,
+        "@/lib/he-said-nothing-config": { hsnCheckoutReadiness: () => ({ enabled: false }), isHsnProductId: () => false },
+      })
+      const call = async (name, args) => {
+        const response = await mcp.POST(new Request("https://offline.invalid/mcp", {
+          method: "POST", headers: { "content-type": "application/json", "x-vibecart-merchant-key": key },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+        }))
+        assert.equal(response.status, 200)
+        const payload = await response.json()
+        assert.ok(!payload.error, JSON.stringify(payload.error))
+        return payload.result.structuredContent
+      }
+      const none = await call("vibecart.find_products", { query: "zxqvnotacatalogitem" })
+      assert.equal(none.status, "no_match")
+      const discovery = await call("vibecart.find_products", { query: "Synthetic" })
+      assert.equal(discovery.status, "matches")
+      assert.equal(discovery.matches.length, 2)
+      const created = await call("vibecart.create_sales_cart", {
+        items: [{ productId: "sku_a", quantity: 1, priceCents: 1 }],
+        idempotencyKey: "offline-agent-sales", salesSessionId: discovery.salesSessionId, query: "Synthetic", channel: "offline-mcp-client",
+      })
+      assert.equal(created.cart.subtotalCents, 1200)
+      assert.equal(created.cart.merchantId, "merchant_a")
+      const replayed = await call("vibecart.create_sales_cart", {
+        items: [{ productId: "sku_a", quantity: 1 }], idempotencyKey: "offline-agent-sales", salesSessionId: discovery.salesSessionId,
+      })
+      assert.equal(replayed.cart.id, created.cart.id)
+      const originalProduct = products.get("sku_a")
+      products.set("sku_a", { ...originalProduct, availability: "out_of_stock" })
+      let rejected = await call("vibecart.checkout_sales_cart", { cartId: created.cart.id, cartAccessToken: created.cartAccessToken })
+      assert.equal(rejected.code, "PRODUCT_UNAVAILABLE")
+      products.set("sku_a", { ...originalProduct, compatibility: { mode: "structured", required: ["model"], attributes: { model: ["FixtureBike"] } } })
+      rejected = await call("vibecart.checkout_sales_cart", { cartId: created.cart.id, cartAccessToken: created.cartAccessToken })
+      assert.equal(rejected.code, "SALES_COMPATIBILITY_CHANGED")
+      products.set("sku_a", originalProduct)
+      const checked = await call("vibecart.checkout_sales_cart", { cartId: created.cart.id, cartAccessToken: created.cartAccessToken })
+      assert.equal(checked.success, true)
+      session = sessions.get(checked.checkoutSessionId).session
+      assert.equal(session.amount_total, 1200)
+      assert.equal((await deliver(event("evt_offline_sales"))).status, 200)
+      assert.equal((await deliver(event("evt_offline_sales"))).status, 200)
+      const stored = (await db.query("SELECT * FROM vibecart_orders WHERE checkout_session_id = $1", [session.id])).rows
+      assert.equal(stored.length, 1)
+      assert.equal(stored[0].merchant_id, "merchant_a")
+      assert.equal(stored[0].metadata["vibecart.sales.session"], discovery.salesSessionId)
+      assert.equal(stored[0].metadata["vibecart.sales.source"], "ai-salesperson")
+      assert.equal(stored[0].metadata["vibecart.sales.channel"], "offline-mcp-client")
+    })
+
   } finally {
     await db.close()
     for (const name of Object.keys(process.env)) if (!(name in previous)) delete process.env[name]
