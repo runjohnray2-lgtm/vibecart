@@ -63,6 +63,7 @@ The harness is deliberately safe by default:
 - it requires a merchant key supplied securely through the execution environment and 1–20 independently verified variant IDs in `VIBECART_PILOT_PRODUCT_IDS`;
 - before MCP or cart calls, its configuration-only health check requires TEST Stripe/webhook configuration, hosted merchant authentication, durable storage, a remote catalog and disabled outbound Cloud delivery; health cannot establish actual database isolation or cost;
 - it verifies health, MCP tool discovery, real catalog listing/lookup, and durable cart create/read/update/cancel;
+- it uses `find_products` → `create_sales_cart` → optional `checkout_sales_cart`, verifies merchant identity, AI attribution and independently supplied exact USD prices through cart read/update;
 - checkout handoff is skipped unless `VIBECART_PILOT_ALLOW_CHECKOUT=true` is explicitly set;
 - it emits a structured JSON evidence record with timings, pass/fail/skip counts, catalog count, and a small product sample;
 - it never needs the Volusion credential or Stripe secret. Checkout handoff must report TEST mode; this harness does not complete payment or verify a durable order.
@@ -75,12 +76,16 @@ VIBECART_PILOT_APPROVED_PREVIEW_HOST='your-pilot-preview.vercel.app' \
 VIBECART_PILOT_ISOLATION_VERIFIED=true \
 VIBECART_PILOT_ALLOW_WRITES=true \
 VIBECART_PILOT_PRODUCT_IDS='verified-variant-id' \
+VIBECART_PILOT_MERCHANT_ID='radiantz-staging' \
+VIBECART_PILOT_EXPECTED_PRICES='{"verified-variant-id":6599}' \
   node scripts/radiantz-pilot-evidence.mjs > radiantz-pilot-evidence.json
 ```
 
 Supply `VIBECART_MERCHANT_KEY` separately and securely. Only add `VIBECART_PILOT_ALLOW_CHECKOUT=true` to the above environment after all independent gates pass. The runner selects only known in-stock, made-to-order or preorder variants; DENY variants with zero inventory remain blocked and missing motorcycle fitment remains unknown.
 
 After environment scope changes, rebuild: existing immutable Previews retain old values. Verify the new deployment's effective database target before migrations or writes. Keep deployment protection enabled and establish authorized webhook delivery before a test payment.
+
+See [staging configuration](staging-configuration.md) for the exact server-variable contract, authenticated Preview transport, protected TEST webhook delivery and remaining independent acceptance gates. The runner supports a securely injected short-lived `VERCEL_OIDC_TOKEN`; it never records the token or cart capability.
 
 ## Evidence checklist
 

@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url"
+import { randomUUID } from "node:crypto"
 
 export async function runPilot(env = process.env, fetchImpl = fetch) {
   const baseUrl = new URL(env.VIBECART_PILOT_BASE_URL ?? "https://vibecart.vercel.app")
@@ -10,7 +11,7 @@ export async function runPilot(env = process.env, fetchImpl = fetch) {
   }
 
   function isProductionHost(url) {
-    return url.hostname === "vibecart.vercel.app" || url.hostname === "vibecart-promptmeter.vercel.app"
+    return ["vibecart.vercel.app", "vibecart-promptmeter.vercel.app", "vibecart-git-main-promptmeter.vercel.app"].includes(url.hostname)
   }
 
   if (isProductionHost(baseUrl) || baseUrl.protocol !== "https:"
@@ -25,6 +26,11 @@ export async function runPilot(env = process.env, fetchImpl = fetch) {
   const expectedProductIds = (env.VIBECART_PILOT_PRODUCT_IDS ?? "").split(",").map(id => id.trim()).filter(Boolean)
   assert(expectedProductIds.length > 0 && expectedProductIds.length <= 20, "Set 1-20 independently verified pilot product IDs")
   assert(Boolean(merchantKey), "Pilot requires a merchant key supplied securely through the environment")
+  assert(env.VIBECART_PILOT_MERCHANT_ID && env.VIBECART_PILOT_MERCHANT_ID !== "default", "Supply the independently verified staging merchant ID")
+  let expectedPrices
+  try { expectedPrices = JSON.parse(env.VIBECART_PILOT_EXPECTED_PRICES ?? "null") } catch { /* reject below */ }
+  assert(expectedPrices && !Array.isArray(expectedPrices) && expectedProductIds.every(id =>
+    Number.isSafeInteger(expectedPrices[id]) && expectedPrices[id] > 0), "Supply independently verified integer USD cents in VIBECART_PILOT_EXPECTED_PRICES for every pilot ID")
 
   const evidence = {
     startedAt: new Date().toISOString(),
@@ -36,6 +42,9 @@ export async function runPilot(env = process.env, fetchImpl = fetch) {
   async function request(path, init = {}) {
     const headers = new Headers(init.headers ?? {})
     if (merchantKey) headers.set("x-vibecart-merchant-key", merchantKey)
+    // Same-project development OIDC authenticates protected Preview requests.
+    // Never put the token in URLs, evidence, or logs. Redirects stay forbidden.
+    if (env.VERCEL_OIDC_TOKEN) headers.set("x-vercel-trusted-oidc-idp-token", env.VERCEL_OIDC_TOKEN)
     const response = await fetchImpl(new URL(path, baseUrl), { ...init, headers, redirect: "error" })
     const text = await response.text()
     let body
@@ -63,6 +72,7 @@ export async function runPilot(env = process.env, fetchImpl = fetch) {
     })
     assert(response.ok, `${method} returned HTTP ${response.status}`)
     assert(!body?.error, `${method} returned JSON-RPC error`)
+    assert(body?.result && !body.result.isError, `${method} returned a failed tool result`)
     return body.result
   }
 
@@ -82,7 +92,7 @@ export async function runPilot(env = process.env, fetchImpl = fetch) {
   await record("mcp tools/list", async () => {
     const result = await rpc("tools/list")
     const names = result.tools?.map(tool => tool.name) ?? []
-    for (const expected of ["vibecart.list_products", "vibecart.get_product", "vibecart.create_checkout"]) {
+    for (const expected of ["vibecart.list_products", "vibecart.get_product", "vibecart.find_products", "vibecart.create_sales_cart", "vibecart.checkout_sales_cart"]) {
       assert(names.includes(expected), `missing MCP tool ${expected}`)
     }
     return { tools: names }
@@ -94,12 +104,14 @@ export async function runPilot(env = process.env, fetchImpl = fetch) {
     assert(Array.isArray(products) && products.length > 0, "catalog returned no products")
     const pilotProducts = products.filter(product => expectedProductIds.includes(product.id))
     assert(pilotProducts.length === expectedProductIds.length, "Pilot IDs do not exactly match the verified catalog subset")
+    assert(pilotProducts.every(product => product.priceCents === expectedPrices[product.id]), "Pilot catalog price differs from independently verified USD cents")
     const eligible = pilotProducts.filter(product => ["in_stock", "made_to_order", "preorder"].includes(product.availability))
     assert(eligible.length > 0, "No independently verified checkout-eligible product in pilot subset")
     return {
       count: products.length,
       sample: pilotProducts.slice(0, 5).map(product => ({ id: product.id, name: product.name, priceCents: product.priceCents, availability: product.availability })),
       productIds: eligible.map(product => product.id),
+      query: env.VIBECART_PILOT_QUERY?.trim() || eligible[0].name,
     }
   })
 
@@ -110,18 +122,42 @@ export async function runPilot(env = process.env, fetchImpl = fetch) {
     return { productId }
   })
 
+  const discovery = await record("AI product discovery", async () => {
+    const result = await rpc("tools/call", { name: "vibecart.find_products", arguments: { query: catalog.query } })
+    const found = result.structuredContent
+    assert(found?.success === true && found.status === "matches" && found.salesSessionId, "AI discovery did not return a sales session with matches")
+    const match = found.matches?.find(match => catalog.productIds.includes(match.product?.id)
+      && match.product.priceCents === expectedPrices[match.product.id]
+      && ["in_stock", "made_to_order", "preorder"].includes(match.availability))
+    assert(match, "AI discovery did not recommend a verified eligible pilot variant")
+    return { salesSessionId: found.salesSessionId, productId: match.product.id, compatibility: match.compatibility?.status ?? "unknown" }
+  })
+
   let cartId
   let cartVersion
+  let cartAccessToken
+  function assertCart(cart, quantity) {
+    assert(cart?.merchantId === env.VIBECART_PILOT_MERCHANT_ID, "Cart belongs to an unexpected merchant")
+    assert(cart?.currency?.toLowerCase() === "usd" && cart.items?.length === 1
+      && cart.items[0].productId === discovery.productId && cart.items[0].quantity === quantity
+      && cart.items[0].unitPriceCents === expectedPrices[discovery.productId]
+      && cart.subtotalCents === expectedPrices[discovery.productId] * quantity,
+    "Cart does not match verified variant, quantity and USD price")
+    assert(cart.metadata?.["vibecart.sales.session"] === discovery.salesSessionId, "Cart lost AI sales attribution")
+  }
   await record("cart create", async () => {
-    const productId = catalog.productIds[0]
-    const { response, body } = await request("/api/cart", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ items: [{ productId, quantity: 1 }] }),
-    })
-    assert(response.ok, `cart create returned HTTP ${response.status}`)
-    cartId = body.cart?.id ?? body.id
-    cartVersion = body.cart?.version ?? body.version
+    const productId = discovery.productId
+    const result = await rpc("tools/call", { name: "vibecart.create_sales_cart", arguments: {
+      items: [{ productId, quantity: 1 }], salesSessionId: discovery.salesSessionId,
+      idempotencyKey: `pilot-${randomUUID()}`, channel: "radiantz-pilot-mcp", query: catalog.query,
+    } })
+    const body = result.structuredContent
+    assert(body?.success === true, "AI sales cart creation failed")
+    assertCart(body.cart, 1)
+    cartId = body.cart.id
+    cartVersion = body.cart.version
+    cartAccessToken = body.cartAccessToken
+    assert(typeof cartAccessToken === "string" && cartAccessToken.length > 0, "Hosted sales cart capability is missing")
     assert(cartId, "cart create returned no cart id")
     return { cartId, productId }
   })
@@ -130,12 +166,13 @@ export async function runPilot(env = process.env, fetchImpl = fetch) {
     const { response, body } = await request(`/api/cart/${encodeURIComponent(cartId)}`)
     assert(response.ok, `cart read returned HTTP ${response.status}`)
     const cart = body.cart ?? body
+    assertCart(cart, 1)
     cartVersion = cart.version ?? cartVersion
     return { cartId, version: cartVersion, status: cart.status }
   })
 
   await record("cart update", async () => {
-    const productId = catalog.productIds[0]
+    const productId = discovery.productId
     const { response, body } = await request(`/api/cart/${encodeURIComponent(cartId)}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -143,20 +180,19 @@ export async function runPilot(env = process.env, fetchImpl = fetch) {
     })
     assert(response.ok, `cart update returned HTTP ${response.status}`)
     const cart = body.cart ?? body
+    assertCart(cart, 2)
     cartVersion = cart.version ?? cartVersion
     return { cartId, version: cartVersion, quantity: 2 }
   })
 
   if (allowCheckout) {
     await record("controlled checkout handoff", async () => {
-      const { response, body } = await request(`/api/cart/${encodeURIComponent(cartId)}/checkout`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ version: cartVersion }),
-      })
-      assert(response.ok, `checkout returned HTTP ${response.status}`)
+      const result = await rpc("tools/call", { name: "vibecart.checkout_sales_cart", arguments: { cartId, cartAccessToken } })
+      const body = result.structuredContent
+      assert(body?.success === true, "AI checkout handoff failed")
       assert(body.mode === "test" && typeof body.checkoutUrl === "string", "Checkout must return a TEST-mode session URL")
-      return { cartId, mode: body.mode, hasUrl: true }
+      assert(typeof body.checkoutSessionId === "string" && body.checkoutSessionId.startsWith("cs_test_"), "Checkout session must have a TEST identifier")
+      return { cartId, checkoutSessionId: body.checkoutSessionId, mode: body.mode, hasUrl: true }
     })
   } else {
     evidence.checks.push({ name: "controlled checkout handoff", ok: true, skipped: true, reason: "VIBECART_PILOT_ALLOW_CHECKOUT is not true" })

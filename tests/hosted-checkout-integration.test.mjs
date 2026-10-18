@@ -5,6 +5,7 @@ import test from "node:test"
 import ts from "typescript"
 import Stripe from "stripe"
 import { PGlite } from "@electric-sql/pglite"
+import { runPilot } from "../scripts/radiantz-pilot-evidence.mjs"
 
 const require = createRequire(import.meta.url)
 async function load(path, shims) {
@@ -179,7 +180,7 @@ test("hosted merchant checkout -> signed payment -> atomic order, replay and iso
       assert.equal(response.status, 200)
       assert.equal(sessionRequests.at(-1).metadata.vibecart_merchant_id, "merchant_a")
     })
-    await t.test("MCP protocol sales discover -> attributed cart -> signed durable order", async () => {
+    await t.test("MCP protocol sales discover -> attributed cart -> signed durable order", async t => {
       process.env.VIBECART_AI_SALESPERSON_ENABLED = "true"
       const sales = await load("lib/sales-cart.ts", {
         "@/lib/cart-store": carts, "@/lib/catalog-source": catalog,
@@ -237,6 +238,42 @@ test("hosted merchant checkout -> signed payment -> atomic order, replay and iso
       assert.equal(stored[0].metadata["vibecart.sales.session"], discovery.salesSessionId)
       assert.equal(stored[0].metadata["vibecart.sales.source"], "ai-salesperson")
       assert.equal(stored[0].metadata["vibecart.sales.channel"], "offline-mcp-client")
+
+      await t.test("pilot runner interoperates with actual MCP, cart, Stripe signing and PostgreSQL routes", async () => {
+        const cartApi = await load("app/api/cart/[id]/route.ts", {
+          "next/server": next, "@/lib/cart-store": carts, "@/lib/catalog-source": catalog, "@/lib/merchant-auth": auth,
+        })
+        const evidence = await runPilot({
+          VIBECART_PILOT_BASE_URL: "https://staging-pilot.vercel.app",
+          VIBECART_PILOT_APPROVED_PREVIEW_HOST: "staging-pilot.vercel.app",
+          VIBECART_PILOT_ISOLATION_VERIFIED: "true", VIBECART_PILOT_ALLOW_WRITES: "true",
+          VIBECART_PILOT_ALLOW_CHECKOUT: "true", VIBECART_MERCHANT_KEY: key,
+          VIBECART_PILOT_PRODUCT_IDS: "sku_a,sku_b", VIBECART_PILOT_EXPECTED_PRICES: JSON.stringify({ sku_a: 1200, sku_b: 1300 }),
+          VIBECART_PILOT_MERCHANT_ID: "merchant_a",
+        }, async (url, init) => {
+          if (url.pathname === "/api/health") return Response.json({
+            ok: true, readinessScope: "configuration-only", stagingSafetyConfigured: true, stripeMode: "test", webhookConfigured: true,
+            hostedMode: true, merchantAuthConfigured: true, durableOrderStoreConfigured: true, catalogMode: "remote", referenceCatalog: false,
+            cloudConfigured: false, cloudOutboxRetryEnabled: false,
+          })
+          const req = new Request(url, init)
+          if (url.pathname === "/mcp") return mcp.POST(req)
+          const id = decodeURIComponent(url.pathname.split("/").at(-1))
+          assert.ok(["GET", "PATCH", "DELETE"].includes(req.method))
+          return cartApi[req.method](req, { params: Promise.resolve({ id }) })
+        })
+        assert.equal(evidence.summary.failed, 0)
+        assert.equal(evidence.summary.skipped, 0)
+        const handoff = evidence.checks.find(check => check.name === "controlled checkout handoff").detail
+        session = sessions.get(handoff.checkoutSessionId).session
+        assert.equal(session.amount_total, 2400)
+        assert.equal((await deliver(event("evt_offline_pilot"))).status, 200)
+        assert.equal((await deliver(event("evt_offline_pilot"))).status, 200)
+        const order = (await db.query("SELECT * FROM vibecart_orders WHERE checkout_session_id = $1", [session.id])).rows
+        assert.equal(order.length, 1)
+        assert.equal(order[0].amount_total, 2400)
+        assert.equal(order[0].metadata["vibecart.sales.channel"], "radiantz-pilot-mcp")
+      })
     })
 
   } finally {
