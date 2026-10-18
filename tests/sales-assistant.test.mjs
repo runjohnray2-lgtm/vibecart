@@ -185,3 +185,26 @@ test("sales input is bounded and malformed compatibility is rejected", async () 
     /limit must be/
   )
 })
+
+test("explicitly out-of-stock products are not recommended, but stock status remains visible", async () => {
+  const { discoverSalesProducts } = await loadSalesAssistant()
+  const unavailable = { ...universalProduct, id: "test-sold-out", availability: "out_of_stock" }
+  const result = discoverSalesProducts([unavailable], { query: "universal sticker" })
+
+  assert.equal(result.status, "no_match")
+  assert.deepEqual(result.matches, [])
+  assert.equal(result.candidates.length, 1)
+  assert.equal(result.candidates[0].availability, "out_of_stock")
+  assert.match(result.message, /out of stock/)
+})
+
+test("made-to-order and available products remain recommendable alongside sold-out candidates", async () => {
+  const { discoverSalesProducts } = await loadSalesAssistant()
+  const unavailable = { ...universalProduct, id: "test-sold-out", availability: "out_of_stock" }
+  const result = discoverSalesProducts([unavailable, universalProduct], { query: "universal sticker" })
+
+  assert.equal(result.status, "matches")
+  assert.deepEqual(result.matches.map(match => match.product.id), [universalProduct.id])
+  assert.deepEqual(result.candidates.map(match => match.product.id), [unavailable.id])
+  assert.equal(result.matches[0].availability, "made_to_order")
+})
