@@ -169,4 +169,30 @@ BEGIN
   END IF;
 END $$;
 
+
+-- A replacement worker owns the row after reclaim. Neither a late success nor
+-- a late failure from the old worker may mutate its delivery state.
+UPDATE vibecart_cloud_outbox
+SET status = 'processing', lease_token = 'replacement-worker', lease_until = now() + interval '120 seconds'
+WHERE order_id = 'ord_durable_1';
+UPDATE vibecart_cloud_outbox SET status = 'delivered', lease_token = NULL
+WHERE order_id = 'ord_durable_1' AND status = 'processing' AND lease_token = 'expired-worker';
+UPDATE vibecart_cloud_outbox SET status = 'pending', attempt_count = attempt_count + 1, lease_token = NULL
+WHERE order_id = 'ord_durable_1' AND status = 'processing' AND lease_token = 'expired-worker';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM vibecart_cloud_outbox WHERE order_id = 'ord_durable_1'
+    AND status = 'processing' AND lease_token = 'replacement-worker' AND attempt_count = 0) THEN
+    RAISE EXCEPTION 'expired worker overwrote replacement lease';
+  END IF;
+END $$;
+UPDATE vibecart_cloud_outbox SET status = 'delivered', lease_token = NULL
+WHERE order_id = 'ord_durable_1' AND status = 'processing' AND lease_token = 'replacement-worker';
+DO $$
+BEGIN
+  IF (SELECT status FROM vibecart_cloud_outbox WHERE order_id = 'ord_durable_1') <> 'delivered' THEN
+    RAISE EXCEPTION 'current lease owner could not finish delivery';
+  END IF;
+END $$;
+
 ROLLBACK;

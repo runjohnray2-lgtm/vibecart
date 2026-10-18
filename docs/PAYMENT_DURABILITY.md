@@ -18,7 +18,7 @@ The Checkout Session ID is the durable order idempotency key. Stripe event IDs a
 
 ## Optional Cloud outbox
 
-Migration `007_core_order_outbox.sql` adds `vibecart_cloud_outbox`.
+Migration `007_core_order_outbox.sql` adds `vibecart_cloud_outbox`. Migration `008_outbox_lease_ownership.sql` adds a fresh random ownership token for each claim. Completion and failure updates require that token, so an expired worker cannot overwrite a replacement worker.
 
 The outbox is created only when either `VIBECART_CLOUD_INGEST_URL` or `VIBECART_CLOUD_INGEST_KEY` indicates that Cloud delivery has been requested. It is inserted in the same transaction as the Core order.
 
@@ -35,7 +35,7 @@ Delivery behavior:
 
 Vercel calls `GET /api/cron/cloud-outbox` every five minutes.
 
-The route is disabled by default. To enable it only after migration 007 is applied:
+The route is disabled by default. To enable it only after migrations 007 and 008 are applied:
 
 ```bash
 VIBECART_CLOUD_OUTBOX_CRON_ENABLED=true
@@ -55,8 +55,9 @@ Apply in order:
 - `005_durable_orders.sql`
 - `006_business_brain_foundation.sql` when Business Brain is used
 - `007_core_order_outbox.sql`
+- `008_outbox_lease_ownership.sql`
 
-Payment durability requires 005. Optional Cloud replay requires 007.
+Payment durability requires 005. Optional Cloud replay requires 007 and 008. Apply 008 before deploying the updated workers.
 
 ## Safe rollout
 
@@ -64,7 +65,7 @@ Do not enable real-money checkout as part of this change.
 
 Before merging/deploying payment changes:
 
-1. Apply 005 and 007 to a non-production Neon branch.
+1. Apply 005, 007, and 008 to a non-production Neon branch.
 2. Run the unit, build, typecheck, lint, MCP, and UCP checks.
 3. In Stripe test mode, create one Checkout Session and deliver the same signed webhook more than once.
 4. Verify exactly one `vibecart_orders` row exists for the Checkout Session.
