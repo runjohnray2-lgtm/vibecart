@@ -120,3 +120,15 @@ Work on #93 should be stacked on the verified #99 branch until #91 receives owne
 - Local build, typecheck, lint (one existing img warning) and 178 tests PASS. Tests are synthetic/offline and do not prove live Neon/Stripe/Radiantz acceptance. CI pending at checkpoint.
 - No production or merchant data changes, real checkout, environment mutation, database provisioning, paid services or metered AI calls.
 - Next: fix #100 compile/test integration and verify grounded external-agent flow; staging runtime tests remain blocked by unverified isolated DB, zero-incremental-cost allowance and Preview-only test Stripe credentials.
+
+## 2026-10-18 combined merchant AI checkout acceptance
+
+- #111 tenant/payment fix CI run 39171519703 PASS; #112 repairs existing #100 compile and full test execution on a separate stack.
+- Integrated existing #100/#112 sales code with #111 on an isolated review branch; no upstream branch rewritten or production merge performed.
+- Actual-code offline MCP protocol requests now discover trusted synthetic products, create/replay a server-priced attributed cart, hand off with cart capability, verify a real Stripe signature, persist one PostgreSQL order and retain source/session/channel attribution through replay.
+- Checkout revalidates known out-of-stock state and sales compatibility against current catalog data; post-cart stock/fitment changes are rejected before Stripe session creation.
+- Combined local build/typecheck/lint and all 199 tests PASS, no failures/skips. CI pending. PGlite and fake Stripe/Neon network adapters are offline integration, not actual Radiantz/Stripe/Neon acceptance.
+- Fresh read-only metadata still shows shared production+preview DATABASE_URL and production-only Stripe secrets; Neon lists no dedicated commerce staging branch. No zero-incremental-cost allowance proof is available through the connected metadata surface. No infrastructure changed or unsafe staging write attempted.
+- Next owner/operator-dependent assignment: establish cost-verified isolated schema-only Neon staging and secure branch-specific Preview DB/test Stripe configuration under #108. Next engineering assignment: run the existing offline acceptance in CI, then port the same assertions to protected staging only after all #108 gates are independently verified. Hourly worker retains real Shopify source/sellability/pagination work.
+
+Follow-up in the combined branch: reproduced three fitment/discovery regressions before fixing them (all three failed first): unverified extra shopper attributes, conflicting case-variant keys hiding a mismatch, and out-of-stock products appearing in recommendations. Added strict unknown-attribute handling, duplicate-key rejection, and out-of-stock candidate-only visibility. All 202 tests pass with zero skips; no third-party patch claimed as committed by the worker. #112 CI run 39171646612 PASS. #113 remains a draft integration candidate, not deployed or approved for production.

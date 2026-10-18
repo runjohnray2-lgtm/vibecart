@@ -1,3 +1,4 @@
+import { assertSalesCompatibility } from "@/lib/sales-assistant"
 import { NextResponse } from "next/server"
 import { configuredMerchantId, hostedModeEnabled, merchantRequestAuthorized, cartRequestAuthorized, MerchantAuthConfigurationError } from "@/lib/merchant-auth"
 import Stripe from "stripe"
@@ -167,6 +168,9 @@ export async function POST(req: Request) {
       if (item.productId) {
         const catalogProduct = await getCatalogProduct(item.productId)
         if (catalogProduct) {
+          if (catalogProduct.availability === "out_of_stock") {
+            return err("PRODUCT_UNAVAILABLE", "A selected product is no longer available.", 409)
+          }
           resolved.push({ product: catalogProduct, quantity, trusted: true })
           continue
         }
@@ -198,6 +202,7 @@ export async function POST(req: Request) {
         }
         resolved.push({
           product: {
+            availability: "unknown",
             id: p.id,
             name: p.name,
             description: p.description ?? "",
@@ -220,6 +225,14 @@ export async function POST(req: Request) {
 
     if (checkoutCart && !cartMatchesCheckout(checkoutCart, resolved)) {
       return err("CART_MISMATCH", "Checkout items do not match the durable cart.", 409)
+    }
+    if (checkoutCart?.metadata["vibecart.sales.source"] === "ai-salesperson") {
+      try {
+        const compatibility = JSON.parse(checkoutCart.metadata["vibecart.sales.compatibility"] ?? "{}")
+        for (const line of resolved) assertSalesCompatibility(line.product, compatibility)
+      } catch {
+        return err("SALES_COMPATIBILITY_CHANGED", "Product compatibility must be verified again before checkout.", 409)
+      }
     }
     const origin = req.headers.get("origin") ?? new URL(req.url).origin
     const containsHsnProduct = resolved.some(item => isHsnProductId(item.product.id))

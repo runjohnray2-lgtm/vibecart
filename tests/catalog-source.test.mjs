@@ -47,3 +47,18 @@ test("catalog changes are refreshed on a short bounded cache instead of being co
   assert.match(source, /cache\.expiresAt > Date\.now\(\)/)
   assert.match(source, /Date\.now\(\) \+ CACHE_TTL_MS/)
 })
+
+
+test("catalog availability and compatibility are explicit trusted fields", async () => {
+  const source = await readFile(sourcePath, "utf8")
+  const products = await readFile("lib/products.ts", "utf8")
+
+  assert.match(products, /PRODUCT_AVAILABILITY_STATUSES/)
+  assert.match(products, /"unknown"/)
+  assert.match(products, /interface ProductCompatibility/)
+  assert.match(source, /availabilityStatus\(item\.availability\)/)
+  assert.match(source, /productCompatibility\(item\.compatibility\)/)
+  assert.match(source, /compatibility\.mode must be/)
+  assert.match(source, /Structured compatibility requires 1-20 required fields/)
+  assert.match(source, /Structured compatibility is missing values for required field/)
+})
