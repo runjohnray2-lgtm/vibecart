@@ -39,6 +39,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: false, error: "Signature verification failed." }, { status: 400 })
   }
 
+  if (process.env.VERCEL_ENV === "preview" && event.livemode !== false) {
+    return NextResponse.json({ received: false, error: "Staging accepts test-mode events only." }, { status: 400 })
+  }
+
   if (FORWARDABLE_EVENTS.has(event.type)) {
     const session = event.data.object as Stripe.Checkout.Session
 
