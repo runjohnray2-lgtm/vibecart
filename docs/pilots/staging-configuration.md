@@ -12,6 +12,9 @@ copy production data into staging.
 - The connector sees the Promptmeter team but returns an empty project list,
   project/deployment 404s and a protected-fetch API 403. This is a connector
   project authorization problem; disabling Preview protection will not fix it.
+- A later identity probe also returns `GET /v2/user` 404. Exact connector identity
+  or scope failure is unresolved; reconnect the intended account and authorize only
+  Promptmeter/vibecart. Browser sign-in works independently; do not weaken protection.
 - The actual Preview redirects to normal Vercel sign-in/2FA. After owner sign-in,
   `/api/health` is reachable and reports `stagingSafetyConfigured=false`,
   `durableOrderStoreConfigured=false`, `stripeMode=none`, and reference catalog.
@@ -30,22 +33,52 @@ Business Brain and archived prior tests, with no dedicated commerce staging.
 The second configured Neon connection fails tool resolution. No database queries
 were issued to wake compute. Included branches do not include Launch compute.
 
-Neon documents separate Free organizations with independent billing. Its current
-Free plan includes 100 CU-hours/month/project and 1 GB/project; verify the actual
-account allowance before use. The current account menu does not expose the
-documented Create organization control. An owner must resolve access to an
-existing Free organization or obtain that control through Neon support. Do not
-provision another project in the Launch organization. Do not transfer or downgrade
-existing projects. No zero-cost target has been established.
+The paid account remains unchanged. A separate zero-cost temporary target is now
+available through **Claimable Neon**, without linking a human account or payment
+details. Official limits: 72 hours, 100 MB storage, 1 GB transfer; do not claim into
+the paid organization or extend/upgrade without a separate cost decision.
+
+On October 18, provisioned project `royal-mountain-93927396`, independent root
+`br-damp-scene-b4ewajhs`, endpoint `ep-blue-hill-b46430js`. Verified its owning org
+differs from the paid organization, its credentials map to that endpoint, and the
+effective database/role and empty target match before migration. Expires
+**October 21, 2026 at 4:43 PM Pacific**. This is temporary pilot infrastructure,
+not a permanent merchant backend. Do not import production/customer records.
+
+Migrations 001/002/004/005/007/008 applied; PostgreSQL durability assertions passed
+with explicit rollback. A dedicated runtime role has commerce/rate-limit DML only,
+with no superuser/create-database/create-role/create-schema privileges. Credentials
+and a sensitive Preview import bundle are outside Git under restrictive local ACLs
+for the owner and Codex runtime; no secrets appear in the evidence.
+
+Actual VibeCart modules using the preserved real Radiantz subset and real Neon HTTP
+passed a **Stripe network simulation**: signed synthetic payment event, induced
+INSERT-permission outage returning 503 and rolling back the order, access recovery,
+retry/replay yielding one 6599-cent order/event, and cross-merchant cart rejection.
+This does not prove a real Stripe TEST payment or a network/compute outage. The
+simulated session/event IDs are explicitly labeled in the evidence. Preserve that
+distinction when verifying the eventual real transaction; correlate by session ID.
+
+Supabase Free was also investigated, but the current Neon HTTP transport is not a
+drop-in client for its PostgreSQL endpoint. No alternate service was provisioned.
 
 Sources: [organization management](https://neon.com/docs/manage/orgs-manage),
-[current pricing](https://neon.com/pricing).
+[current pricing](https://neon.com/pricing),
+[Claimable Neon](https://neon.com/claimable-neon),
+[Claimable API and expiry](https://neon.com/docs/reference/claimable-neon).
 
 ## Vercel Preview variables
 
 Use sensitive server variables for credentials, Preview only, restricted to the
-reviewed pilot branch (`agent/pilot-ai-transport` for this PR). Never select
+reviewed pilot branch (`agent/checkout-quote-retry` for this PR). Never select
 Production or Development. `.env.staging.example` is a blank template only.
+
+Verified UI detail: **Add Environment Variable defaults to Production**. Selecting
+a Preview branch adds that branch and leaves Production selected. In Environments,
+open Environments and deselect Production/Development, then Preview Branches and
+select only the pilot branch. Verify the collapsed selector contains only the
+branch before importing the private `.env` bundle or saving. Keep Type **Secret**.
+Never edit the existing production DATABASE_URL or Stripe rows.
 
 | Variable | Required staging value / independent verification |
 | --- | --- |

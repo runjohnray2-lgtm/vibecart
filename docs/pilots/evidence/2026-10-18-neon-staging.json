@@ -1,0 +1,52 @@
+{
+  "verifiedAt": "2026-10-18T23:44:04.187Z",
+  "projectId": "royal-mountain-93927396",
+  "branchId": "br-damp-scene-b4ewajhs",
+  "endpointId": "ep-blue-hill-b46430js",
+  "databaseHost": "ep-blue-hill-b46430js-pooler.c-6.us-east-2.aws.neon.tech",
+  "independentRoot": true,
+  "paidOrgDifferent": true,
+  "expiresAt": "2026-10-21T23:43:28.900Z",
+  "requestedCapabilities": [
+    "postgres"
+  ],
+  "provisionedWithoutAccountOrPayment": true,
+  "source": "https://neon.com/claimable-neon",
+  "databaseQueriesRun": true,
+  "emptyBeforeMigration": true,
+  "effectiveIdentityMatches": true,
+  "migrations": [
+    "001_durable_carts",
+    "004_cart_metadata",
+    "005_durable_orders",
+    "007_core_order_outbox",
+    "008_outbox_lease_ownership",
+    "002_distributed_rate_limits"
+  ],
+  "postgresDurabilityAssertions": "passed",
+  "smokeTransactionRolledBack": true,
+  "ordersAfterSmoke": 0,
+  "cartsAfterSmoke": 0,
+  "realStripePayment": false,
+  "runtimeRoleVerified": true,
+  "runtimeRole": "vibecart_pilot_runtime",
+  "runtimeSuperuser": false,
+  "runtimeCanCreateSchema": false,
+  "stagingBundlePrepared": true,
+  "realNeonCommerceSimulation": {
+    "passed": true,
+    "realRadiantzVariants": 15,
+    "amountTotal": 6599,
+    "orders": 1,
+    "eventRecords": 1,
+    "checkoutSessionId": "cs_test_local_simulation_0af2eb8d-5c3f-47c4-a4ca-e28d95984687",
+    "eventId": "evt_local_simulation_77067270-c482-43fe-80b6-2f9327e844e7",
+    "persistencePermissionOutageRollback": true,
+    "retryAndReplayPassed": true,
+    "crossMerchantCartDenied": true,
+    "unverifiedMotorcycleFitmentDenied": true,
+    "realStripePayment": false,
+    "stripeTransport": "offline simulation",
+    "source": "actual VibeCart modules, signed synthetic event, actual Neon HTTP PostgreSQL"
+  }
+}

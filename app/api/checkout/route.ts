@@ -127,6 +127,14 @@ function cartMatchesCheckout(cart: VibeCart, resolved: { product: VibeProduct; q
     && expected.size === 0
 }
 
+function cartQuoteMatches(cart: VibeCart, resolved: { product: VibeProduct; quantity: number }[]): boolean {
+  const quoted = new Map(cart.items.map(item => [item.productId, item]))
+  return cart.currency === "usd" && resolved.every(({ product, quantity }) => {
+    const line = quoted.get(product.id)
+    return line?.unitPriceCents === product.priceCents && line.lineTotalCents === product.priceCents * quantity
+  }) && cart.subtotalCents === resolved.reduce((sum, item) => sum + item.product.priceCents * item.quantity, 0)
+}
+
 function automaticTaxEnabled(): boolean {
   return process.env.VIBECART_AUTOMATIC_TAX_ENABLED?.trim().toLowerCase() === "true"
 }
@@ -225,6 +233,9 @@ export async function POST(req: Request) {
 
     if (checkoutCart && !cartMatchesCheckout(checkoutCart, resolved)) {
       return err("CART_MISMATCH", "Checkout items do not match the durable cart.", 409)
+    }
+    if (checkoutCart && !cartQuoteMatches(checkoutCart, resolved)) {
+      return err("CART_PRICE_CHANGED", "Catalog prices changed. Refresh the cart and review its new total before checkout.", 409)
     }
     if (checkoutCart?.metadata["vibecart.sales.source"] === "ai-salesperson") {
       try {
@@ -405,6 +416,9 @@ export async function POST(req: Request) {
     if (error && typeof error === "object") {
       const stripeError = error as { type?: unknown; code?: unknown; statusCode?: unknown }
       const type = typeof stripeError.type === "string" ? stripeError.type : ""
+      if (type === "StripeIdempotencyError") {
+        return err("CHECKOUT_RETRY_CONFLICT", "This cart already has a checkout with different parameters. Resume the original checkout or start a new cart.", 409)
+      }
       if (type === "StripeAuthenticationError") {
         console.error("[vibecart checkout] Stripe authentication failed")
         return err("STRIPE_AUTHENTICATION_FAILED", "The merchant Stripe credential is invalid or expired.", 503)
