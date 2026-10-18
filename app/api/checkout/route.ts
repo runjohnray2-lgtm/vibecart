@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { configuredMerchantId, hostedModeEnabled, merchantRequestAuthorized, cartRequestAuthorized, MerchantAuthConfigurationError } from "@/lib/merchant-auth"
 import Stripe from "stripe"
 import { stripeKeyMode } from "@/lib/stripe-mode"
 import { CatalogSourceError, getCatalogProduct } from "@/lib/catalog-source"
@@ -121,7 +122,8 @@ function safeRedirectUrl(candidate: string | undefined, origin: string, fallback
 function cartMatchesCheckout(cart: VibeCart, resolved: { product: VibeProduct; quantity: number }[]): boolean {
   if (cart.items.length !== resolved.length) return false
   const expected = new Map(cart.items.map(item => [item.productId, item.quantity]))
-  return resolved.every(item => expected.get(item.product.id) === item.quantity)
+  return resolved.every(item => expected.get(item.product.id) === item.quantity && expected.delete(item.product.id))
+    && expected.size === 0
 }
 
 function automaticTaxEnabled(): boolean {
@@ -135,6 +137,14 @@ export async function POST(req: Request) {
 
   try {
     const body = (await req.json()) as CheckoutRequestBody
+    const cartId = cartReference(body.cartId)
+    const merchantId = configuredMerchantId()
+    if (hostedModeEnabled() && !(cartId ? cartRequestAuthorized(req, cartId, merchantId) : merchantRequestAuthorized(req))) {
+      return err("UNAUTHORIZED", "Merchant or cart authorization is required.", 401)
+    }
+    const checkoutCart = cartId ? await getCart(cartId, merchantId) : null
+    if (cartId && !checkoutCart) return err("CART_NOT_FOUND", "Cart not found.", 404)
+    if (checkoutCart && checkoutCart.status !== "active") return err("CART_NOT_ACTIVE", `Cart is ${checkoutCart.status}.`, 409)
 
     if (!body.items || body.items.length === 0) {
       return err("NO_ITEMS", "No items provided", 400)
@@ -208,8 +218,10 @@ export async function POST(req: Request) {
       )
     }
 
+    if (checkoutCart && !cartMatchesCheckout(checkoutCart, resolved)) {
+      return err("CART_MISMATCH", "Checkout items do not match the durable cart.", 409)
+    }
     const origin = req.headers.get("origin") ?? new URL(req.url).origin
-    const cartId = cartReference(body.cartId)
     const containsHsnProduct = resolved.some(item => isHsnProductId(item.product.id))
     const isHsnCheckout = containsHsnProduct && resolved.every(item => isHsnProductId(item.product.id))
     if (containsHsnProduct && !isHsnCheckout) {
@@ -221,7 +233,7 @@ export async function POST(req: Request) {
     let hsnPremiumPackagingCents: number | null = null
     if (isHsnCheckout) {
       if (!cartId) return err("CART_REQUIRED", "He Said Nothing checkout requires a durable cart.", 400)
-      hsnCart = await getCart(cartId)
+      hsnCart = checkoutCart
       if (!hsnCart) return err("CART_NOT_FOUND", "Cart not found.", 404)
       if (hsnCart.status !== "active") return err("CART_NOT_ACTIVE", `Cart is ${hsnCart.status}.`, 409)
       if (!cartMatchesCheckout(hsnCart, resolved)) {
@@ -316,17 +328,20 @@ export async function POST(req: Request) {
         client_reference_id: cartId,
         metadata: {
           vibecart_cart_id: cartId,
-          vibecart_merchant_id: hsnCart?.merchantId ?? "default",
+          vibecart_merchant_id: merchantId,
           vibecart_store: isHsnCheckout ? "he-said-nothing" : "",
         },
         payment_intent_data: {
           metadata: {
             vibecart_cart_id: cartId,
-            vibecart_merchant_id: hsnCart?.merchantId ?? "default",
+            vibecart_merchant_id: merchantId,
             vibecart_store: isHsnCheckout ? "he-said-nothing" : "",
           },
         },
-      } : {}),
+      } : {
+        metadata: { vibecart_merchant_id: merchantId },
+        payment_intent_data: { metadata: { vibecart_merchant_id: merchantId } },
+      }),
       ...(isHsnCheckout ? {
         billing_address_collection: "auto" as const,
         customer_creation: "always" as const,
@@ -367,6 +382,9 @@ export async function POST(req: Request) {
       checkoutSessionId: session.id,
     })
   } catch (error) {
+    if (error instanceof MerchantAuthConfigurationError) {
+      return err("MERCHANT_AUTH_NOT_CONFIGURED", "Hosted merchant authentication is not configured.", 503)
+    }
     if (error instanceof CatalogSourceError) {
       console.error(`[vibecart checkout] ${error.code}`, error.message)
       return err(error.code, "Trusted merchant catalog is unavailable. Retry after the merchant catalog is healthy.", 503)

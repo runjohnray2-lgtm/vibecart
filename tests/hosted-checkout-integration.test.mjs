@@ -1,0 +1,185 @@
+import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
+import { createRequire } from "node:module"
+import test from "node:test"
+import ts from "typescript"
+import Stripe from "stripe"
+import { PGlite } from "@electric-sql/pglite"
+
+const require = createRequire(import.meta.url)
+async function load(path, shims) {
+  const source = await readFile(path, "utf8")
+  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText
+  const testModule = { exports: {} }
+  new Function("require", "exports", "module", code)(name => {
+    if (name in shims) return shims[name]
+    if (name.startsWith("node:")) return require(name)
+    throw new Error(`Unexpected import: ${name}`)
+  }, testModule.exports, testModule)
+  return testModule.exports
+}
+
+// Offline integration: actual auth/cart/checkout/normalization/order-store/webhook
+// modules, real Stripe signature verification, and real PostgreSQL transactions.
+// Only the Stripe network and Neon HTTP transports are replaced. Synthetic SKUs.
+test("hosted merchant checkout -> signed payment -> atomic order, replay and isolation", async t => {
+  const previous = { ...process.env }
+  const db = new PGlite()
+  let failLineWrite = false
+  const sessions = new Map()
+  const sessionRequests = []
+  const key = "a".repeat(32)
+  const signingSecret = "whsec_offline_integration"
+  Object.assign(process.env, {
+    DATABASE_URL: "postgresql://offline.invalid/test", VIBECART_HOSTED_MODE: "true",
+    VIBECART_MERCHANT_ID: "merchant_a", VIBECART_MERCHANT_API_KEY: key,
+    VIBECART_CART_ACCESS_SECRET: "b".repeat(32), STRIPE_SECRET_KEY: "sk_test_offline",
+    STRIPE_WEBHOOK_SECRET: signingSecret,
+  })
+  for (const name of ["VERCEL_ENV", "VIBECART_CLOUD_INGEST_URL", "VIBECART_CLOUD_INGEST_KEY", "POSTGRES_URL"]) delete process.env[name]
+  try {
+    for (const name of ["001_durable_carts", "004_cart_metadata", "005_durable_orders", "007_core_order_outbox", "008_outbox_lease_ownership"]) await db.exec(await readFile(`migrations/${name}.sql`, "utf8"))
+    function sql(parts, ...values) {
+      const text = parts.reduce((result, part, index) => result + (index ? `$${index}` : "") + part, "")
+      const run = async client => {
+        if (failLineWrite && text.includes("INSERT INTO vibecart_order_lines")) throw new Error("Injected line-write failure")
+        return (await client.query(text, values)).rows
+      }
+      return { run, then: (resolve, reject) => run(db).then(resolve, reject) }
+    }
+    sql.transaction = queries => db.transaction(async tx => {
+      const results = []
+      for (const query of queries) results.push(await query.run(tx))
+      return results
+    })
+    const auth = await load("lib/merchant-auth.ts", {})
+    const products = new Map(["sku_a", "sku_b"].map((id, index) => [id, { id, name: `Synthetic product ${index}`, priceCents: 1200 + index * 100, description: "Offline fixture", image: "" }]))
+    const catalog = { getCatalogProduct: async id => products.get(id), CatalogSourceError: class extends Error {} }
+    const carts = await load("lib/cart-store.ts", { "@neondatabase/serverless": { neon: () => sql }, "@/lib/catalog-source": catalog, "@/lib/merchant-auth": auth })
+    const orders = await load("lib/order-store.ts", { "@neondatabase/serverless": { neon: () => sql } })
+    const normalizer = await load("lib/orders.ts", {})
+    const durability = await load("lib/payment-durability.ts", {
+      "@/lib/orders": normalizer, "@/lib/cart-store": carts, "@/lib/merchant-auth": auth,
+      "@/lib/cloud-events": { cloudDeliveryRequested: () => false }, "@/lib/order-store": orders,
+    })
+    const signer = new Stripe("sk_test_offline")
+    class OfflineStripe {
+      webhooks = signer.webhooks
+      checkout = { sessions: {
+        create: async params => {
+          sessionRequests.push(params)
+          const id = `cs_test_offline_${sessionRequests.length}`
+          const total = params.line_items.reduce((sum, line) => sum + line.quantity * line.price_data.unit_amount, 0)
+          const session = { id, object: "checkout.session", livemode: false, payment_status: "paid", amount_subtotal: total, amount_total: total, currency: "usd", client_reference_id: params.client_reference_id, metadata: params.metadata, payment_intent: `pi_${id}`, url: `https://checkout.stripe.com/offline/${id}` }
+          sessions.set(id, { session, lines: params.line_items.map((line, index) => ({ id: `li_${index}`, quantity: line.quantity, description: line.price_data.product_data.name, currency: "usd", amount_subtotal: line.quantity * line.price_data.unit_amount, amount_total: line.quantity * line.price_data.unit_amount, amount_tax: 0, amount_discount: 0, price: { unit_amount: line.price_data.unit_amount, product: { id: `prod_${index}`, metadata: line.price_data.product_data.metadata } } })) })
+          return session
+        },
+        listLineItems: async id => ({ data: sessions.get(id).lines, has_more: false }),
+      } }
+    }
+    const next = { NextResponse: { json: (body, init) => Response.json(body, init) } }
+    const checkout = await load("app/api/checkout/route.ts", {
+      "next/server": next, stripe: OfflineStripe, "@/lib/stripe-mode": { stripeKeyMode: () => "test" },
+      "@/lib/catalog-source": catalog, "@/lib/cart-store": carts, "@/lib/merchant-auth": auth,
+      "@/lib/he-said-nothing-config": { isHsnProductId: () => false },
+    })
+    const handoff = await load("app/api/cart/[id]/checkout/route.ts", {
+      "next/server": next, "@/lib/cart-store": carts, "@/lib/merchant-auth": auth,
+      "@/app/api/checkout/route": checkout,
+    })
+    const webhook = await load("app/api/webhook/stripe/route.ts", {
+      "next/server": next, stripe: OfflineStripe, "@/lib/payment-durability": durability,
+      "@/lib/cloud-outbox": { attemptCloudOutboxForOrder: async () => null },
+    })
+    const request = (items, cartId, headers = { "x-vibecart-merchant-key": key }) => new Request("https://offline.invalid/api/checkout", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ items, cartId }) })
+    const items = [{ productId: "sku_a", quantity: 2 }, { productId: "sku_b", quantity: 1 }]
+    const cart = await carts.createCart(items, "offline-a", undefined, { source: "offline-agent" })
+    let session
+    const event = (id = "evt_offline_paid", overrides = {}) => ({ id, object: "event", type: "checkout.session.completed", created: Math.floor(Date.now() / 1000), livemode: false, data: { object: session }, ...overrides })
+    const deliver = async (value, mutate = false) => {
+      const payload = JSON.stringify(value)
+      const signature = signer.webhooks.generateTestHeaderString({ payload, secret: signingSecret })
+      return webhook.POST(new Request("https://offline.invalid/api/webhook/stripe", { method: "POST", headers: { "stripe-signature": signature }, body: mutate ? payload + " " : payload }))
+    }
+    await t.test("unauthed internal checkout cannot bypass merchant auth", async () => {
+      const result = await checkout.POST(request(items, cart.id, {}))
+      assert.equal(result.status, 401)
+      assert.equal(sessionRequests.length, 0)
+    })
+    await t.test("foreign cart and wrong/duplicate items cannot be attached to checkout", async () => {
+      process.env.VIBECART_MERCHANT_ID = "merchant_b"
+      const foreign = await carts.createCart(items, "offline-b")
+      process.env.VIBECART_MERCHANT_ID = "merchant_a"
+      assert.equal((await checkout.POST(request(items, foreign.id))).status, 404)
+      assert.equal((await checkout.POST(request([{ productId: "sku_a", quantity: 1 }], cart.id))).status, 409)
+      assert.equal((await checkout.POST(request([{ productId: "sku_a", quantity: 2 }, { productId: "sku_a", quantity: 2 }], cart.id))).status, 409)
+      const foreignToken = auth.issueCartAccessToken(cart.id, "merchant_b")
+      assert.equal((await checkout.POST(request(items, cart.id, { authorization: `Bearer ${foreignToken}` }))).status, 401)
+      assert.equal(sessionRequests.length, 0)
+    })
+    await t.test("cart capability survives handoff and server-trusted prices/tenant reach Stripe", async () => {
+      const token = auth.issueCartAccessToken(cart.id)
+      const response = await handoff.POST(new Request(`https://offline.invalid/api/cart/${cart.id}/checkout`, { method: "POST", headers: { authorization: `Bearer ${token}` } }), { params: Promise.resolve({ id: cart.id }) })
+      assert.equal(response.status, 200)
+      const body = await response.json()
+      session = sessions.get(body.checkoutSessionId).session
+      assert.equal(session.metadata.vibecart_merchant_id, "merchant_a")
+      assert.equal(session.client_reference_id, cart.id)
+      assert.equal(sessionRequests[0].payment_intent_data.metadata.vibecart_merchant_id, "merchant_a")
+      assert.equal(session.amount_total, 3700)
+      assert.equal((await carts.getCart(cart.id)).status, "active")
+    })
+    await t.test("real Stripe signature rejects tampering before a durable order exists", async () => {
+      const warnings = []
+      const originalWarn = console.warn
+      console.warn = (...args) => warnings.push(args)
+      try {
+        const sensitive = event()
+        sensitive.data.object.customer_email = "private-offline@example.invalid"
+        assert.equal((await deliver(sensitive, true)).status, 400)
+      } finally { console.warn = originalWarn }
+      assert.equal(warnings.length, 1)
+      assert.equal(warnings[0].length, 1)
+      assert.ok(!JSON.stringify(warnings).includes("private-offline@example.invalid"))
+      assert.equal((await db.query("SELECT count(*)::int AS n FROM vibecart_orders")).rows[0].n, 0)
+    })
+    await t.test("line write failure rolls back header/event/cart; retry and replay persist once", async () => {
+      failLineWrite = true
+      assert.equal((await deliver(event())).status, 503)
+      assert.equal((await db.query("SELECT count(*)::int AS n FROM vibecart_orders")).rows[0].n, 0)
+      assert.equal((await carts.getCart(cart.id)).status, "active")
+      failLineWrite = false
+      assert.equal((await deliver(event())).status, 200)
+      assert.equal((await deliver(event())).status, 200)
+      assert.equal((await deliver(event("evt_offline_async", { type: "checkout.session.async_payment_succeeded" }))).status, 200)
+      const rows = (await db.query("SELECT * FROM vibecart_orders")).rows
+      assert.equal(rows.length, 1)
+      assert.equal(rows[0].merchant_id, "merchant_a")
+      assert.equal(rows[0].amount_total, 3700)
+      assert.equal(rows[0].metadata.source, "offline-agent")
+      assert.equal((await db.query("SELECT * FROM vibecart_order_lines")).rows.length, 2)
+      assert.equal((await db.query("SELECT * FROM vibecart_order_events")).rows.length, 2)
+      assert.equal((await carts.getCart(cart.id)).status, "converted")
+      process.env.VIBECART_MERCHANT_ID = "merchant_b"
+      assert.equal(await carts.getCart(cart.id), null)
+      process.env.VIBECART_MERCHANT_ID = "merchant_a"
+    })
+    await t.test("hosted webhooks never attribute missing/foreign merchant metadata by fallback", async () => {
+      for (const metadata of [{}, { vibecart_merchant_id: "merchant_b" }]) {
+        const value = event("evt_wrong_tenant")
+        value.data = { object: { ...session, metadata } }
+        assert.equal((await deliver(value)).status, 503)
+      }
+      assert.equal((await db.query("SELECT count(*)::int AS n FROM vibecart_orders")).rows[0].n, 1)
+    })
+    await t.test("merchant checkout without a cart still stamps explicit tenant metadata", async () => {
+      const response = await checkout.POST(request([{ productId: "sku_a", quantity: 1 }]))
+      assert.equal(response.status, 200)
+      assert.equal(sessionRequests.at(-1).metadata.vibecart_merchant_id, "merchant_a")
+    })
+  } finally {
+    await db.close()
+    for (const name of Object.keys(process.env)) if (!(name in previous)) delete process.env[name]
+    Object.assign(process.env, previous)
+  }
+})

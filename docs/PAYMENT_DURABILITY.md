@@ -78,3 +78,13 @@ Before merging/deploying payment changes:
 ## Merchant isolation
 
 Core derives the hosted merchant identity from server configuration and rejects a Stripe Session whose merchant metadata conflicts with that hosted tenant. Cart conversion updates are scoped by both cart ID and merchant ID. The Cloud retry worker verifies the stored order merchant matches the outbox merchant before delivery.
+
+## Hosted checkout identity and offline acceptance (2026-10-18)
+
+Generic cart checkout now looks up the cart under the configured merchant and validates active state and the exact product/quantity set before creating a Stripe session. Duplicate lines cannot substitute for a missing product. The handler checks merchant/cart authorization itself, including internal calls from MCP/cart routes; these adapters forward only the caller's existing credential, never a server-injected merchant secret.
+
+All Checkout sessions, including non-cart sessions, carry the configured merchant identity on the session and PaymentIntent. Hosted webhook processing rejects missing or conflicting merchant identity before requesting Stripe line items; self-host mode retains its legacy fallback. Previously created hosted sessions missing metadata cannot be safely auto-attributed: investigate/reconcile them through a separate reviewed procedure, rather than disabling the identity check or modifying production data.
+
+`tests/hosted-checkout-integration.test.mjs` runs actual merchant auth, cart, checkout, normalization, payment persistence and webhook code against in-memory PGlite PostgreSQL and the real Stripe webhook signature verifier. Stripe/Neon network transports are replaced with offline test adapters; all products and payment IDs are explicitly synthetic. It proves server-priced/tenant-bound cart handoff, cross-tenant and tampered-line rejection, raw-body tamper rejection, a line-write failure rolling back header/event/cart state, recovery, identical event replay and a second async event producing one durable order. This is offline integration evidence, not a real Neon/Stripe checkout or Radiantz merchant acceptance.
+
+Signature errors no longer log Stripe's raw exception, which can include the signed body, customer information and signature. Health now reports `readinessScope: configuration-only` and `stagingSafetyConfigured`; neither field independently proves infrastructure isolation or successful transactions.
