@@ -1,3 +1,4 @@
+import { previewRequestFailure } from "@/lib/preview-safety"
 import { NextRequest, NextResponse } from "next/server"
 import {
   consumeRateLimit,
@@ -203,7 +204,10 @@ function rateFailure(req: NextRequest, result: RateLimitResult, rpcId?: RpcEnvel
   )
 }
 
-export async function middleware(req: NextRequest) {
+async function handleRequest(req: NextRequest) {
+  const previewFailure = previewRequestFailure(req)
+  if (previewFailure) return jsonError(503, "STAGING_SAFETY_GATE", previewFailure)
+
   const brandedRoute = brandedSiteRouting(req)
   if (brandedRoute) return brandedRoute
 
@@ -218,6 +222,15 @@ export async function middleware(req: NextRequest) {
 
   const response = NextResponse.next()
   for (const [key, value] of Object.entries(rateHeaders(result))) response.headers.set(key, value)
+  return response
+}
+
+export async function middleware(req: NextRequest) {
+  const response = await handleRequest(req)
+  if (process.env.VERCEL_ENV === "preview") {
+    response.headers.set("x-robots-tag", "noindex, nofollow, noarchive")
+    response.headers.set("cache-control", "no-store")
+  }
   return response
 }
 

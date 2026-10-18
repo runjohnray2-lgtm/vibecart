@@ -98,3 +98,14 @@ Work on #93 should be stacked on the verified #99 branch until #91 receives owne
 - Official UCP validator and service PostgreSQL checks: GitHub CI pending when checkpoint written.
 - PR #109 is stacked on #91. Neither PR merged or production deployed. No production credentials, live payment activation, or paid services changed.
 - Remaining gates: non-production Neon + signed Stripe test checkout/replay/outage evidence; #56 managed merchant user sessions, credential provisioning and shared-runtime isolation; #58 authorized real merchant catalog and pilot. Then Shopify #94, merchant billing #97, and grounded AI sales #93 as dependencies permit.
+
+## 2026-10-18 issue #108 staging safety follow-up
+
+- Owner approved dedicated Vercel Preview and isolated staging Neon, test-mode Stripe only after isolation/merchant/cost checks; no production or extra spending.
+- Read-only Vercel metadata reverified: DATABASE_URL still targets production + preview; Stripe secrets production-only. No secrets read and no environment values changed.
+- PR #106 is closed and unmerged; #107 remains based on agent/ai-readiness. No blind merge or stack modification.
+- Added Preview runtime gate before rate limiting/routes: isolation attestation, approved database hostname/fallback checks, test credential and merchant auth requirements, Cloud disablement, non-pilot API denial, noindex/no-store, and live webhook rejection.
+- Local build/typecheck/lint PASS (existing img warning); 169 unit tests PASS, including 14 staging regressions. Infrastructure isolation is NOT established by these tests.
+- #109 CI fully PASS, including service PostgreSQL and official UCP validation.
+- Blockers: dedicated empty/schema-only staging database and zero incremental cost not verified; shared Preview DATABASE_URL unresolved; staging Stripe test credentials absent. No migration, database write, checkout, deployment or paid resource created in this follow-up.
+- Next: establish and verify secure branch-specific staging env with zero extra cost, then execute authorized Radiantz test-only checkout/replay/outage/cross-tenant acceptance under #108. Keep production unchanged.
