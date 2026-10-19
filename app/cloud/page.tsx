@@ -1,8 +1,6 @@
 import Link from "next/link"
 
 const cloudUrl = "https://vibecart-cloud-uupzkh.v2.appdeploy.ai/"
-const managedSetupUrl =
-  "https://github.com/runjohnray2-lgtm/vibecart/issues/new?title=VibeCart%20done-for-you%20setup"
 
 const cloudFeatures = [
   "Managed deployment, updates, and monitoring",
@@ -110,12 +108,12 @@ export default function CloudPage() {
                 Scope depends on the existing app, Stripe setup, authentication, and business-logic handoff.
               </p>
             </div>
-            <a
-              href={managedSetupUrl}
+            <Link
+              href="/setup"
               className="mt-5 inline-flex shrink-0 rounded-lg border border-emerald-500 px-5 py-3 font-semibold text-emerald-300 transition hover:bg-emerald-500/10 md:mt-0"
             >
-              Request Done-for-you Setup
-            </a>
+              See Done-for-you Setup
+            </Link>
           </div>
         </section>
 
@@ -138,6 +136,7 @@ export default function CloudPage() {
         <footer className="flex flex-wrap gap-5 border-t border-neutral-800 pt-6 text-sm text-neutral-500">
           <Link href="/" className="hover:text-neutral-200">VibeCart Core</Link>
           <a href={cloudUrl} className="hover:text-neutral-200">Cloud workspace</a>
+          <Link href="/setup" className="hover:text-neutral-200">Done-for-you Setup</Link>
           <Link href="/support" className="hover:text-neutral-200">Support</Link>
         </footer>
       </div>
