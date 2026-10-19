@@ -222,7 +222,10 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
 
     const images = asList(entry.images)
     const description = describe(entry)
-    const fallbackImage = imageUrl(entry.featuredImage) ?? imageUrl(entry.image) ?? imageUrl(images[0])
+    const featuredMedia = isObject(entry.featuredMedia) ? entry.featuredMedia : undefined
+    const preview = featuredMedia && isObject(featuredMedia.preview) ? featuredMedia.preview : undefined
+    const mediaPreviewImage = preview ? imageUrl(preview.image) : undefined
+    const fallbackImage = mediaPreviewImage ?? imageUrl(entry.featuredImage) ?? imageUrl(entry.image) ?? imageUrl(images[0])
 
     for (const variant of variants) {
       if (!isObject(variant)) {

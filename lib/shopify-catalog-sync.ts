@@ -26,7 +26,7 @@ export const SHOPIFY_SYNC_FLAG = 'VIBECART_SHOPIFY_SYNC_ENABLED'
 
 export const MAX_FEED_PRODUCTS = 10_000
 
-/** Reference queries for the future connector. Not executed or verified against a live shop. */
+/** Reference queries for the future connector. Schema fields reflect the read-only Radiantz Admin check; not executed by this module. */
 export const SHOPIFY_SHOP_CURRENCY_QUERY = 'query { shop { currencyCode } }'
 
 export const SHOPIFY_PRODUCTS_QUERY = `query VibeCartProducts($cursor: String, $query: String) {
@@ -39,11 +39,11 @@ export const SHOPIFY_PRODUCTS_QUERY = `query VibeCartProducts($cursor: String, $
       status
       publishedAt
       updatedAt
-      featuredImage { url }
+      featuredMedia { preview { image { url } } }
       images(first: 20) { nodes { id url } }
       variants(first: 100) {
-        pageInfo { hasNextPage }
-        nodes { id title sku price inventoryPolicy inventoryQuantity image { url } }
+        pageInfo { hasNextPage endCursor }
+        nodes { id title sku price inventoryPolicy inventoryQuantity }
       }
     }
   }
