@@ -40,3 +40,13 @@ Scope all order reads/mutations, session conflicts and outbox claims to an authe
 Local/control-plane database proof is not proof of deployed runtime binding. The Preview diagnostic must still be authenticated and its returned endpoint, current role, database, commit and read-only flag compared with independent evidence. The form keeps credentials out of URLs and performs only SELECTs under the unchanged false lock.
 
 Before payment testing, rotate only the temporary runtime password and branch-specific Preview DATABASE_URL, merchant key and cart signing secret; preserve privileges, keep the lock false, redeploy and invalidate old staging credentials/capabilities. Never reuse the earlier readable values for checkout. No rotation was applied during verification.
+
+## Additional RLS compatibility result
+
+A separate role-bound cart policy was evaluated locally: the non-admin runtime could read/create merchant A carts and could neither read nor insert merchant B carts. The prototype was rolled back. This shows that the failed missing-GUC experiment does not imply all RLS designs break checkout. A per-merchant login role with role-bound RLS is a viable candidate; all six tables and the complete checkout/webhook/retry transaction still need validation. Rate limits currently have no merchant column, so a full policy design needs an explicit tenant discriminator there or separately isolated rate-limit storage. A caller-settable custom GUC alone is not a credential-compromise boundary.
+
+Primary references: [PostgreSQL row security](https://www.postgresql.org/docs/current/ddl-rowsecurity.html), [Neon serverless transactions](https://neon.com/docs/serverless/serverless-driver).
+
+## Focused security fix — 2026-10-19
+
+Commit 2e3c69c90023fdb0ab080ec5b5c2239ae2d3cb36 scopes the authenticated integration lookup to configuredMerchantId in SQL and rejects a mismatched returned order. The actual-route/PGlite regression verifies A-to-B lookup returns 404 without reading B lines, A-to-A succeeds, missing sessions return 404, and invalid integration credentials make no database calls. Four focused tests, full TypeScript analysis and changed-file lint passed. The prior integration-route failure is fixed; the other seven reproduced isolation failures remain open. The optional merchant argument preserves legacy callers, which therefore remain unscoped until separately repaired. This is not a claim of complete tenant isolation. Full CI was deliberately skipped on this budget-limited change; baseline 3b8a52d had 249 passing tests.
