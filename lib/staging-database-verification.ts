@@ -102,7 +102,9 @@ export async function submitStagingVerification(req: Request) {
     return reply({ error: "Not found" }, 404)
   }
   // Same-origin POST keeps the key out of URLs, history and referrer headers.
-  if (req.headers.get("origin") !== new URL(req.url).origin) return reply({ error: "Forbidden" }, 403)
+  const deploymentHost = process.env.VERCEL_URL
+  if (!deploymentHost || !/^[a-z0-9-]+\.vercel\.app$/.test(deploymentHost)
+    || req.headers.get("origin") !== `https://${deploymentHost}`) return reply({ error: "Forbidden" }, 403)
   if (req.headers.get("content-type")?.split(";")[0] !== "application/x-www-form-urlencoded") {
     return reply({ error: "Unsupported content type" }, 415)
   }
