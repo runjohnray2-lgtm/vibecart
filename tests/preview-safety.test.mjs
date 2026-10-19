@@ -57,8 +57,10 @@ test("Unverified Preview blocks before rate limiter/database access and marks re
       "next/server": { NextResponse: { json: (body, init) => Response.json(body, init), next: () => new Response() } },
       "@/lib/distributed-rate-limit": { consumeRateLimit: () => { limiterCalls += 1; throw new Error("must not touch shared database") } },
     })
-    for (const path of ["/api/cart", "/api/checkout", "/api/webhook/stripe", "/mcp", "/ucp/mcp"]) {
-      const result = await mod.middleware({ method: "POST", nextUrl: { pathname: path }, headers: new Headers() })
+    for (const [method, path] of [["POST", "/api/cart"], ["POST", "/api/checkout"],
+      ["POST", "/api/webhook/stripe"], ["POST", "/mcp"], ["POST", "/ucp/mcp"],
+      ["POST", "/api/cart/id/checkout"], ["PATCH", "/api/cart/id"], ["DELETE", "/api/cart/id"]]) {
+      const result = await mod.middleware({ method, nextUrl: { pathname: path }, headers: new Headers() })
       assert.equal(result.status, 503)
       assert.equal((await result.json()).code, "STAGING_SAFETY_GATE")
       assert.match(result.headers.get("x-robots-tag"), /noindex/)

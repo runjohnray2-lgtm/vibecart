@@ -25,7 +25,11 @@ function stripeCredentialInfo() {
   return { configured: true, mode, credentialType }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  if (req && new URL(req.url).searchParams.get("staging-database") === "verify") {
+    const { verifyStagingDatabase } = await import("@/lib/staging-database-verification")
+    return verifyStagingDatabase(req)
+  }
   const hsn = hsnCheckoutReadiness()
   const stripe = stripeCredentialInfo()
   const catalogMode = catalogSourceMode()
