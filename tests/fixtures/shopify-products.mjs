@@ -49,6 +49,7 @@ export const graphqlEdges = {
         },
       },
     ],
+    pageInfo: { hasNextPage: false, endCursor: null },
   },
 }
 

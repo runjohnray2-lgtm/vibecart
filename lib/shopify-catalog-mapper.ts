@@ -210,9 +210,17 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
       continue
     }
     const connection = entry.variants
-    if (isObject(connection) && isObject(connection.pageInfo) && connection.pageInfo.hasNextPage === true) {
-      skip(productId, undefined, 'variant list is truncated (pageInfo.hasNextPage); fetch every variant before exposing this product')
-      continue
+    if (isObject(connection)) {
+      // A GraphQL connection must prove its variant list is complete.
+      // Legacy REST arrays are not connections and remain supported.
+      if (!isObject(connection.pageInfo) || typeof connection.pageInfo.hasNextPage !== 'boolean') {
+        skip(productId, undefined, 'variant pagination status unknown: pageInfo.hasNextPage missing or invalid')
+        continue
+      }
+      if (connection.pageInfo.hasNextPage) {
+        skip(productId, undefined, 'variant list is truncated (pageInfo.hasNextPage); fetch every variant before exposing this product')
+        continue
+      }
     }
     const variants = asList(entry.variants)
     if (variants.length === 0) {
