@@ -80,3 +80,49 @@ export async function verifyStagingDatabase(req: Request) {
     return reply({ error: "Read-only staging verification unavailable" }, 503)
   }
 }
+
+// This form is served only on the already Vercel-protected Preview. It contains
+// no credential or database data; authentication precedes every SQL connection.
+export function stagingVerificationForm() {
+  if (process.env.VERCEL_ENV !== "preview" || process.env.VIBECART_STAGING_ISOLATION_VERIFIED !== "false"
+    || process.env.VIBECART_HOSTED_MODE !== "true" || process.env.VIBECART_MERCHANT_ID !== "radiantz-staging"
+    || Date.now() >= Date.parse(EXPIRES_AT)) return reply({ error: "Not found" }, 404)
+  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Read-only staging verification</title>
+    <h1>Read-only staging verification</h1><p>Temporary Radiantz Preview only. Commerce remains locked.</p>
+    <form method="post" action="/api/health?staging-database=verify" autocomplete="off">
+      <label>Staging merchant key <input type="password" name="merchantKey" maxlength="128" autocomplete="off" required></label>
+      <button type="submit">Verify database (read only)</button>
+    </form></html>`, { headers: { ...HEADERS, "content-type": "text/html; charset=utf-8",
+      "content-security-policy": "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "referrer-policy": "no-referrer", "x-frame-options": "DENY" } })
+}
+
+export async function submitStagingVerification(req: Request) {
+  if (process.env.VERCEL_ENV !== "preview" || process.env.VIBECART_STAGING_ISOLATION_VERIFIED !== "false") {
+    return reply({ error: "Not found" }, 404)
+  }
+  // Same-origin POST keeps the key out of URLs, history and referrer headers.
+  if (req.headers.get("origin") !== new URL(req.url).origin) return reply({ error: "Forbidden" }, 403)
+  if (req.headers.get("content-type")?.split(";")[0] !== "application/x-www-form-urlencoded") {
+    return reply({ error: "Unsupported content type" }, 415)
+  }
+  try {
+    const reader = req.body?.getReader()
+    if (!reader) return reply({ error: "Invalid request" }, 400)
+    const chunks: Uint8Array[] = []
+    let length = 0
+    for (;;) {
+      const next = await reader.read()
+      if (next.done) break
+      length += next.value.byteLength
+      if (length > 2048) { await reader.cancel(); return reply({ error: "Invalid request" }, 413) }
+      chunks.push(next.value)
+    }
+    const bytes = new Uint8Array(length)
+    let offset = 0
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+    const key = new URLSearchParams(new TextDecoder().decode(bytes)).get("merchantKey") ?? ""
+    if (!key || key.length > 128) return reply({ error: "Unauthorized" }, 401)
+    return verifyStagingDatabase(new Request(req.url, { headers: { "x-vibecart-merchant-key": key } }))
+  } catch { return reply({ error: "Read-only staging verification unavailable" }, 503) }
+}

@@ -88,6 +88,33 @@ test("temporary Preview diagnostic authenticates before read-only SQL and preser
    assert.equal((await mod.exports.verifyStagingDatabase(request(true))).status, 503)
    identity = { ...identity, role: "vibecart_pilot_runtime" }
   })
+  await t.test("private form contains no credential and closes outside locked Preview", async () => {
+   const response = mod.exports.stagingVerificationForm()
+   assert.equal(response.status, 200)
+   assert.match(response.headers.get("content-security-policy"), /form-action 'self'/)
+   assert.doesNotMatch(await response.text(), /a{32}|postgresql:/)
+   process.env.VERCEL_ENV = "production"
+   assert.equal(mod.exports.stagingVerificationForm().status, 404)
+   process.env.VERCEL_ENV = "preview"
+  })
+  await t.test("form rejects cross-origin and oversized posts before connecting", async () => {
+   const before = connections
+   const post = (origin, body) => new Request("https://offline.vercel.app/api/health?staging-database=verify", {
+    method: "POST", headers: { origin, "content-type": "application/x-www-form-urlencoded" }, body,
+   })
+   assert.equal((await mod.exports.submitStagingVerification(post("https://other.invalid", "merchantKey=" + settings.VIBECART_MERCHANT_API_KEY))).status, 403)
+   assert.equal((await mod.exports.submitStagingVerification(post("https://offline.vercel.app", "x".repeat(2049)))).status, 413)
+   assert.equal((await mod.exports.submitStagingVerification(post("https://offline.vercel.app", "merchantKey=wrong"))).status, 401)
+   assert.equal(connections, before)
+  })
+  await t.test("same-origin form credential authorizes only read-only introspection", async () => {
+   const response = await mod.exports.submitStagingVerification(new Request("https://offline.vercel.app/api/health?staging-database=verify", {
+    method: "POST", headers: { origin: "https://offline.vercel.app", "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ merchantKey: settings.VIBECART_MERCHANT_API_KEY }),
+   }))
+   assert.equal(response.status, 200)
+   assert.equal((await response.json()).isolationLock, false)
+  })
   await t.test("driver errors never disclose connection strings", async () => {
    fail = true
    const response = await mod.exports.verifyStagingDatabase(request(true))

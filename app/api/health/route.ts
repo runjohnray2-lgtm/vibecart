@@ -30,6 +30,10 @@ export async function GET(req: Request) {
     const { verifyStagingDatabase } = await import("@/lib/staging-database-verification")
     return verifyStagingDatabase(req)
   }
+  if (req && new URL(req.url).searchParams.get("staging-database") === "form") {
+    const { stagingVerificationForm } = await import("@/lib/staging-database-verification")
+    return stagingVerificationForm()
+  }
   const hsn = hsnCheckoutReadiness()
   const stripe = stripeCredentialInfo()
   const catalogMode = catalogSourceMode()
@@ -65,4 +69,10 @@ export async function GET(req: Request) {
     },
     { headers: { "cache-control": "no-store" } }
   )
+}
+
+export async function POST(req: Request) {
+  if (new URL(req.url).searchParams.get("staging-database") !== "verify") return NextResponse.json({ error: "Not found" }, { status: 404 })
+  const { submitStagingVerification } = await import("@/lib/staging-database-verification")
+  return submitStagingVerification(req)
 }
