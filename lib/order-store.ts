@@ -261,10 +261,11 @@ export async function getStoredOrder(id: string): Promise<StoredOrder | null> {
   return row ? mapOrder(row, await linesForOrder(row.id)) : null
 }
 
-export async function getStoredOrderByCheckoutSession(checkoutSessionId: string): Promise<StoredOrder | null> {
-  const rows = await sql()`
-    SELECT * FROM vibecart_orders WHERE checkout_session_id = ${checkoutSessionId} LIMIT 1
-  `
+export async function getStoredOrderByCheckoutSession(checkoutSessionId: string, merchantId?: string): Promise<StoredOrder | null> {
+  const db = sql()
+  const rows = merchantId === undefined
+    ? await db`SELECT * FROM vibecart_orders WHERE checkout_session_id = ${checkoutSessionId} LIMIT 1`
+    : await db`SELECT * FROM vibecart_orders WHERE checkout_session_id = ${checkoutSessionId} AND merchant_id = ${merchantId} LIMIT 1`
   const row = rows[0] as OrderRow | undefined
   return row ? mapOrder(row, await linesForOrder(row.id)) : null
 }

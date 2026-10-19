@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { cloudIntegrationAuthorized } from "@/lib/cloud-ingest-auth"
 import { getStoredOrderByCheckoutSession } from "@/lib/order-store"
+import { configuredMerchantId } from "@/lib/merchant-auth"
 
 export const runtime = "nodejs"
 
@@ -17,8 +18,9 @@ export async function POST(req: Request, context: { params: Promise<{ integratio
       || body.checkoutSessionId.length > 200) {
       return NextResponse.json({ success: false, error: "Invalid checkout session." }, { status: 400 })
     }
-    const order = await getStoredOrderByCheckoutSession(body.checkoutSessionId)
-    if (!order) return NextResponse.json({ success: false, error: "Order not found." }, { status: 404 })
+    const merchantId = configuredMerchantId()
+    const order = await getStoredOrderByCheckoutSession(body.checkoutSessionId, merchantId)
+    if (!order || order.merchantId !== merchantId) return NextResponse.json({ success: false, error: "Order not found." }, { status: 404 })
     return NextResponse.json({ success: true, order })
   } catch (error) {
     console.error("[vibecart cloud] Durable order lookup failed", error)
