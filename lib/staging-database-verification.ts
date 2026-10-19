@@ -94,7 +94,7 @@ export function stagingVerificationForm() {
       <button type="submit">Verify database (read only)</button>
     </form></html>`, { headers: { ...HEADERS, "content-type": "text/html; charset=utf-8",
       "content-security-policy": "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
-      "referrer-policy": "no-referrer", "x-frame-options": "DENY" } })
+      "referrer-policy": "same-origin", "x-frame-options": "DENY" } })
 }
 
 export async function submitStagingVerification(req: Request) {

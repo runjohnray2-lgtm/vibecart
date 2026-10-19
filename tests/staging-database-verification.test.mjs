@@ -92,6 +92,7 @@ test("temporary Preview diagnostic authenticates before read-only SQL and preser
    const response = mod.exports.stagingVerificationForm()
    assert.equal(response.status, 200)
    assert.match(response.headers.get("content-security-policy"), /form-action 'self'/)
+   assert.equal(response.headers.get("referrer-policy"), "same-origin")
    assert.doesNotMatch(await response.text(), /a{32}|postgresql:/)
    process.env.VERCEL_ENV = "production"
    assert.equal(mod.exports.stagingVerificationForm().status, 404)
@@ -105,10 +106,11 @@ test("temporary Preview diagnostic authenticates before read-only SQL and preser
    assert.equal((await mod.exports.submitStagingVerification(post("https://other.invalid", "merchantKey=" + settings.VIBECART_MERCHANT_API_KEY))).status, 403)
    assert.equal((await mod.exports.submitStagingVerification(post("https://offline.vercel.app", "x".repeat(2049)))).status, 413)
    assert.equal((await mod.exports.submitStagingVerification(post("https://offline.vercel.app", "merchantKey=wrong"))).status, 401)
+   assert.equal((await mod.exports.submitStagingVerification(post("null", "merchantKey=" + settings.VIBECART_MERCHANT_API_KEY))).status, 403)
    assert.equal(connections, before)
   })
   await t.test("same-origin form credential authorizes only read-only introspection", async () => {
-   const response = await mod.exports.submitStagingVerification(new Request("https://offline.vercel.app/api/health?staging-database=verify", {
+   const response = await mod.exports.submitStagingVerification(new Request("http://localhost:3000/api/health?staging-database=verify", {
     method: "POST", headers: { origin: "https://offline.vercel.app", "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ merchantKey: settings.VIBECART_MERCHANT_API_KEY }),
    }))
