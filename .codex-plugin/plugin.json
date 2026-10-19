@@ -1,7 +1,7 @@
 {
   "name": "vibecart",
-  "version": "0.3.0",
-  "description": "Trusted Stripe Checkout tools and integration guidance for AI-built apps.",
+  "version": "0.4.0",
+  "description": "Agent-native merchant discovery, trusted catalogs, multi-item carts, and Stripe Checkout for AI-built apps.",
   "author": {
     "name": "VibeCart contributors",
     "url": "https://github.com/runjohnray2-lgtm"
@@ -9,7 +9,14 @@
   "homepage": "https://vibecart.vercel.app",
   "repository": "https://github.com/runjohnray2-lgtm/vibecart",
   "license": "MIT",
-  "keywords": ["stripe", "checkout", "mcp", "commerce"],
+  "keywords": [
+    "stripe",
+    "checkout",
+    "mcp",
+    "commerce",
+    "agent-commerce",
+    "merchant-network"
+  ],
   "skills": "./skills/",
   "mcpServers": {
     "vibecart": {
@@ -19,18 +26,22 @@
   },
   "interface": {
     "displayName": "VibeCart",
-    "shortDescription": "Trusted Stripe Checkout for AI-built apps",
-    "longDescription": "Add a single-product Stripe Checkout primitive with trusted server-side pricing. VibeCart is not a cart, inventory, or fulfillment platform.",
+    "shortDescription": "Agent-native commerce network for AI-built apps",
+    "longDescription": "Resolve VibeCart network merchants, inspect trusted merchant catalogs, and create trusted multi-item Stripe Checkout sessions. Merchants keep their own Stripe account and fulfillment workflow; VibeCart is not merchant of record and takes no transaction percentage.",
     "developerName": "VibeCart contributors",
     "category": "Developer Tools",
-    "capabilities": ["Read", "Interactive"],
+    "capabilities": [
+      "Read",
+      "Interactive"
+    ],
     "websiteURL": "https://vibecart.vercel.app",
     "privacyPolicyURL": "https://vibecart.vercel.app/privacy",
     "termsOfServiceURL": "https://vibecart.vercel.app/terms",
     "defaultPrompt": [
-      "Show me the trusted VibeCart demo catalog.",
-      "Explain how to add VibeCart securely.",
-      "Create a demo checkout for one catalog product."
+      "Resolve a published VibeCart merchant by slug.",
+      "Show me the trusted VibeCart catalog.",
+      "Explain how to connect a merchant securely.",
+      "Create a trusted multi-item checkout."
     ],
     "brandColor": "#10B981"
   }

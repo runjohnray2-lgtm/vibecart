@@ -10,7 +10,7 @@ test("server.json publishes VibeCart as a public Streamable HTTP remote", async 
   assert.equal(server.$schema, "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json")
   assert.equal(server.name, expectedServerName)
   assert.equal(server.title, "VibeCart")
-  assert.equal(server.version, "0.3.0")
+  assert.equal(server.version, "0.4.0")
   assert.equal(server.repository?.url, "https://github.com/runjohnray2-lgtm/vibecart")
   assert.equal(server.repository?.source, "github")
   assert.equal(server.websiteUrl, "https://vibecart.vercel.app")

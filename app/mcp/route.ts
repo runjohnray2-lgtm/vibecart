@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { CatalogSourceError, catalogSourceMode, listCatalogProducts } from "@/lib/catalog-source"
+import { MerchantNetworkError, getNetworkMerchant } from "@/lib/merchant-network"
 import type { VibeProduct } from "@/lib/products"
 import { POST as checkoutPost } from "@/app/api/checkout/route"
 import { hsnCheckoutReadiness, isHsnProductId } from "@/lib/he-said-nothing-config"
@@ -7,7 +8,7 @@ import { hsnCheckoutReadiness, isHsnProductId } from "@/lib/he-said-nothing-conf
 export const runtime = "nodejs"
 
 const SERVER_NAME = "vibecart"
-const SERVER_VERSION = "0.3.0"
+const SERVER_VERSION = "0.4.0"
 const MODERN_PROTOCOL = "2026-07-28"
 const LEGACY_PROTOCOL = "2025-11-25"
 const MCP_STANDARD_PROTOCOL = "2025-06-18"
@@ -45,6 +46,22 @@ const productSchema = {
     variant: { type: "string" },
   },
   required: ["id", "name", "description", "priceCents", "image"],
+  additionalProperties: false,
+} as const
+
+const merchantSchema = {
+  type: "object",
+  properties: {
+    slug: { type: "string" },
+    displayName: { type: "string" },
+    description: { type: "string" },
+    websiteUrl: { type: "string" },
+    catalogUrl: { type: "string" },
+    published: { type: "boolean", const: true },
+    network: { type: "string", const: "vibecart" },
+    updatedAt: { type: "string" },
+  },
+  required: ["slug", "displayName", "description", "websiteUrl", "catalogUrl", "published", "network", "updatedAt"],
   additionalProperties: false,
 } as const
 
@@ -103,6 +120,29 @@ const tools = [
       additionalProperties: false,
     },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: "vibecart.get_merchant",
+    title: "Resolve a VibeCart network merchant",
+    description: "Looks up one subscriber-published VibeCart merchant profile by stable slug. Returns only public business identity and public catalog-feed information; it does not expose merchant credentials or create a checkout.",
+    inputSchema: {
+      type: "object",
+      properties: { slug: { type: "string", minLength: 3, maxLength: 50, description: "Stable lowercase VibeCart merchant slug." } },
+      required: ["slug"],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean" },
+        merchant: merchantSchema,
+        code: errorProperties.code,
+        error: errorProperties.error,
+      },
+      required: ["success"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   {
     name: "vibecart.get_integration_instructions",
@@ -371,6 +411,22 @@ async function callTool(req: Request, name: string, args: Record<string, unknown
     }
   }
 
+  if (name === "vibecart.get_merchant") {
+    const slug = getStringArg(args, "slug")?.toLowerCase()
+    if (!slug) return toolError("slug is required", "INVALID_ARGUMENT")
+    try {
+      const merchant = await getNetworkMerchant(slug)
+      if (!merchant) return toolError(`VibeCart merchant "${slug}" was not found or is not published.`, "MERCHANT_NOT_FOUND")
+      return completeToolResult({ success: true, merchant })
+    } catch (error) {
+      if (error instanceof MerchantNetworkError) {
+        console.error(`[vibecart merchant network] ${error.code}`, error.message)
+        return toolError("VibeCart merchant network is temporarily unavailable.", error.code)
+      }
+      throw error
+    }
+  }
+
   if (name === "vibecart.get_integration_instructions") {
     const integration = {
       success: true,
@@ -382,6 +438,7 @@ async function callTool(req: Request, name: string, args: Record<string, unknown
         "Keep prices server-side for production stores.",
         "Configure VIBECART_CATALOG_URL for a merchant-controlled HTTPS JSON catalog; the built-in catalog is demo-only.",
         "Use product IDs returned by the trusted merchant catalog for checkout.",
+        "Use vibecart.get_merchant to resolve subscriber-published merchant identity and public catalog information by stable VibeCart slug.",
         "vibecart.create_checkout accepts legacy productId + quantity or a multi-item items[] list.",
         "Never expose STRIPE_SECRET_KEY or VIBECART_CATALOG_BEARER_TOKEN in client code.",
         "Never send prices through the generic MCP checkout tool; VibeCart resolves trusted prices server-side.",
@@ -509,7 +566,7 @@ export async function POST(req: Request) {
         name: SERVER_NAME,
         version: SERVER_VERSION,
       },
-      instructions: "VibeCart is agent-friendly commerce infrastructure with a trusted merchant catalog and hosted multi-item checkout on the generic MCP surface. Durable cart and released UCP commerce capabilities are available through VibeCart's dedicated UCP transport. Always use trusted product IDs; merchants own their Stripe account and fulfillment workflow.",
+      instructions: "VibeCart is agent-friendly commerce infrastructure with a shared merchant network, trusted merchant catalogs, and hosted multi-item checkout on the generic MCP surface. Durable cart and released UCP commerce capabilities are available through VibeCart's dedicated UCP transport. Use vibecart.get_merchant for subscriber-published merchant identity, always use trusted product IDs, and keep merchant Stripe/fulfillment credentials server-side.",
     })
   }
 
@@ -529,7 +586,7 @@ export async function POST(req: Request) {
         name: SERVER_NAME,
         version: SERVER_VERSION,
       },
-      instructions: "VibeCart exposes a compact trusted-catalog and multi-item checkout toolset for generic MCP clients; UCP-aware clients use /ucp/mcp for durable cart/order protocol capabilities.",
+      instructions: "VibeCart exposes merchant-network discovery, trusted-catalog, and multi-item checkout tools for generic MCP clients; UCP-aware clients use /ucp/mcp for durable cart/order protocol capabilities.",
     })
   }
 

@@ -19,10 +19,17 @@ Use `/mcp` for ordinary MCP clients.
 
 - `vibecart.list_products`
 - `vibecart.get_product`
+- `vibecart.get_merchant`
 - `vibecart.get_integration_instructions`
 - `vibecart.create_checkout`
 
 `vibecart.create_checkout` accepts either legacy `productId + quantity` or a multi-item `items[]` list of product IDs/quantities. VibeCart resolves trusted prices server-side. Do not send or invent real transaction prices.
+
+## Merchant network
+
+`vibecart.get_merchant` resolves a VibeCart Cloud subscriber-published merchant by stable slug. Treat the returned website and catalog URL as public merchant data. The network profile never contains Stripe credentials, catalog bearer tokens, Cloud keys, or fulfillment secrets.
+
+Merchant discovery does not imply agent-native payment support. Use only payment, checkout, order, and protocol capabilities actually advertised by the merchant/VibeCart runtime; do not invent a machine-payable settlement path.
 
 ## Merchant catalog source
 

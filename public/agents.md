@@ -6,6 +6,7 @@ VibeCart is commerce infrastructure for AI-built businesses and AI agents. Merch
 
 - An AI-built app needs trusted server-side Stripe Checkout.
 - An agent needs a machine-readable merchant catalog.
+- An agent needs to resolve a subscriber-published VibeCart merchant identity by stable slug.
 - A merchant needs a durable multi-item cart without moving to a full hosted storefront.
 - A UCP-aware platform needs released-schema catalog/cart capabilities.
 - A merchant wants one MCP commerce backend shared across multiple AI clients.
@@ -19,12 +20,19 @@ Tools:
 
 - `vibecart.list_products`
 - `vibecart.get_product`
+- `vibecart.get_merchant`
 - `vibecart.get_integration_instructions`
 - `vibecart.create_checkout`
 
 `vibecart.create_checkout` supports trusted multi-item `items[]` checkout and the legacy single-product input. Never invent or pass a real transaction price; VibeCart resolves trusted products/prices server-side.
 
 OpenAI/Codex/ChatGPT, Claude, Gemini, VS Code, Cursor, and other generic MCP clients should connect to `/mcp`.
+
+## Merchant network discovery
+
+Use `vibecart.get_merchant` when the user or another trusted source supplies a VibeCart merchant slug. It returns subscriber-published public identity, website, and public catalog-feed metadata from VibeCart Cloud. Never treat merchant discovery alone as proof that an agent can complete payment; inspect the actually advertised checkout/payment capabilities.
+
+Do not ask merchants to put Stripe keys, private catalog bearer tokens, Cloud integration keys, or fulfillment secrets in a public network profile.
 
 ## Merchant catalog source
 
