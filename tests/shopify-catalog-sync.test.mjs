@@ -74,6 +74,22 @@ test('feed carries only catalog-contract fields; identifiers stay in the server-
   assert.equal(index.get('nope'), undefined)
 })
 
+test('cross-product variant collision fails closed in index and atomic sync', async () => {
+  const first = gqlProduct(501, 'SYNTHETIC Alpha', [[777, 'Red', 'ALPHA', '65.99']])
+  const second = gqlProduct(502, 'SYNTHETIC Beta', [[777, 'Amber', 'BETA', '70.00']])
+  const base = createSnapshot('USD')
+  const mapped = applyProducts(base, [first, second])
+  assert.equal(mapped.upserted, 2)
+  assert.throws(() => buildVariantIndex(mapped.snapshot), /duplicate Shopify variant id in snapshot/)
+  assert.throws(() => toCatalogFeed(mapped.snapshot), /duplicate catalog id in snapshot/)
+
+  const fetchPage = async () => ({
+    products: [first, second], pageInfo: { hasNextPage: false, endCursor: null },
+  })
+  await assert.rejects(() => syncShopifyCatalog({ ...OPTS, fetchPage, base }), /duplicate Shopify variant id in snapshot/)
+  assert.equal(base.products.size, 0, 'failed sync must not mutate the previous snapshot')
+})
+
 test('incremental sync upserts a changed product and drops its removed variants', async () => {
   const { result: first } = await fullSync()
   const updated = gqlProduct(1, 'Alpha', [[11, 'Small', 'A-S', '11.00']])

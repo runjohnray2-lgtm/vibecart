@@ -205,6 +205,7 @@ export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string,
   const index = new Map<string, ShopifyVariantRef>()
   for (const variants of snapshot.products.values()) {
     for (const p of variants) {
+      if (index.has(p.id)) throw new Error('duplicate Shopify variant id in snapshot: ' + p.id)
       index.set(p.id, {
         productId: p.shopify.productId,
         variantId: p.shopify.variantId,
@@ -262,5 +263,7 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
     cursor = nextCursor
   }
 
+  // Reject ambiguous variant ownership before a caller can publish or index the snapshot.
+  buildVariantIndex(snapshot)
   return { snapshot, pages, upserted, removed, skipped, warnings }
 }
