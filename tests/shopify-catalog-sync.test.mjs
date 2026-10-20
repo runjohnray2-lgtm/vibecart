@@ -170,6 +170,34 @@ test('a sellable-variant change removes the product instead of keeping a stale p
   assert.equal(toCatalogFeed(badPrice.snapshot).products.some(p => p.id === V(21)), false)
 })
 
+test('sync omits an entire family when one variant is rejected, preserving unrelated valid products', async () => {
+  const old = gqlProduct(920, 'SYNTHETIC previous', [[9201, 'Old', 'OLD', '11.00']])
+  const base = applyProducts(createSnapshot('USD'), [old]).snapshot
+  const before = toCatalogFeed(base)
+  const partial = gqlProduct(920, 'SYNTHETIC partial', [
+    [9201, 'Good', 'GOOD', '65.99'],
+    [9202, 'Bad price', 'BAD', '12.345'],
+  ])
+  const other = gqlProduct(921, 'SYNTHETIC valid', [[9211, 'Good', 'OK', '70.00']])
+
+  const applied = applyProducts(base, [partial, other])
+  assert.equal(applied.removed, 1)
+  assert.equal(applied.upserted, 1)
+  assert.equal(applied.snapshot.products.has('920'), false)
+  assert.deepEqual(toCatalogFeed(applied.snapshot).products.map(p => p.id), [V(9211)])
+  assert.ok(applied.skipped.some(s => s.variantId === V(9202) && /more than two decimal/.test(s.reason)))
+  assert.ok(applied.skipped.some(s => /entire family omitted/.test(s.reason)))
+  assert.deepEqual(toCatalogFeed(base), before, 'base snapshot remains unchanged')
+
+  const synced = await syncShopifyCatalog({
+    ...OPTS, base,
+    fetchPage: async () => ({ products: [partial, other], pageInfo: { hasNextPage: false, endCursor: null } }),
+  })
+  assert.equal(synced.removed, 1)
+  assert.equal(synced.upserted, 1)
+  assert.deepEqual(toCatalogFeed(synced.snapshot).products.map(p => p.id), [V(9211)])
+})
+
 test('delete webhooks accept numeric ids and global ids', async () => {
   const { result } = await fullSync()
   const numeric = applyProductDeleted(result.snapshot, [3])

@@ -169,6 +169,18 @@ export function applyProducts(
     warnings.push(...mapped.warnings)
     const key = productKey(raw)
     if (!key) continue
+    // A partial variant family can misrepresent Shopify's purchasable choices.
+    // Keep individual diagnostics, but do not publish valid siblings when any
+    // variant in the same product was rejected by the mapper.
+    if (mapped.products.length > 0 && mapped.skipped.length > 0) {
+      const id = rawProductId(raw)
+      skipped.push({
+        ...(id ? { productId: id } : {}),
+        reason: 'product variants incomplete: ' + mapped.skipped.length + ' rejected variant(s); entire family omitted',
+      })
+      if (next.delete(key)) removed += 1
+      continue
+    }
     if (mapped.products.length > 0) {
       next.set(key, mapped.products)
       upserted += 1
