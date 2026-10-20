@@ -105,6 +105,13 @@ function productKey(raw: unknown): string | undefined {
   return id ? (shopifyNumericId(id) ?? id) : undefined
 }
 
+/** Trusted sync must positively verify status; missing is not ACTIVE. */
+function statusUnknown(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false
+  const status = (raw as Record<string, unknown>).status
+  return typeof status !== 'string' || status.trim().length === 0
+}
+
 /** True when neither publishedAt nor published_at was returned at all (explicit null is handled by the mapper). */
 function publicationUnknown(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null) return false
@@ -139,6 +146,16 @@ export function applyProducts(
       skipped.push({
         ...(id ? { productId: id } : {}),
         reason: 'publication status unknown: publishedAt was not returned, so the product is not exposed',
+      })
+      const unknownKey = productKey(raw)
+      if (unknownKey && next.delete(unknownKey)) removed += 1
+      continue
+    }
+    if (statusUnknown(raw)) {
+      const id = rawProductId(raw)
+      skipped.push({
+        ...(id ? { productId: id } : {}),
+        reason: 'product status unknown: status was not returned, so the product is not exposed',
       })
       const unknownKey = productKey(raw)
       if (unknownKey && next.delete(unknownKey)) removed += 1

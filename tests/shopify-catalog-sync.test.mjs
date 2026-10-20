@@ -140,6 +140,28 @@ test('an update that archives or unpublishes a product removes it from the feed'
   assert.deepEqual(toCatalogFeed(unpublished.snapshot).products.map(p => p.id), [V(11), V(12)])
 })
 
+test('missing or invalid status never exposes a published Shopify product', async () => {
+  const product = gqlProduct(811, 'SYNTHETIC light', [[8111, 'Red', 'R-1', '65.99']])
+  const base = applyProducts(createSnapshot('USD'), [product]).snapshot
+  const original = toCatalogFeed(base)
+  assert.equal(original.products.length, 1)
+  for (const status of [undefined, null, ' ', 0]) {
+    const raw = { ...product, status }
+    const applied = applyProducts(base, [raw])
+    assert.equal(applied.removed, 1)
+    assert.equal(applied.upserted, 0)
+    assert.match(applied.skipped[0].reason, /status unknown/)
+    assert.deepEqual(toCatalogFeed(applied.snapshot).products, [])
+    const synced = await syncShopifyCatalog({
+      ...OPTS, base, fetchPage: async () => ({
+        products: [raw], pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    })
+    assert.deepEqual(toCatalogFeed(synced.snapshot).products, [])
+    assert.deepEqual(toCatalogFeed(base), original, 'previous snapshot is immutable')
+  }
+})
+
 test('a sellable-variant change removes the product instead of keeping a stale price', async () => {
   const { result } = await fullSync()
   const badPrice = applyProducts(result.snapshot, [gqlProduct(2, 'Beta', [[21, 'Default Title', 'B-1', '5.999']])])
