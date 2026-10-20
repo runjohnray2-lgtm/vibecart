@@ -284,9 +284,9 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
     for (const raw of page.products) {
       const key = productKey(raw)
       if (!key) {
-        // An unidentifiable product makes a full reconciliation untrustworthy.
-        if (options.fullRefresh) throw new Error('full Shopify refresh contains a product with an invalid id')
-        continue // Incremental updates report invalid identities as mapper skips.
+        // An unidentified product cannot be reconciled safely in either a full
+        // or incremental batch. Abort atomically rather than silently skipping it.
+        throw new Error('Shopify sync contains a product with an invalid id')
       }
       if (seenProductKeys.has(key)) throw new Error('duplicate Shopify product id across sync pages: ' + key)
       seenProductKeys.add(key)
