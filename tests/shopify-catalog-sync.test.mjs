@@ -90,6 +90,27 @@ test('cross-product variant collision fails closed in index and atomic sync', as
   assert.equal(base.products.size, 0, 'failed sync must not mutate the previous snapshot')
 })
 
+test('duplicate product identities within or across pages fail closed without changing the last good snapshot', async () => {
+  const first = gqlProduct(601, 'First', [[6101, 'Red', 'FIRST', '65.99']])
+  const repeated = gqlProduct(601, 'Second', [[6102, 'Amber', 'SECOND', '70.00']], { id: 601 })
+  const base = applyProducts(createSnapshot('USD'), [
+    gqlProduct(600, 'Previously accepted', [[6001, 'One', 'OLD', '12.34']]),
+  ]).snapshot
+  const before = toCatalogFeed(base)
+
+  for (const pages of [
+    [{ products: [first, repeated], pageInfo: { hasNextPage: false, endCursor: null } }],
+    [
+      { products: [first], pageInfo: { hasNextPage: true, endCursor: 'next' } },
+      { products: [repeated], pageInfo: { hasNextPage: false, endCursor: null } },
+    ],
+  ]) {
+    const { fetchPage } = pager(pages)
+    await assert.rejects(() => syncShopifyCatalog({ ...OPTS, fetchPage, base }), /duplicate Shopify product id/)
+    assert.deepEqual(toCatalogFeed(base), before, 'failed sync must leave last good snapshot untouched')
+  }
+})
+
 test('incremental sync upserts a changed product and drops its removed variants', async () => {
   const { result: first } = await fullSync()
   const updated = gqlProduct(1, 'Alpha', [[11, 'Small', 'A-S', '11.00']])

@@ -234,6 +234,7 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
   const maxPages = options.maxPages ?? 200
   let snapshot = options.base ?? createSnapshot(shopCurrency)
   const seenCursors = new Set<string>()
+  const seenProductKeys = new Set<string>()
   const skipped: ShopifyMapSkip[] = []
   const warnings: string[] = []
   let upserted = 0
@@ -247,6 +248,13 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
     const page = await options.fetchPage(cursor)
     if (!page || !Array.isArray(page.products) || !page.pageInfo || typeof page.pageInfo.hasNextPage !== 'boolean') {
       throw new Error('fetchPage returned an invalid page')
+    }
+    // Product pages must never repeat an identity: later pages could overwrite a variant family.
+    for (const raw of page.products) {
+      const key = productKey(raw)
+      if (!key) continue // Invalid identities are handled as mapper skips.
+      if (seenProductKeys.has(key)) throw new Error('duplicate Shopify product id across sync pages: ' + key)
+      seenProductKeys.add(key)
     }
     const applied = applyProducts(snapshot, page.products, { includeUnpublished: options.includeUnpublished })
     snapshot = applied.snapshot
