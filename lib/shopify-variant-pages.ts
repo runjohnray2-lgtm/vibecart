@@ -44,16 +44,19 @@ function unpackConnection(value: unknown): { nodes: unknown[]; hasNextPage: bool
     endCursor: typeof value.pageInfo.endCursor === 'string' ? value.pageInfo.endCursor : null,
   }
 }
+const PRODUCT_GID = /^gid:\/\/shopify\/Product\/[1-9]\d*$/
+const VARIANT_GID = /^gid:\/\/shopify\/ProductVariant\/[1-9]\d*$/
+
 function variantId(value: unknown): string {
-  if (!isRecord(value) || typeof value.id !== 'string' || !value.id.trim()) {
-    throw new Error('Shopify variant page contains a missing or invalid variant id')
+  if (!isRecord(value) || typeof value.id !== 'string' || !VARIANT_GID.test(value.id)) {
+    throw new Error('Shopify variant page contains a missing or invalid ProductVariant gid')
   }
   return value.id
 }
 /** Returns a new, fully hydrated product or throws; never mutates the original. */
 export async function hydrateShopifyProductVariants(raw: unknown, options: VariantPageOptions): Promise<unknown> {
-  if (!isRecord(raw) || typeof raw.id !== 'string' || !raw.id.trim()) {
-    throw new Error('Shopify product id is required for variant pagination')
+  if (!isRecord(raw) || typeof raw.id !== 'string' || !PRODUCT_GID.test(raw.id)) {
+    throw new Error('Shopify Product gid is required for variant pagination')
   }
   const productId = raw.id
   const initial = unpackConnection(raw.variants)
