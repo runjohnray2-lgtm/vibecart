@@ -33,11 +33,12 @@ function connectionOf(value: unknown, operation: string): { nodes: unknown[]; pa
     throw new Error('invalid Shopify ' + operation + ' connection')
   }
   const pageInfo = value.pageInfo
+  const hasNextPage = pageInfo.hasNextPage === true
   const endCursor = typeof pageInfo.endCursor === 'string' ? pageInfo.endCursor : null
-  if (pageInfo.hasNextPage && (!endCursor || !endCursor.trim())) {
+  if (hasNextPage && (!endCursor || !endCursor.trim())) {
     throw new Error('Shopify ' + operation + ' continuation cursor missing')
   }
-  return { nodes: value.nodes, pageInfo: { hasNextPage: pageInfo.hasNextPage, endCursor } }
+  return { nodes: value.nodes, pageInfo: { hasNextPage, endCursor } }
 }
 
 /**
