@@ -82,6 +82,37 @@ test('rejects empty continuation and missing IDs', async () => {
   }))), /invalid variant id/)
 })
 
+test('rejects malformed Shopify GIDs on initial and continuation pages', async () => {
+  const noFetch = options(async () => { throw new Error('unexpected continuation fetch') })
+  for (const id of [
+    'gid://shopify/ProductVariant/99',
+    'gid://shopify/Product/0',
+    'gid://shopify/Product/-1',
+    'gid://shopify/Product/not-a-number',
+    '99',
+  ]) {
+    await assert.rejects(hydrate({ ...product(1, false), id }, noFetch), /Shopify Product gid/)
+  }
+  for (const id of [
+    'gid://shopify/Product/1',
+    'gid://shopify/ProductVariant/0',
+    'gid://shopify/ProductVariant/not-a-number',
+    'gid://shopify/ProductVariant/1?foo=bar',
+    '1',
+  ]) {
+    const raw = product(1, false)
+    raw.variants.nodes[0] = { ...V(1), id }
+    await assert.rejects(hydrate(raw, noFetch), /invalid variant id/)
+  }
+  await assert.rejects(hydrate(product(100), options(async productId => ({
+    productId,
+    variants: {
+      nodes: [{ ...V(101), id: 'gid://shopify/Product/101' }],
+      pageInfo: { hasNextPage: false },
+    },
+  }))), /invalid variant id/)
+})
+
 test('rejects unsafe limits and oversized catalogs', async () => {
   await assert.rejects(hydrate(product(100), { ...options(async () => ({})), maxVariantPages: 1 }), /page limit exceeded/)
   await assert.rejects(hydrate(product(100), { ...options(async id => ({
