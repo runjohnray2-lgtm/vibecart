@@ -49,7 +49,7 @@ const VARIANT_GID = /^gid:\/\/shopify\/ProductVariant\/[1-9]\d*$/
 
 function variantId(value: unknown): string {
   if (!isRecord(value) || typeof value.id !== 'string' || !VARIANT_GID.test(value.id)) {
-    throw new Error('Shopify variant page contains a missing or invalid ProductVariant gid')
+    throw new Error('Shopify variant page contains a missing or invalid variant id (ProductVariant gid required)')
   }
   return value.id
 }
