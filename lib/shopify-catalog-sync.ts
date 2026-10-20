@@ -76,8 +76,10 @@ export type ShopifySyncOptions = {
   /** Currency this merchant catalog is sold in. Must equal the shop currency. */
   expectedCurrencyCode: string
   fetchPage: (cursor: string | null) => Promise<ShopifyProductsPage>
-  /** Existing snapshot for an incremental sync. Omit for a full sync. */
+  /** Existing snapshot to reconcile. Omit to build a new snapshot. */
   base?: ShopifyCatalogSnapshot
+  /** Remove absent products only after a complete, unfiltered traversal. Defaults to false. */
+  fullRefresh?: boolean
   maxPages?: number
   includeUnpublished?: boolean
 }
@@ -281,7 +283,11 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
     // Product pages must never repeat an identity: later pages could overwrite a variant family.
     for (const raw of page.products) {
       const key = productKey(raw)
-      if (!key) continue // Invalid identities are handled as mapper skips.
+      if (!key) {
+        // An unidentifiable product makes a full reconciliation untrustworthy.
+        if (options.fullRefresh) throw new Error('full Shopify refresh contains a product with an invalid id')
+        continue // Incremental updates report invalid identities as mapper skips.
+      }
       if (seenProductKeys.has(key)) throw new Error('duplicate Shopify product id across sync pages: ' + key)
       seenProductKeys.add(key)
     }
@@ -298,6 +304,19 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
     }
     seenCursors.add(nextCursor)
     cursor = nextCursor
+  }
+
+  // Prune only after the entire unfiltered product traversal succeeds. A failed page,
+  // cursor guard or malformed product identity must never delete last-known-good data.
+  if (options.fullRefresh) {
+    const reconciled = new Map(snapshot.products)
+    for (const key of reconciled.keys()) {
+      if (!seenProductKeys.has(key)) {
+        reconciled.delete(key)
+        removed += 1
+      }
+    }
+    snapshot = { currencyCode: snapshot.currencyCode, products: reconciled }
   }
 
   // Reject ambiguous variant ownership before a caller can publish or index the snapshot.
