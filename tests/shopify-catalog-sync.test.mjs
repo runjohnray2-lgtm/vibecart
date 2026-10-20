@@ -124,6 +124,44 @@ test('incremental sync upserts a changed product and drops its removed variants'
   assert.equal(toCatalogFeed(first.snapshot).products.length, 4, 'base snapshot must not be mutated')
 })
 
+test('explicit full refresh prunes absent products only after a complete traversal', async () => {
+  const { result: initial } = await fullSync()
+  const before = toCatalogFeed(initial.snapshot)
+  const onlyOne = gqlProduct(1, 'Alpha', [[11, 'Small', 'A-S', '11.00']])
+  const fetchPage = async () => ({
+    products: [onlyOne], pageInfo: { hasNextPage: false, endCursor: null },
+  })
+  const incremental = await syncShopifyCatalog({ ...OPTS, base: initial.snapshot, fetchPage })
+  assert.equal(incremental.removed, 0)
+  assert.deepEqual(toCatalogFeed(incremental.snapshot).products.map(p => p.id), [V(11), V(21), V(31)])
+
+  const refreshed = await syncShopifyCatalog({ ...OPTS, base: initial.snapshot, fetchPage, fullRefresh: true })
+  assert.equal(refreshed.upserted, 1)
+  assert.equal(refreshed.removed, 2)
+  assert.deepEqual(toCatalogFeed(refreshed.snapshot).products.map(p => p.id), [V(11)])
+  assert.equal(refreshed.snapshot.products.size, 1)
+  assert.deepEqual(toCatalogFeed(initial.snapshot), before, 'full refresh must not mutate base')
+})
+
+test('full refresh aborts on invalid product identity or incomplete pages without pruning base', async () => {
+  const { result: initial } = await fullSync()
+  const before = toCatalogFeed(initial.snapshot)
+  const badId = gqlProduct(9, 'Invalid', [[91, 'One', 'BAD', '10.00']], { id: null })
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS, base: initial.snapshot, fullRefresh: true,
+    fetchPage: async () => ({ products: [badId], pageInfo: { hasNextPage: false, endCursor: null } }),
+  }), /invalid id/)
+  const { fetchPage } = pager([
+    { products: [gqlProduct(1, 'Alpha', [[11, 'One', 'OK', '10.00']])],
+      pageInfo: { hasNextPage: true, endCursor: 'next' } },
+    { products: [], pageInfo: { hasNextPage: true, endCursor: 'next' } },
+  ])
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS, base: initial.snapshot, fullRefresh: true, fetchPage,
+  }), /cursor did not advance/)
+  assert.deepEqual(toCatalogFeed(initial.snapshot), before)
+})
+
 test('an update that archives or unpublishes a product removes it from the feed', async () => {
   const { result } = await fullSync()
   const archived = applyProducts(result.snapshot, [
