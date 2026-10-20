@@ -1,4 +1,5 @@
-import { SHOPIFY_PRODUCTS_QUERY, SHOPIFY_SHOP_CURRENCY_QUERY, normalizeCurrency, type ShopifyProductsPage } from '@/lib/shopify-catalog-sync'
+import { SHOPIFY_PRODUCTS_QUERY, SHOPIFY_SHOP_CURRENCY_QUERY, type ShopifyProductsPage } from '@/lib/shopify-catalog-sync'
+import { normalizeCurrency } from '@/lib/shopify-catalog-mapper'
 import { SHOPIFY_VARIANTS_QUERY, withHydratedShopifyVariants, type ShopifyVariantPage } from '@/lib/shopify-variant-pages'
 
 /**
