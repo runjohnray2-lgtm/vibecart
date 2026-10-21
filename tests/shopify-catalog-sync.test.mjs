@@ -162,6 +162,22 @@ test('full refresh aborts on invalid product identity or incomplete pages withou
   assert.deepEqual(toCatalogFeed(initial.snapshot), before)
 })
 
+test('incremental sync rejects unidentified products instead of silently accepting a partial update', async () => {
+  const { result: initial } = await fullSync()
+  const before = toCatalogFeed(initial.snapshot)
+  const valid = gqlProduct(1, 'Updated', [[11, 'Small', 'A-S', '12.00']])
+  const unidentified = gqlProduct(9, 'Unknown identity', [[91, 'One', 'BAD', '10.00']], { id: null })
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS,
+    base: initial.snapshot,
+    fetchPage: async () => ({
+      products: [valid, unidentified],
+      pageInfo: { hasNextPage: false, endCursor: null },
+    }),
+  }), /invalid id/)
+  assert.deepEqual(toCatalogFeed(initial.snapshot), before, 'last-known-good snapshot must remain intact')
+})
+
 test('an update that archives or unpublishes a product removes it from the feed', async () => {
   const { result } = await fullSync()
   const archived = applyProducts(result.snapshot, [
