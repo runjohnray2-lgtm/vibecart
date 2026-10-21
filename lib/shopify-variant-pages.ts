@@ -62,7 +62,9 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
   const initial = unpackConnection(raw.variants)
   const maxPages = options.maxVariantPages ?? 30
   const maxVariants = options.maxVariantsPerProduct ?? 3000
-  if (!Number.isSafeInteger(maxPages) || maxPages < 1 || !Number.isSafeInteger(maxVariants) || maxVariants < 1) {
+  // Caller overrides may tighten defaults but must not bypass the hard request/memory caps.
+  if (!Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 30 ||
+      !Number.isSafeInteger(maxVariants) || maxVariants < 1 || maxVariants > 3000) {
     throw new Error('invalid Shopify variant pagination limits')
   }
   const seen = new Set<string>()
