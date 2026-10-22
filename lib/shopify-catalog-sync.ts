@@ -188,6 +188,19 @@ export function applyProducts(
       if (next.delete(key)) removed += 1
       continue
     }
+    // Direct sync callers can bypass the GraphQL adapter. Require an actual
+    // Shopify DENY/CONTINUE policy for every variant before publishing a family.
+    // Zero quantity remains allowed for either policy; checkout authorization is separate.
+    if (mapped.products.length > 0 && mapped.products.some(
+      product => product.shopify.inventoryPolicy !== 'DENY' && product.shopify.inventoryPolicy !== 'CONTINUE',
+    )) {
+      skipped.push({
+        ...(rawProductId(raw) ? { productId: rawProductId(raw) } : {}),
+        reason: 'inventory policy missing or invalid; entire family omitted',
+      })
+      if (next.delete(key)) removed += 1
+      continue
+    }
     if (mapped.products.length > 0) {
       next.set(key, mapped.products)
       upserted += 1
