@@ -72,6 +72,12 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
   const append = (nodes: unknown[]) => {
     for (const node of nodes) {
       const id = variantId(node)
+      // Admin GraphQL must positively report sellability policy. Never silently
+      // publish a variant whose DENY/CONTINUE rule is missing or unrecognized.
+      const policy = isRecord(node) ? node.inventoryPolicy : undefined
+      if (policy !== 'DENY' && policy !== 'CONTINUE') {
+        throw new Error('Shopify variant page contains missing or invalid inventoryPolicy for ' + id)
+      }
       if (seen.has(id)) throw new Error('duplicate Shopify variant id across pages: ' + id)
       seen.add(id)
       all.push(node)

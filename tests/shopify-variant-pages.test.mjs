@@ -54,6 +54,23 @@ test('complete single page does not fetch additional variants', async () => {
   assert.equal(result.variants.nodes.length, 100)
 })
 
+test('rejects missing or invalid Admin inventory policy on initial and continuation pages', async () => {
+  const noFetch = options(async () => { throw new Error('unexpected continuation fetch') })
+  for (const policy of [undefined, null, 'UNKNOWN', 'deny']) {
+    const initial = product(1, false)
+    initial.variants.nodes[0] = { ...V(1), inventoryPolicy: policy }
+    await assert.rejects(hydrate(initial, noFetch), /missing or invalid inventoryPolicy/)
+
+    await assert.rejects(hydrate(product(100), options(async productId => ({
+      productId,
+      variants: {
+        nodes: [{ ...V(101), inventoryPolicy: policy }],
+        pageInfo: { hasNextPage: false, endCursor: 'done' },
+      },
+    }))), /missing or invalid inventoryPolicy/)
+  }
+})
+
 test('rejects duplicate variant IDs across pages', async () => {
   await assert.rejects(hydrate(product(100), options(async id => ({
     productId: id, variants: { nodes: [V(100)], pageInfo: { hasNextPage: false } },
