@@ -180,6 +180,31 @@ test('incremental sync rejects unidentified products instead of silently accepti
   assert.deepEqual(toCatalogFeed(initial.snapshot), before, 'last-known-good snapshot must remain intact')
 })
 
+test('public catalog snapshots reject unpublished-product overrides before Shopify reads', async () => {
+  const published = gqlProduct(881, 'SYNTHETIC published', [[8811, 'One', 'PUB', '12.34']])
+  const unpublished = { ...published, publishedAt: null }
+  const base = applyProducts(createSnapshot('USD'), [published]).snapshot
+  const before = toCatalogFeed(base)
+
+  assert.throws(
+    () => applyProducts(base, [unpublished], { includeUnpublished: true }),
+    /includeUnpublished is not permitted for public catalog snapshots/,
+  )
+  let requests = 0
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS, base, includeUnpublished: true,
+    fetchPage: async () => {
+      requests += 1
+      return { products: [unpublished], pageInfo: { hasNextPage: false, endCursor: null } }
+    },
+  }), /includeUnpublished is not permitted for public Shopify catalog sync/)
+  assert.equal(requests, 0, 'unsafe override must fail before the Shopify transport is called')
+  assert.deepEqual(toCatalogFeed(base), before, 'existing published snapshot must remain unchanged')
+
+  const safe = applyProducts(base, [unpublished])
+  assert.deepEqual(toCatalogFeed(safe.snapshot).products, [], 'default path must omit unpublished product')
+})
+
 test('an update that archives or unpublishes a product removes it from the feed', async () => {
   const { result } = await fullSync()
   const archived = applyProducts(result.snapshot, [

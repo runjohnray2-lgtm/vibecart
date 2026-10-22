@@ -136,6 +136,11 @@ export function applyProducts(
   rawProducts: unknown[],
   options: { includeUnpublished?: boolean } = {},
 ): ShopifyApplyResult {
+  // A public snapshot must never be populated with unpublished Shopify items,
+  // even when a caller accidentally forwards a diagnostic-only mapper option.
+  if (options.includeUnpublished) {
+    throw new Error('includeUnpublished is not permitted for public catalog snapshots')
+  }
   const next = new Map(snapshot.products)
   const skipped: ShopifyMapSkip[] = []
   const warnings: string[] = []
@@ -260,6 +265,12 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
   }
   if (options.base && options.base.currencyCode !== shopCurrency) {
     throw new Error('base snapshot currency ' + options.base.currencyCode + ' does not match ' + shopCurrency)
+  }
+
+  // Public sync must fail closed on unpublished-product overrides before any
+  // caller-supplied Shopify transport can be invoked.
+  if (options.includeUnpublished) {
+    throw new Error('includeUnpublished is not permitted for public Shopify catalog sync')
   }
 
   // fetchPage is injected and may apply an unknown Shopify query/filter. Without
