@@ -269,6 +269,11 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
   }
 
   const maxPages = options.maxPages ?? 200
+  // Overrides may tighten the default but cannot bypass the product-page request cap.
+  // Validate before invoking the caller's potentially metered Shopify transport.
+  if (!Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 200) {
+    throw new Error('invalid Shopify product pagination limits')
+  }
   let snapshot = options.base ?? createSnapshot(shopCurrency)
   const seenCursors = new Set<string>()
   const seenProductKeys = new Set<string>()

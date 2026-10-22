@@ -275,6 +275,21 @@ test('currency must be verified, never assumed', async () => {
   await assert.rejects(() => syncShopifyCatalog({ ...OPTS, fetchPage, base: eur }), /base snapshot currency/)
 })
 
+test('product pagination limits reject invalid overrides before Shopify requests', async () => {
+  let calls = 0
+  const fetchPage = async () => {
+    calls += 1
+    return { products: [], pageInfo: { hasNextPage: false, endCursor: null } }
+  }
+  for (const maxPages of [0, -1, 1.5, 201, NaN, Infinity, Number.MAX_SAFE_INTEGER, '3']) {
+    await assert.rejects(() => syncShopifyCatalog({ ...OPTS, fetchPage, maxPages }), /invalid Shopify product pagination limits/)
+  }
+  assert.equal(calls, 0, 'invalid override must fail before any Shopify request')
+  const result = await syncShopifyCatalog({ ...OPTS, fetchPage, maxPages: 200 })
+  assert.equal(result.pages, 1)
+  assert.equal(calls, 1)
+})
+
 test('pagination guards: repeated cursor, page limit, invalid page, failed fetch', async () => {
   const loop = pager([
     { products: [], pageInfo: { hasNextPage: true, endCursor: 'x' } },
