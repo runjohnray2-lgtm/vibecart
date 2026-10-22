@@ -27,9 +27,13 @@ test('losing publication evidence removes a previously synced product', () => {
   assert.equal(toCatalogFeed(synced.snapshot).products.length, 3, 'input snapshot must not be mutated')
 })
 
-test('includeUnpublished explicitly bypasses the publication requirement', () => {
-  const result = applyProducts(createSnapshot('USD'), [mystery()], { includeUnpublished: true })
-  assert.equal(result.upserted, 1)
+test('includeUnpublished cannot bypass publication verification in public snapshots', () => {
+  const base = createSnapshot('USD')
+  assert.throws(
+    () => applyProducts(base, [mystery()], { includeUnpublished: true }),
+    /includeUnpublished is not permitted for public catalog snapshots/,
+  )
+  assert.equal(toCatalogFeed(base).products.length, 0)
 })
 
 test('explicit null publishedAt still reports not published', () => {
