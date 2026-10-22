@@ -78,7 +78,7 @@ export type ShopifySyncOptions = {
   fetchPage: (cursor: string | null) => Promise<ShopifyProductsPage>
   /** Existing snapshot to reconcile. Omit to build a new snapshot. */
   base?: ShopifyCatalogSnapshot
-  /** Remove absent products only after a complete, unfiltered traversal. Defaults to false. */
+  /** Reserved unsafe legacy option. Destructive pruning is disabled pending independent traversal proof. */
   fullRefresh?: boolean
   maxPages?: number
   includeUnpublished?: boolean
@@ -262,6 +262,12 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
     throw new Error('base snapshot currency ' + options.base.currencyCode + ' does not match ' + shopCurrency)
   }
 
+  // fetchPage is injected and may apply an unknown Shopify query/filter. Without
+  // independent unfiltered traversal proof, absence is NOT evidence of deletion.
+  if (options.fullRefresh) {
+    throw new Error('fullRefresh requires independently verified unfiltered traversal; use explicit products/delete events instead')
+  }
+
   const maxPages = options.maxPages ?? 200
   let snapshot = options.base ?? createSnapshot(shopCurrency)
   const seenCursors = new Set<string>()
@@ -304,19 +310,6 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
     }
     seenCursors.add(nextCursor)
     cursor = nextCursor
-  }
-
-  // Prune only after the entire unfiltered product traversal succeeds. A failed page,
-  // cursor guard or malformed product identity must never delete last-known-good data.
-  if (options.fullRefresh) {
-    const reconciled = new Map(snapshot.products)
-    for (const key of reconciled.keys()) {
-      if (!seenProductKeys.has(key)) {
-        reconciled.delete(key)
-        removed += 1
-      }
-    }
-    snapshot = { currencyCode: snapshot.currencyCode, products: reconciled }
   }
 
   // Reject ambiguous variant ownership before a caller can publish or index the snapshot.
