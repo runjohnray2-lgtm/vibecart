@@ -15,7 +15,13 @@ function completeFixture() {
   for (const page of pages) {
     page.products = page.products
       .filter(p => p.variants.pageInfo.hasNextPage === false)
-      .map(p => ({ ...p, title: p.title.replace(/^SYNTHETIC /, 'Fixture ') }))
+      .map(p => ({
+        ...p,
+        title: p.title.replace(/^SYNTHETIC /, 'Fixture '),
+        // Synthetic fixture only: in a real export this count must be queried
+        // independently from Shopify, never inferred from the exported nodes.
+        variantsCount: { count: p.variants.nodes.length, precision: 'EXACT' },
+      }))
   }
   return { shop: syntheticShop, pages }
 }
@@ -57,6 +63,29 @@ test('offline pilot bridge refuses truncated Shopify variant families', () => {
   assert.notEqual(result.status, 0)
   assert.equal(result.feed, null)
   assert.match(result.stderr, /variant family is incomplete/)
+})
+
+test('offline pilot bridge rejects missing, approximate or mismatched independent Shopify variant counts', () => {
+  const missing = completeFixture()
+  delete missing.pages[0].products[0].variantsCount
+  const a = run(missing)
+  assert.notEqual(a.status, 0)
+  assert.equal(a.feed, null)
+  assert.match(a.stderr, /missing or non-exact Shopify variantsCount/)
+
+  const approximate = completeFixture()
+  approximate.pages[0].products[0].variantsCount.precision = 'AT_LEAST'
+  const b = run(approximate)
+  assert.notEqual(b.status, 0)
+  assert.equal(b.feed, null)
+  assert.match(b.stderr, /missing or non-exact Shopify variantsCount/)
+
+  const truncated = completeFixture()
+  truncated.pages[0].products[0].variantsCount.count = 225
+  const c = run(truncated)
+  assert.notEqual(c.status, 0)
+  assert.equal(c.feed, null)
+  assert.match(c.stderr, /variant count mismatch/)
 })
 
 test('offline pilot bridge refuses incomplete product pagination', () => {
