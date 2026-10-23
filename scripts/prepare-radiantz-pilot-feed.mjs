@@ -44,6 +44,13 @@ function validateExport(data) {
     throw new Error('expected a complete { shop: { currencyCode: "USD" }, pages: [...] } export')
   }
   checkNoPrivateFields(data)
+  // The product cursor's final hasNextPage=false is not independent proof that
+  // the export contains the full shop. Require a separate, unfiltered Admin
+  // productsCount(limit: null) result with exact precision.
+  const total = data.productsCount
+  if (!total || !Number.isSafeInteger(total.count) || total.count < 1 || total.precision !== 'EXACT') {
+    throw new Error('missing or non-exact independent Shopify productsCount')
+  }
   const seenProducts = new Set()
   const seenCursors = new Set()
   let activeProducts = 0
@@ -85,7 +92,7 @@ function validateExport(data) {
       if (product.status === 'ACTIVE' && product.publishedAt !== null) {
         const count = product.variantsCount?.count
         if (!Number.isSafeInteger(count) || count < 1 ||
-            (product.variantsCount.precision !== undefined && product.variantsCount.precision !== 'EXACT')) {
+            product.variantsCount.precision !== 'EXACT') {
           throw new Error('missing or non-exact Shopify variantsCount for ' + product.id)
         }
         if (product.variants.nodes.length !== count) {
@@ -94,6 +101,10 @@ function validateExport(data) {
         }
       }
     }
+  }
+  if (seenProducts.size !== total.count) {
+    throw new Error('Shopify product count mismatch: independent count ' + total.count +
+      ', export contains ' + seenProducts.size)
   }
   if (activeProducts === 0) throw new Error('no ACTIVE products in Shopify export')
 }
