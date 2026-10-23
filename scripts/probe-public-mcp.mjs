@@ -4,6 +4,7 @@
  * A successful probe proves endpoint compatibility, NOT Shopify provenance.
  */
 const READ_ONLY_TOOLS = new Set(['vibecart.list_products', 'vibecart.get_product'])
+const READ_ONLY_UCP_TOOLS = new Set(['search_catalog', 'lookup_catalog', 'get_product'])
 
 function originOf(baseUrl) {
   const url = new URL(baseUrl)
@@ -54,6 +55,10 @@ export async function probePublicMcp({ baseUrl, expectedProductId, fetchImpl = f
       !ucp.capabilities?.['dev.ucp.shopping.catalog.lookup']) {
     throw new Error('UCP discovery lacks required catalog capabilities')
   }
+  const ucpEndpoint = ucp.services?.['dev.ucp.shopping']?.find(service => service?.transport === 'mcp')?.endpoint
+  if (ucpEndpoint !== `${origin}/ucp/mcp`) {
+    throw new Error('UCP discovery must advertise same-origin /ucp/mcp transport')
+  }
   const rpc = async (id, method, params = {}) => rpcResult(await jsonRequest(fetchImpl, `${origin}/mcp`, {
     method: 'POST', body: { jsonrpc: '2.0', id, method, params },
   }), id)
@@ -68,6 +73,17 @@ export async function probePublicMcp({ baseUrl, expectedProductId, fetchImpl = f
     if (!tool || tool.annotations?.readOnlyHint !== true || tool.annotations?.destructiveHint !== false) {
       throw new Error(`MCP tool ${name} is missing or not explicitly read-only`)
     }
+  }
+  const ucpRpc = async (id, method, params = {}) => rpcResult(await jsonRequest(fetchImpl, ucpEndpoint, {
+    method: 'POST', body: { jsonrpc: '2.0', id, method, params },
+  }), id)
+  const ucpInitialized = await ucpRpc(10, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'vibecart-read-only-probe', version: '1.0.0' } })
+  if (!ucpInitialized.capabilities?.tools || ucpInitialized.serverInfo?.name !== 'vibecart-ucp') {
+    throw new Error('UCP MCP initialize did not advertise VibeCart UCP tools')
+  }
+  const ucpListed = await ucpRpc(11, 'tools/list')
+  if (!Array.isArray(ucpListed.tools) || [...READ_ONLY_UCP_TOOLS].some(name => !ucpListed.tools.some(tool => tool.name === name))) {
+    throw new Error('UCP MCP transport lacks required catalog tools')
   }
   const list = await rpc(3, 'tools/call', { name: 'vibecart.list_products', arguments: {} })
   if (list.isError || list.structuredContent?.success !== true || !Array.isArray(list.structuredContent.products)) {
@@ -95,9 +111,9 @@ export async function probePublicMcp({ baseUrl, expectedProductId, fetchImpl = f
     verifiedProduct = true
   }
   return { ok: true, ucpVersion: ucp.version, mcpVersion: initialized.protocolVersion,
-    productCount: products.length, expectedProductMatched: verifiedProduct,
-    note: verifiedProduct ? 'Expected ID and price matched public MCP; live Shopify freshness still requires independent verification.'
-      : 'Public MCP works; catalog merchant provenance is NOT verified without an expected Shopify variant ID.' }
+    ucpTransportVerified: true, productCount: products.length, expectedProductMatched: verifiedProduct,
+    note: verifiedProduct ? 'Expected ID and price matched public MCP; live Shopify freshness still requires independent verification. UCP catalog tool calls require negotiated agent profile and were not invoked.'
+      : 'Public MCP works; UCP discovery/transport contract verified without UCP catalog calls. Catalog merchant provenance is NOT verified without an expected Shopify variant ID.' }
 }
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
