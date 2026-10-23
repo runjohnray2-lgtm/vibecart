@@ -153,7 +153,11 @@ test('UCP catalog calls require independent Shopify evidence and public profile 
     baseUrl: 'https://merchant.example/', agentProfileUrl, fetchImpl,
   }), /requires independently verified Shopify variant ID and price/)
   for (const unsafe of ['http://agent.example/profile', 'https://user:secret@agent.example/profile',
-    'https://localhost/profile', 'https://127.0.0.1/profile', 'https://agent.example/profile?token=x']) {
+    'https://localhost/profile', 'https://127.0.0.1/profile', 'https://agent.example/profile?token=x',
+    'https://[::1]/profile', 'https://[fd00::1]/profile', 'https://[::ffff:127.0.0.1]/profile',
+    'https://172.16.0.1/profile', 'https://100.64.0.1/profile', 'https://169.254.169.254/profile',
+    'https://2130706433/profile', 'https://host.internal/profile',
+    'https://host.localhost/profile', 'https://host.home.arpa/profile']) {
     await assert.rejects(probePublicMcp({
       baseUrl: 'https://merchant.example/', expectedProductId: ID, expectedPriceCents: 6599,
       agentProfileUrl: unsafe, fetchImpl,
