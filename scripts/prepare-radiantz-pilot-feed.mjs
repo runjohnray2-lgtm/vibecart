@@ -16,7 +16,12 @@ const MAX_INPUT_BYTES = 25 * 1024 * 1024
 const forbiddenKey = /^(?:authorization|access[_-]?token|api[_-]?key|client[_-]?secret|password|customers?|orders?|billing|shipping_address)$/i
 
 function outsideRepo(filePath) {
-  const relative = path.relative(repoRoot, filePath)
+  // A lexically external path can still resolve into this public repository via
+  // a symlinked parent (or an existing symlinked input/output file).
+  const canonical = fs.existsSync(filePath)
+    ? fs.realpathSync(filePath)
+    : path.join(fs.realpathSync(path.dirname(filePath)), path.basename(filePath))
+  const relative = path.relative(fs.realpathSync(repoRoot), canonical)
   return relative !== '' && (relative === '..' || relative.startsWith('..' + path.sep))
 }
 
