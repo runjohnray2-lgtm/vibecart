@@ -233,3 +233,17 @@ test('evaluator stays isolated from payments, database, env and the network', ()
   assert.doesNotMatch(code, /stripe|checkout|cart-store|neon|process\.env|fetch\(/i)
   assert.deepEqual(libSource.match(/from '[^']+'/g), ["from '@/lib/shopify-catalog-mapper'"])
 })
+
+test('future-dated Shopify sync cannot falsely certify catalog freshness', () => {
+  const future = run([good('a')], { lastSyncedAt: NOW + 3 * HOUR })
+  assert.equal(future.freshness.status, 'unknown')
+  assert.ok(future.warnings.some(w => w.code === 'freshness_future_timestamp'))
+  assert.notEqual(future.level, 'ready_for_agent_testing')
+
+  const skew = run([good('a')], { lastSyncedAt: NOW + 60_000 })
+  assert.equal(skew.freshness.status, 'fresh')
+  assert.equal(skew.level, 'ready_for_agent_testing')
+
+  const stale = run([good('a')], { lastSyncedAt: NOW - 30 * HOUR })
+  assert.equal(stale.freshness.status, 'stale')
+})
