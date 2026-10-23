@@ -60,6 +60,11 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
   }
   const productId = raw.id
   const initial = unpackConnection(raw.variants)
+  // Admin GraphQL requests at most 100 variants per page. A zero-item
+  // nonterminal page or an oversized page cannot prove complete traversal.
+  if (initial.nodes.length > 100 || (initial.nodes.length === 0 && initial.hasNextPage)) {
+    throw new Error('invalid Shopify initial variant page size for ' + productId)
+  }
   const maxPages = options.maxVariantPages ?? 30
   const maxVariants = options.maxVariantsPerProduct ?? 3000
   // Caller overrides may tighten defaults but must not bypass the hard request/memory caps.
@@ -96,6 +101,7 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
     const next = await options.fetchVariantPage(productId, cursor)
     if (!next || next.productId !== productId) throw new Error('Shopify variant page product id mismatch for ' + productId)
     page = unpackConnection(next.variants)
+    if (page.nodes.length > 100) throw new Error('Shopify continuation variant page exceeds first: 100 for ' + productId)
     if (page.nodes.length === 0) throw new Error('empty Shopify continuation variant page for ' + productId)
     append(page.nodes)
     pages++
@@ -111,6 +117,9 @@ export function withHydratedShopifyVariants(
     const page = await fetchProductPage(cursor)
     if (!page || !Array.isArray(page.products) || !page.pageInfo || typeof page.pageInfo.hasNextPage !== 'boolean') {
       throw new Error('invalid Shopify products page')
+    }
+    if (page.products.length === 0 && page.pageInfo.hasNextPage) {
+      throw new Error('empty Shopify product page with continuation; traversal completeness unknown')
     }
     const products: unknown[] = []
     for (const product of page.products) products.push(await hydrateShopifyProductVariants(product, options))
