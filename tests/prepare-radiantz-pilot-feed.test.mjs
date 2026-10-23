@@ -88,3 +88,20 @@ test('offline pilot bridge rejects repo-local output paths before writing', () =
   assert.notEqual(result.status, 0)
   assert.match(result.stderr, /outside the public GitHub repository/)
 })
+
+test('offline pilot bridge rejects symlinked directories resolving inside the public repo', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vibecart-pilot-symlink-'))
+  try {
+    const link = path.join(dir, 'linked-repo')
+    fs.symlinkSync(root, link, 'dir')
+    const result = spawnSync(process.execPath, [
+      script, '--input', path.join(dir, 'missing-export.json'),
+      '--output', path.join(link, 'pilot-feed-symlink-check.json'),
+    ], { cwd: root, encoding: 'utf8', timeout: 30000 })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /outside the public GitHub repository/)
+    assert.equal(fs.existsSync(path.join(root, 'pilot-feed-symlink-check.json')), false)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
