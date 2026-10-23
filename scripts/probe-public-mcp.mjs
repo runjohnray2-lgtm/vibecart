@@ -60,9 +60,15 @@ export async function probePublicMcp({ baseUrl, expectedProductId, expectedPrice
     }
     let profile
     try { profile = new URL(agentProfileUrl) } catch { throw new Error('agentProfileUrl must be a public HTTPS profile URL') }
+    // The profile is fetched by the UCP server during negotiation. Reject all
+    // literal IPs (including bracketed IPv6 and URL-normalized IPv4 shorthands),
+    // not just selected private IPv4 ranges; never send it an internal target.
+    // DNS resolution/rebinding safety remains the responsibility of the server.
+    const host = profile.hostname.toLowerCase()
+    const internalName = ['localhost', 'local', 'internal', 'home.arpa']
+      .some(suffix => host === suffix || host.endsWith('.' + suffix))
     if (profile.protocol !== 'https:' || profile.username || profile.password || profile.search || profile.hash ||
-        profile.hostname === 'localhost' || profile.hostname.endsWith('.local') ||
-        /^(?:127|10|0|169\.254|192\.168)\./.test(profile.hostname)) {
+        host.startsWith('[') || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || internalName) {
       throw new Error('agentProfileUrl must be a public HTTPS profile URL without credentials or query')
     }
   }
