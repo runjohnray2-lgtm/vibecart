@@ -78,6 +78,21 @@ function validateExport(data) {
           !Array.isArray(product.variants.nodes)) {
         throw new Error('variant family is incomplete or not fully hydrated for ' + product.id)
       }
+      // A hasNextPage=false flag alone cannot prove a merged family is complete:
+      // a 100-variant first page could be mislabeled as the full 225 variants.
+      // Require a separately queried Shopify variantsCount.count, not a count
+      // manufactured by measuring the exported nodes.
+      if (product.status === 'ACTIVE' && product.publishedAt !== null) {
+        const count = product.variantsCount?.count
+        if (!Number.isSafeInteger(count) || count < 1 ||
+            (product.variantsCount.precision !== undefined && product.variantsCount.precision !== 'EXACT')) {
+          throw new Error('missing or non-exact Shopify variantsCount for ' + product.id)
+        }
+        if (product.variants.nodes.length !== count) {
+          throw new Error('variant count mismatch for ' + product.id +
+            ': Shopify reports ' + count + ', export contains ' + product.variants.nodes.length)
+        }
+      }
     }
   }
   if (activeProducts === 0) throw new Error('no ACTIVE products in Shopify export')
