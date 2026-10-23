@@ -168,3 +168,33 @@ test('reference query uses read-only Admin fields, not unavailable variant.image
   assert.doesNotMatch(SHOPIFY_VARIANTS_QUERY, /featuredImage|\bimage\s*\{/)
   assert.doesNotMatch(SHOPIFY_VARIANTS_QUERY, /mutation|checkout|orderCreate/i)
 })
+
+test('rejects empty nonterminal initial variants and oversized GraphQL variant pages', async () => {
+  const noFetch = options(async () => { throw new Error('unexpected variant continuation') })
+  await assert.rejects(hydrate(product(0, true), noFetch), /invalid Shopify initial variant page size/)
+  await assert.rejects(hydrate(product(101, false), noFetch), /invalid Shopify initial variant page size/)
+  await assert.rejects(hydrate(product(100), options(async productId => ({
+    productId,
+    variants: {
+      nodes: Array.from({ length: 101 }, (_, i) => V(i + 101)),
+      pageInfo: { hasNextPage: false, endCursor: 'c201' },
+    },
+  }))), /continuation variant page exceeds first: 100/)
+})
+
+test('rejects an empty nonterminal Shopify product page before exposing partial catalog', async () => {
+  let variantsFetched = 0
+  const fetch = wrap(async () => ({
+    products: [], pageInfo: { hasNextPage: true, endCursor: 'next' },
+  }), options(async () => {
+    variantsFetched++
+    throw new Error('unexpected variant fetch')
+  }))
+  await assert.rejects(fetch(null), /empty Shopify product page with continuation/)
+  assert.equal(variantsFetched, 0)
+
+  const emptyStore = wrap(async () => ({
+    products: [], pageInfo: { hasNextPage: false, endCursor: null },
+  }), options(async () => { throw new Error('unexpected variant fetch') }))
+  assert.deepEqual((await emptyStore(null)).products, [])
+})
