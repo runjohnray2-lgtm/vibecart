@@ -23,7 +23,13 @@ function completeFixture() {
         variantsCount: { count: p.variants.nodes.length, precision: 'EXACT' },
       }))
   }
-  return { shop: syntheticShop, pages }
+  return {
+    shop: syntheticShop,
+    pages,
+    // Synthetic fixture only. A real export must obtain this separately from
+    // Shopify productsCount(limit: null) over the same unfiltered product set.
+    productsCount: { count: pages.reduce((n, page) => n + page.products.length, 0), precision: 'EXACT' },
+  }
 }
 
 function run(data) {
@@ -86,6 +92,38 @@ test('offline pilot bridge rejects missing, approximate or mismatched independen
   assert.notEqual(c.status, 0)
   assert.equal(c.feed, null)
   assert.match(c.stderr, /variant count mismatch/)
+})
+
+test('offline pilot bridge requires an independent exact total Shopify product count', () => {
+  const missing = completeFixture()
+  delete missing.productsCount
+  const a = run(missing)
+  assert.notEqual(a.status, 0)
+  assert.equal(a.feed, null)
+  assert.match(a.stderr, /missing or non-exact independent Shopify productsCount/)
+
+  const approximate = completeFixture()
+  approximate.productsCount.precision = 'AT_LEAST'
+  const b = run(approximate)
+  assert.notEqual(b.status, 0)
+  assert.equal(b.feed, null)
+  assert.match(b.stderr, /missing or non-exact independent Shopify productsCount/)
+
+  const truncated = completeFixture()
+  truncated.pages[1].products.pop()
+  const c = run(truncated)
+  assert.notEqual(c.status, 0)
+  assert.equal(c.feed, null)
+  assert.match(c.stderr, /Shopify product count mismatch/)
+})
+
+test('offline pilot bridge refuses missing precision on independently queried variant count', () => {
+  const data = completeFixture()
+  delete data.pages[0].products[0].variantsCount.precision
+  const result = run(data)
+  assert.notEqual(result.status, 0)
+  assert.equal(result.feed, null)
+  assert.match(result.stderr, /missing or non-exact Shopify variantsCount/)
 })
 
 test('offline pilot bridge refuses incomplete product pagination', () => {
