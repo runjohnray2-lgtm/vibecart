@@ -32,6 +32,8 @@ Create `tests/fixtures/radiantz/shop-products.json` in a reviewed PR:
 - Use the reference query `SHOPIFY_PRODUCTS_QUERY` in `lib/shopify-catalog-sync.ts` against the **whole** catalog, one JSON page per request. The first look at the shop was a sample capped at 50 products, so it is not a complete export.
 - Include only product data. No tokens, keys, customer data or admin URLs. A test fails if the file looks like it contains credentials.
 - Keep the `publishedAt`, `status`, `inventoryPolicy` and `variants.pageInfo` fields exactly as Shopify returned them. Do not edit prices or ids.
+- The **offline private-feed converter** `scripts/prepare-radiantz-pilot-feed.mjs` now also requires an **independently queried** `variantsCount: { "count": N, "precision": "EXACT" }` on every published ACTIVE product. Compare that count to the fully hydrated `variants.nodes` array; do **not** manufacture the count from the exported nodes. If the connected Shopify Admin schema cannot supply an exact count, treat completeness as **unverified** and do not generate the feed. This prevents a 100-variant first page from being mislabeled as complete when Shopify has 150–225 variants.
+- Keep the private full export **outside the public repository**. The optional local converter emits a sanitized file outside the repo; it does not publish a feed, verify its freshness, or authorize checkout. A future reviewed test fixture must be synthetic/redacted, not a full private Admin export.
 
 ## What this does not prove
 
