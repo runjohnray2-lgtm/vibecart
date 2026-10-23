@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
+import ts from 'typescript'
 import { gqlProduct, page1, page2 } from './fixtures/shopify-sync-pages.mjs'
 import { assertCatalogContract, loadTsModules } from './helpers/shopify-test-utils.mjs'
 
@@ -369,8 +370,29 @@ test('shopifyNumericId extracts the numeric tail of gids and numeric ids', () =>
   assert.equal(shopifyNumericId('abc'), undefined)
 })
 
+/** Remove comment trivia without transpiling away unused imports or altering runtime code. */
+function withoutTsComments(source) {
+  const scanner = ts.createScanner(ts.ScriptTarget.ES2022, false, ts.LanguageVariant.Standard, source)
+  const chars = source.split('')
+  for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
+    if (token !== ts.SyntaxKind.SingleLineCommentTrivia && token !== ts.SyntaxKind.MultiLineCommentTrivia) continue
+    for (let i = scanner.getTokenPos(); i < scanner.getTextPos(); i += 1) {
+      if (chars[i] !== '\n' && chars[i] !== '\r') chars[i] = ' '
+    }
+  }
+  return chars.join('')
+}
+
+test('isolation guard ignores comments but still detects executable dependencies', () => {
+  const forbidden = /stripe|checkout|cart-store|neon|process\.env|fetch\(/i
+  assert.doesNotMatch(withoutTsComments('// checkout is a separate concern\n/* stripe */\nexport const ok = 1'), forbidden)
+  assert.match(withoutTsComments("import unused from 'stripe'"), forbidden)
+  assert.match(withoutTsComments("export const bad = fetch('https://example.test')"), forbidden)
+  assert.match(withoutTsComments('export const bad = process.env.KEY'), forbidden)
+})
+
 test('sync module stays isolated: imports only a type and the mapper, no payment, database or env', () => {
-  const code = syncSource.replace(/\/\*[\s\S]*?\*\//g, '')
+  const code = withoutTsComments(syncSource)
   assert.doesNotMatch(code, /stripe|checkout|cart-store|neon|process\.env|fetch\(/i)
   assert.deepEqual(syncSource.match(/from '[^']+'/g), ["from '@/lib/products'", "from '@/lib/shopify-catalog-mapper'"])
 })
