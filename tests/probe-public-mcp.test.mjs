@@ -5,15 +5,20 @@ import { probePublicMcp } from '../scripts/probe-public-mcp.mjs'
 const ID = 'gid://shopify/ProductVariant/123'
 const product = { id: ID, name: 'Synthetic light', priceCents: 6599 }
 const json = value => new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } })
-function mockFetch({ products = [product], annotations = { readOnlyHint: true, destructiveHint: false }, getProduct = product } = {}) {
+function mockFetch({ products = [product], annotations = { readOnlyHint: true, destructiveHint: false }, getProduct = product, badUcpEndpoint = false, missingUcpTool = false } = {}) {
   const calls = []
   const fetchImpl = async (url, options) => {
     if (options.signal.aborted) throw new Error('unexpected abort')
     const body = options.body ? JSON.parse(options.body) : null
     calls.push({ url, method: options.method, body })
-    if (url.endsWith('/.well-known/ucp')) return json({ ucp: { version: '2026-04-08', capabilities: {
-      'dev.ucp.shopping.catalog.search': [{}], 'dev.ucp.shopping.catalog.lookup': [{}],
-    } } })
+    if (url.endsWith('/.well-known/ucp')) return json({ ucp: { version: '2026-04-08', services: {
+      'dev.ucp.shopping': [{ transport: 'mcp', endpoint: badUcpEndpoint ? 'https://evil.example/ucp/mcp' : 'https://merchant.example/ucp/mcp' }],
+    }, capabilities: { 'dev.ucp.shopping.catalog.search': [{}], 'dev.ucp.shopping.catalog.lookup': [{}] } } })
+    if (url.endsWith('/ucp/mcp')) {
+      const result = body.method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'vibecart-ucp' } }
+        : { tools: [{ name: 'search_catalog' }, { name: 'lookup_catalog' }, ...(missingUcpTool ? [] : [{ name: 'get_product' }]), { name: 'create_cart' }] }
+      return json({ jsonrpc: '2.0', id: body.id, result })
+    }
     const result = body.method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'vibecart' } }
       : body.method === 'tools/list' ? { tools: [
         { name: 'vibecart.list_products', annotations }, { name: 'vibecart.get_product', annotations },
@@ -26,12 +31,13 @@ function mockFetch({ products = [product], annotations = { readOnlyHint: true, d
   return { fetchImpl, calls }
 }
 
-test('read-only discovery, initialize, list and get preserve verified variant price', async () => {
+test('read-only discovery, generic MCP and UCP transport, and verified variant price', async () => {
   const { fetchImpl, calls } = mockFetch()
   const result = await probePublicMcp({ baseUrl: 'https://merchant.example/', expectedProductId: ID, fetchImpl })
   assert.equal(result.productCount, 1)
   assert.equal(result.expectedProductMatched, true)
-  assert.deepEqual(calls.map(x => x.body?.method ?? 'GET'), ['GET', 'initialize', 'tools/list', 'tools/call', 'tools/call'])
+  assert.equal(result.ucpTransportVerified, true)
+  assert.deepEqual(calls.map(x => x.body?.method ?? 'GET'), ['GET', 'initialize', 'tools/list', 'initialize', 'tools/list', 'tools/call', 'tools/call'])
   assert.deepEqual(calls.filter(x => x.body?.method === 'tools/call').map(x => x.body.params.name),
     ['vibecart.list_products', 'vibecart.get_product'])
   assert.ok(calls.every(x => x.url.startsWith('https://merchant.example/')))
@@ -42,7 +48,7 @@ test('without expected Shopify variant, probe does not claim merchant proof or g
   const result = await probePublicMcp({ baseUrl: 'https://merchant.example/', fetchImpl })
   assert.equal(result.expectedProductMatched, false)
   assert.match(result.note, /NOT verified/)
-  assert.equal(calls.length, 4)
+  assert.equal(calls.length, 6)
 })
 
 test('fails closed on absent expected variant and duplicate catalog identity', async () => {
@@ -65,4 +71,16 @@ test('refuses HTTP redirects and malformed JSON-RPC responses', async () => {
     if (url.endsWith('/.well-known/ucp')) return fetchImpl(url, options)
     return json({ jsonrpc: '2.0', id: 99, result: {} })
   } }), /invalid MCP JSON-RPC/)
+})
+
+test('refuses advertised cross-origin UCP endpoint without contacting it', async () => {
+  const { fetchImpl, calls } = mockFetch({ badUcpEndpoint: true })
+  await assert.rejects(probePublicMcp({ baseUrl: 'https://merchant.example/', fetchImpl }), /same-origin/)
+  assert.equal(calls.length, 1)
+})
+
+test('refuses incomplete UCP transport tool advertisement', async () => {
+  const { fetchImpl, calls } = mockFetch({ missingUcpTool: true })
+  await assert.rejects(probePublicMcp({ baseUrl: 'https://merchant.example/', fetchImpl }), /lacks required catalog tools/)
+  assert.equal(calls.filter(x => x.body?.method === 'tools/call').length, 0)
 })
