@@ -114,11 +114,22 @@ function statusUnknown(raw: unknown): boolean {
   return typeof status !== 'string' || status.trim().length === 0
 }
 
-/** True when neither publishedAt nor published_at was returned at all (explicit null is handled by the mapper). */
+/** Null means explicitly unpublished; other publication values require a valid ISO timestamp. */
 function publicationUnknown(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null) return false
   const entry = raw as Record<string, unknown>
-  return entry.publishedAt === undefined && entry.published_at === undefined
+  const publishedAt = entry.publishedAt !== undefined ? entry.publishedAt : entry.published_at
+  if (publishedAt === null) return false
+  if (typeof publishedAt !== 'string') return true
+  const match = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(publishedAt)
+  if (!match || !Number.isFinite(Date.parse(publishedAt))) return true
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (month < 1 || month > 12 || day < 1) return true
+  const lastDay = new Date(0)
+  lastDay.setUTCFullYear(year, month, 0)
+  return day > lastDay.getUTCDate()
 }
 
 export function createSnapshot(currencyCode: string): ShopifyCatalogSnapshot {
