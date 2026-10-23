@@ -108,21 +108,53 @@ export async function probePublicMcp({ baseUrl, expectedProductId, expectedPrice
   let ucpCatalogVerified = false
   if (agentProfileUrl !== undefined) {
     const meta = { 'ucp-agent': { profile: agentProfileUrl } }
-    const search = await ucpRpc(12, 'tools/call', {
-      name: 'search_catalog', arguments: { meta, catalog: { query: '', pagination: { limit: 50 } } },
-    })
-    const searchProducts = search.structuredContent?.products
-    if (search.isError || !Array.isArray(searchProducts) || searchProducts.length === 0 ||
-        searchProducts.some(p => !p || typeof p.id !== 'string' || !p.id) ||
-        new Set(searchProducts.map(p => p.id)).size !== searchProducts.length) {
-      throw new Error('UCP search_catalog did not return a healthy read-only catalog')
-    }
     const matchesExpected = p => p?.id === expectedProductId &&
       p.price_range?.min?.amount === expectedPriceCents &&
       p.price_range?.max?.amount === expectedPriceCents &&
       p.price_range?.min?.currency === 'USD' && p.price_range?.max?.currency === 'USD' &&
       Array.isArray(p.variants) && p.variants.some(v =>
         v?.id === expectedProductId && v.price?.amount === expectedPriceCents && v.price?.currency === 'USD')
+    // An unrelated first page is not proof that the expected Radiantz variant is
+    // discoverable. Walk every search page, fail closed on truncation or cursor loops.
+    const seenSearchIds = new Set()
+    const seenSearchCursors = new Set()
+    let searchCursor
+    let searchMatched = false
+    let searchCompleted = false
+    for (let page = 0; page < 100; page += 1) {
+      const search = await ucpRpc(100 + page, 'tools/call', {
+        name: 'search_catalog', arguments: { meta, catalog: {
+          query: '', pagination: { limit: 50, ...(searchCursor ? { cursor: searchCursor } : {}) },
+        } },
+      })
+      const searchProducts = search.structuredContent?.products
+      const pagination = search.structuredContent?.pagination
+      if (search.isError || search.structuredContent?.ucp?.status === 'error' ||
+          !Array.isArray(searchProducts) || searchProducts.length === 0 || searchProducts.length > 50 ||
+          !pagination || typeof pagination.has_next_page !== 'boolean') {
+        throw new Error('UCP search_catalog did not return a complete healthy catalog page')
+      }
+      for (const p of searchProducts) {
+        if (!p || typeof p.id !== 'string' || !p.id || seenSearchIds.has(p.id)) {
+          throw new Error('UCP search_catalog returned invalid or duplicate product identities')
+        }
+        seenSearchIds.add(p.id)
+        if (p.id === expectedProductId) {
+          if (!matchesExpected(p)) throw new Error('UCP search_catalog expected Shopify variant price or identity differs')
+          searchMatched = true
+        }
+      }
+      if (!pagination.has_next_page) { searchCompleted = true; break }
+      const nextCursor = pagination.cursor
+      if (typeof nextCursor !== 'string' || !nextCursor || seenSearchCursors.has(nextCursor)) {
+        throw new Error('UCP search_catalog pagination cursor missing or repeated')
+      }
+      seenSearchCursors.add(nextCursor)
+      searchCursor = nextCursor
+    }
+    if (!searchCompleted || !searchMatched) {
+      throw new Error('UCP search_catalog did not discover expected Shopify variant across complete pagination')
+    }
     const lookup = await ucpRpc(13, 'tools/call', {
       name: 'lookup_catalog', arguments: { meta, catalog: { ids: [expectedProductId] } },
     })
