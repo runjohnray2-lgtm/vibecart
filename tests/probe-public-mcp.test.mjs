@@ -136,11 +136,11 @@ test('negotiated UCP search/lookup/get prove independent Shopify identity and pr
   assert.ok(toolCalls.slice(0, 3).every(x => x.body.params.arguments.meta['ucp-agent'].profile === agentProfileUrl))
 })
 
-test('UCP read-only lookup rejects stale price and empty search catalog', async () => {
+test('UCP read-only catalog rejects stale price and empty search catalog', async () => {
   await assert.rejects(probePublicMcp({
     baseUrl: 'https://merchant.example/', expectedProductId: ID, expectedPriceCents: 6599,
     agentProfileUrl, fetchImpl: mockFetch({ badUcpPrice: true }).fetchImpl,
-  }), /UCP lookup_catalog did not preserve/)
+  }), /UCP search_catalog expected Shopify variant price/)
   await assert.rejects(probePublicMcp({
     baseUrl: 'https://merchant.example/', expectedProductId: ID, expectedPriceCents: 6599,
     agentProfileUrl, fetchImpl: mockFetch({ emptyUcpSearch: true }).fetchImpl,
