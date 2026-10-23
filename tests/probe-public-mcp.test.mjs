@@ -36,6 +36,8 @@ test('read-only discovery, generic MCP and UCP transport, and verified variant p
   const result = await probePublicMcp({ baseUrl: 'https://merchant.example/', expectedProductId: ID, fetchImpl })
   assert.equal(result.productCount, 1)
   assert.equal(result.expectedProductMatched, true)
+  assert.equal(result.independentShopifyPriceMatched, false)
+  assert.match(result.note, /NOT independently verified/)
   assert.equal(result.ucpTransportVerified, true)
   assert.deepEqual(calls.map(x => x.body?.method ?? 'GET'), ['GET', 'initialize', 'tools/list', 'initialize', 'tools/list', 'tools/call', 'tools/call'])
   assert.deepEqual(calls.filter(x => x.body?.method === 'tools/call').map(x => x.body.params.name),
@@ -47,6 +49,7 @@ test('without expected Shopify variant, probe does not claim merchant proof or g
   const { fetchImpl, calls } = mockFetch()
   const result = await probePublicMcp({ baseUrl: 'https://merchant.example/', fetchImpl })
   assert.equal(result.expectedProductMatched, false)
+  assert.equal(result.independentShopifyPriceMatched, false)
   assert.match(result.note, /NOT verified/)
   assert.equal(calls.length, 6)
 })
@@ -83,4 +86,22 @@ test('refuses incomplete UCP transport tool advertisement', async () => {
   const { fetchImpl, calls } = mockFetch({ missingUcpTool: true })
   await assert.rejects(probePublicMcp({ baseUrl: 'https://merchant.example/', fetchImpl }), /lacks required catalog tools/)
   assert.equal(calls.filter(x => x.body?.method === 'tools/call').length, 0)
+})
+
+test('independent Shopify price evidence is required for a price-verified pilot', async () => {
+  const { fetchImpl, calls } = mockFetch()
+  const verified = await probePublicMcp({ baseUrl: 'https://merchant.example/', expectedProductId: ID,
+    expectedPriceCents: 6599, fetchImpl })
+  assert.equal(verified.expectedProductMatched, true)
+  assert.equal(verified.independentShopifyPriceMatched, true)
+  assert.match(verified.note, /independently verified USD price/)
+  assert.equal(calls.filter(x => x.body?.method === 'tools/call').length, 2)
+  await assert.rejects(probePublicMcp({ baseUrl: 'https://merchant.example/', expectedProductId: ID,
+    expectedPriceCents: 6600, fetchImpl: mockFetch().fetchImpl }), /differs from independently verified Shopify price/)
+  await assert.rejects(probePublicMcp({ baseUrl: 'https://merchant.example/', expectedPriceCents: 6599,
+    fetchImpl: mockFetch().fetchImpl }), /requires an independently verified Shopify variant ID/)
+  for (const invalidPrice of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '6599']) {
+    await assert.rejects(probePublicMcp({ baseUrl: 'https://merchant.example/', expectedProductId: ID,
+      expectedPriceCents: invalidPrice, fetchImpl: mockFetch().fetchImpl }), /non-negative safe integer/)
+  }
 })

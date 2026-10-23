@@ -42,11 +42,17 @@ function rpcResult(value, id) {
   return value.result
 }
 
-export async function probePublicMcp({ baseUrl, expectedProductId, fetchImpl = fetch }) {
+export async function probePublicMcp({ baseUrl, expectedProductId, expectedPriceCents, fetchImpl = fetch }) {
   const origin = originOf(baseUrl)
   if (expectedProductId !== undefined &&
       (typeof expectedProductId !== 'string' || !/^gid:\/\/shopify\/ProductVariant\/[1-9]\d*$/.test(expectedProductId))) {
     throw new Error('expectedProductId must be a verified Shopify ProductVariant GID')
+  }
+  if (expectedPriceCents !== undefined && expectedProductId === undefined) {
+    throw new Error('expectedPriceCents requires an independently verified Shopify variant ID')
+  }
+  if (expectedPriceCents !== undefined && (!Number.isSafeInteger(expectedPriceCents) || expectedPriceCents < 0)) {
+    throw new Error('expectedPriceCents must be a non-negative safe integer in USD cents')
   }
   const discovery = await jsonRequest(fetchImpl, `${origin}/.well-known/ucp`)
   const ucp = discovery?.ucp
@@ -102,6 +108,9 @@ export async function probePublicMcp({ baseUrl, expectedProductId, fetchImpl = f
   if (expectedProductId !== undefined) {
     const listedProduct = products.find(p => p.id === expectedProductId)
     if (!listedProduct) throw new Error('expected Radiantz Shopify variant ID absent from public catalog')
+    if (expectedPriceCents !== undefined && listedProduct.priceCents !== expectedPriceCents) {
+      throw new Error('MCP catalog price differs from independently verified Shopify price')
+    }
     const found = await rpc(4, 'tools/call', { name: 'vibecart.get_product', arguments: { productId: expectedProductId } })
     const returned = found.structuredContent?.product
     if (found.isError || found.structuredContent?.success !== true ||
@@ -112,8 +121,12 @@ export async function probePublicMcp({ baseUrl, expectedProductId, fetchImpl = f
   }
   return { ok: true, ucpVersion: ucp.version, mcpVersion: initialized.protocolVersion,
     ucpTransportVerified: true, productCount: products.length, expectedProductMatched: verifiedProduct,
-    note: verifiedProduct ? 'Expected ID and price matched public MCP; live Shopify freshness still requires independent verification. UCP catalog tool calls require negotiated agent profile and were not invoked.'
-      : 'Public MCP works; UCP discovery/transport contract verified without UCP catalog calls. Catalog merchant provenance is NOT verified without an expected Shopify variant ID.' }
+    independentShopifyPriceMatched: verifiedProduct && expectedPriceCents !== undefined,
+    note: verifiedProduct && expectedPriceCents !== undefined
+      ? 'Expected Shopify variant ID and independently verified USD price matched public MCP. Live Shopify freshness still requires a current read-only source check; UCP catalog tool calls were not invoked.'
+      : verifiedProduct
+        ? 'Expected Shopify variant ID matched, but its price was checked only for internal MCP consistency; Shopify price is NOT independently verified.'
+        : 'Public MCP works; UCP discovery/transport contract verified without UCP catalog calls. Catalog merchant provenance is NOT verified without an expected Shopify variant ID and price.' }
 }
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
@@ -121,12 +134,15 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const flag = key => { const i = args.indexOf(key); return i < 0 ? undefined : args[i + 1] }
   const baseUrl = flag('--base-url')
   const expectedProductId = flag('--expected-product-id')
-  if (!baseUrl || args.some((v, i) => v.startsWith('--') && !['--base-url', '--expected-product-id'].includes(v)) ||
-      args.length !== (expectedProductId ? 4 : 2)) {
-    console.error('Usage: node scripts/probe-public-mcp.mjs --base-url https://example.com/ [--expected-product-id gid://shopify/ProductVariant/123]')
+  const priceArg = flag('--expected-price-cents')
+  const priceValid = priceArg === undefined || (/^(0|[1-9]\d*)$/.test(priceArg) && Number.isSafeInteger(Number(priceArg)))
+  if (!baseUrl || !priceValid || (priceArg !== undefined && !expectedProductId) ||
+      args.some(v => v.startsWith('--') && !['--base-url', '--expected-product-id', '--expected-price-cents'].includes(v)) ||
+      args.length !== 2 + (expectedProductId ? 2 : 0) + (priceArg !== undefined ? 2 : 0)) {
+    console.error('Usage: node scripts/probe-public-mcp.mjs --base-url https://example.com/ [--expected-product-id gid://shopify/ProductVariant/123 --expected-price-cents 6599]')
     process.exitCode = 2
   } else {
-    probePublicMcp({ baseUrl, expectedProductId })
+    probePublicMcp({ baseUrl, expectedProductId, expectedPriceCents: priceArg === undefined ? undefined : Number(priceArg) })
       .then(result => console.log(JSON.stringify(result)))
       .catch(error => { console.error(`Read-only MCP probe failed: ${error.message}`); process.exitCode = 1 })
   }
