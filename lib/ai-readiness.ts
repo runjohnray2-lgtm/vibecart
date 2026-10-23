@@ -339,6 +339,9 @@ export function evaluateCatalogReadiness(input: ReadinessInput): ReadinessReport
   if (input.lastSyncedAt === undefined || !Number.isFinite(input.lastSyncedAt)) {
     freshness = { status: 'unknown', message: 'No sync time was supplied, so data freshness is unknown.' }
     catalogIssues.push({ code: 'freshness_unknown', severity: 'warning', message: freshness.message })
+  } else if (input.lastSyncedAt > now + MAX_CLOCK_SKEW_MS) {
+    freshness = { status: 'unknown', message: 'Catalog sync timestamp is in the future; freshness cannot be verified.' }
+    catalogIssues.push({ code: 'freshness_future_timestamp', severity: 'warning', message: freshness.message })
   } else {
     const ageMs = Math.max(0, now - input.lastSyncedAt)
     if (ageMs > maxCatalogAgeMs) {
