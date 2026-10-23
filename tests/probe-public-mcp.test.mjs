@@ -10,7 +10,7 @@ const ucpProduct = {
   variants: [{ id: ID, price: { amount: 6599, currency: 'USD' } }],
 }
 const json = value => new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } })
-function mockFetch({ products = [product], annotations = { readOnlyHint: true, destructiveHint: false }, getProduct = product, badUcpEndpoint = false, missingUcpTool = false, badUcpPrice = false, emptyUcpSearch = false } = {}) {
+function mockFetch({ products = [product], annotations = { readOnlyHint: true, destructiveHint: false }, getProduct = product, badUcpEndpoint = false, missingUcpTool = false, badUcpPrice = false, emptyUcpSearch = false, searchPages = null } = {}) {
   const calls = []
   const fetchImpl = async (url, options) => {
     if (options.signal.aborted) throw new Error('unexpected abort')
@@ -26,7 +26,7 @@ function mockFetch({ products = [product], annotations = { readOnlyHint: true, d
       } : ucpProduct
       const result = body.method === 'initialize' ? { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'vibecart-ucp' } }
         : body.method === 'tools/list' ? { tools: [{ name: 'search_catalog' }, { name: 'lookup_catalog' }, ...(missingUcpTool ? [] : [{ name: 'get_product' }]), { name: 'create_cart' }] }
-        : body.params.name === 'search_catalog' ? { structuredContent: { products: emptyUcpSearch ? [] : [expected], pagination: { has_next_page: false } } }
+        : body.params.name === 'search_catalog' ? { structuredContent: searchPages ? searchPages[body.params.arguments.catalog.pagination.cursor ? 1 : 0] : { products: emptyUcpSearch ? [] : [expected], pagination: { has_next_page: false } } }
         : body.params.name === 'lookup_catalog' ? { structuredContent: { products: [expected] } }
         : body.params.name === 'get_product' ? { structuredContent: { product: expected } }
         : { error: 'unexpected UCP tool' }
@@ -160,4 +160,36 @@ test('UCP catalog calls require independent Shopify evidence and public profile 
     }), /public HTTPS profile URL/)
   }
   assert.equal(calls.length, 0)
+})
+
+test('UCP search must paginate to discover independently verified variant', async () => {
+  const other = { ...ucpProduct, id: 'gid://shopify/ProductVariant/999',
+    variants: [{ ...ucpProduct.variants[0], id: 'gid://shopify/ProductVariant/999' }] }
+  const { fetchImpl, calls } = mockFetch({ searchPages: [
+    { products: [other], pagination: { has_next_page: true, cursor: 'next' } },
+    { products: [ucpProduct], pagination: { has_next_page: false } },
+  ] })
+  const result = await probePublicMcp({
+    baseUrl: 'https://merchant.example/', expectedProductId: ID, expectedPriceCents: 6599,
+    agentProfileUrl, fetchImpl,
+  })
+  assert.equal(result.ucpCatalogVerified, true)
+  assert.equal(calls.filter(x => x.body?.params?.name === 'search_catalog').length, 2)
+  assert.equal(calls.some(x => x.body?.params?.name === 'create_cart'), false)
+})
+
+test('UCP search refuses false discovery, repeated cursors and wrong price', async () => {
+  const other = { ...ucpProduct, id: 'gid://shopify/ProductVariant/999',
+    variants: [{ ...ucpProduct.variants[0], id: 'gid://shopify/ProductVariant/999' }] }
+  const base = { baseUrl: 'https://merchant.example/', expectedProductId: ID,
+    expectedPriceCents: 6599, agentProfileUrl }
+  await assert.rejects(probePublicMcp({ ...base, fetchImpl: mockFetch({ searchPages: [
+    { products: [other], pagination: { has_next_page: false } },
+  ] }).fetchImpl }), /did not discover expected Shopify variant/)
+  await assert.rejects(probePublicMcp({ ...base, fetchImpl: mockFetch({ searchPages: [
+    { products: [other], pagination: { has_next_page: true, cursor: 'next' } },
+    { products: [ucpProduct], pagination: { has_next_page: true, cursor: 'next' } },
+  ] }).fetchImpl }), /cursor missing or repeated/)
+  await assert.rejects(probePublicMcp({ ...base, fetchImpl: mockFetch({ badUcpPrice: true }).fetchImpl }),
+    /search_catalog expected Shopify variant price/)
 })
