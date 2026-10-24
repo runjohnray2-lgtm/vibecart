@@ -73,7 +73,7 @@ test('Admin GraphQL envelope hydrates 225 variants with exact IDs, prices, polic
     productId: PRODUCT, variantId: 'gid://shopify/ProductVariant/225', sku: 'SYN-225',
   })
   assert.equal(result.snapshot.products.get('10001')[1].shopify.inventoryPolicy, 'DENY')
-  assert.deepEqual(calls.map(c => c.variables.cursor), [undefined, undefined, null, 'v100', 'v200'])
+  assert.deepEqual(calls.map(c => c.variables.cursor), [undefined, null, 'v100', 'v200'])
   assert.ok(calls.every(c => /^query\b/.test(c.document.trim())))
   assert.ok(calls.every(c => !/mutation|orderCreate|checkoutCreate/i.test(c.document)))
 })
