@@ -143,7 +143,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       modules: loaded,
     })
     console.log(JSON.stringify(result))
-  } catch (error) {
+  } catch {
     // Do not print private token, Shopify response body, or raw catalog details.
     console.error('Shopify read-only catalog audit failed; verify private credentials, schema, exact counts and pagination.')
     process.exitCode = 1
