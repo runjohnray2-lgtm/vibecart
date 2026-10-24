@@ -7,7 +7,7 @@ const READ_ONLY_TOOLS = new Set(['vibecart.list_products', 'vibecart.get_product
 const READ_ONLY_UCP_TOOLS = new Set(['search_catalog', 'lookup_catalog', 'get_product'])
 
 function previewOidcHeaders(origin, token, approvedHost) {
-  if (token === undefined) return {}
+  if (token === undefined && approvedHost === undefined) return {}
   const url = new URL(origin)
   // A Preview OIDC token is a credential. Never send it to a caller-supplied
   // origin without an independent, exact non-production host allowlist.
@@ -244,7 +244,10 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const agentProfileUrl = flag('--agent-profile-url')
   const usePreviewOidc = args.includes('--use-preview-oidc')
   const priceValid = priceArg === undefined || (/^(0|[1-9]\d*)$/.test(priceArg) && Number.isSafeInteger(Number(priceArg)))
-  if (!baseUrl || !priceValid || (priceArg !== undefined && !expectedProductId) ||
+  if (usePreviewOidc && (!process.env.VERCEL_OIDC_TOKEN || !process.env.VIBECART_PILOT_APPROVED_PREVIEW_HOST)) {
+    console.error('Protected Preview probe requires VERCEL_OIDC_TOKEN and VIBECART_PILOT_APPROVED_PREVIEW_HOST in the private environment')
+    process.exitCode = 2
+  } else if (!baseUrl || !priceValid || (priceArg !== undefined && !expectedProductId) ||
       args.some(v => v.startsWith('--') && !['--base-url', '--expected-product-id', '--expected-price-cents', '--agent-profile-url', '--use-preview-oidc'].includes(v)) ||
       args.length !== 2 + (expectedProductId ? 2 : 0) + (priceArg !== undefined ? 2 : 0) + (agentProfileUrl ? 2 : 0) + (usePreviewOidc ? 1 : 0)) {
     console.error('Usage: node scripts/probe-public-mcp.mjs --base-url https://example.com/ [--expected-product-id gid://shopify/ProductVariant/123 --expected-price-cents 6599 --agent-profile-url https://agent.example/profile.json] [--use-preview-oidc]')
