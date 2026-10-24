@@ -1,6 +1,6 @@
 import { lookup } from "node:dns/promises"
 import { isIP } from "node:net"
-import { PRODUCTS, type VibeProduct } from "@/lib/products"
+import { PRODUCTS, PRODUCT_AVAILABILITY_STATUSES, type ProductAvailabilityStatus, type ProductCompatibility, type VibeProduct } from "@/lib/products"
 
 const MAX_CATALOG_BYTES = 5 * 1024 * 1024
 const MAX_PRODUCTS = 10_000
@@ -23,7 +23,18 @@ type CacheEntry = {
 let cache: CacheEntry | null = null
 
 export function catalogSourceMode(): "reference" | "remote" {
-  return process.env.VIBECART_CATALOG_URL?.trim() ? "remote" : "reference"
+  return configuredCatalogUrl() ? "remote" : "reference"
+}
+
+function configuredCatalogUrl(): string | undefined {
+  if (process.env.VERCEL_ENV === "preview" && process.env.VIBECART_PILOT_CATALOG_ENABLED === "true") {
+    const host = process.env.VERCEL_URL
+    if (!host || !/^[a-z0-9-]+\.vercel\.app$/.test(host)) {
+      throw new CatalogSourceError("Private pilot feed needs the deployment's VERCEL_URL", "CATALOG_CONFIG_INVALID")
+    }
+    return `https://${host}/api/pilot/catalog`
+  }
+  return process.env.VIBECART_CATALOG_URL?.trim()
 }
 
 export function configuredMerchantName(): string {
@@ -106,6 +117,104 @@ function imageUrl(value: unknown): string {
   return url.toString()
 }
 
+function availabilityStatus(value: unknown): ProductAvailabilityStatus {
+  if (value === undefined || value === null || value === "") return "unknown"
+  if (typeof value !== "string" || !PRODUCT_AVAILABILITY_STATUSES.includes(value as ProductAvailabilityStatus)) {
+    throw new CatalogSourceError(
+      `Catalog product availability must be one of ${PRODUCT_AVAILABILITY_STATUSES.join(", ")}`,
+      "CATALOG_INVALID"
+    )
+  }
+  return value as ProductAvailabilityStatus
+}
+
+function compatibilityKey(value: string): string {
+  const key = value.trim()
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,39}$/.test(key)) {
+    throw new CatalogSourceError(
+      "Catalog compatibility keys must be 1-40 letters, numbers, dots, colons, underscores, or dashes",
+      "CATALOG_INVALID"
+    )
+  }
+  return key
+}
+
+function compatibilityStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 250) {
+    throw new CatalogSourceError(`Catalog compatibility ${field} must contain 1-250 values`, "CATALOG_INVALID")
+  }
+  const values = value.map(item => nonEmptyString(item, `compatibility.${field}`, 200))
+  if (new Set(values.map(item => item.toLowerCase())).size !== values.length) {
+    throw new CatalogSourceError(`Catalog compatibility ${field} contains duplicate values`, "CATALOG_INVALID")
+  }
+  return values
+}
+
+function productCompatibility(value: unknown): ProductCompatibility | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new CatalogSourceError("Catalog product compatibility must be an object", "CATALOG_INVALID")
+  }
+  const raw = value as Record<string, unknown>
+  if (raw.mode !== "not_required" && raw.mode !== "structured") {
+    throw new CatalogSourceError('Catalog product compatibility.mode must be "not_required" or "structured"', "CATALOG_INVALID")
+  }
+  const statement = optionalString(raw.statement, "compatibility.statement", 1_000)
+  if (raw.mode === "not_required") {
+    if (raw.required !== undefined || raw.attributes !== undefined || raw.questions !== undefined) {
+      throw new CatalogSourceError("not_required compatibility cannot define required fields, attributes, or questions", "CATALOG_INVALID")
+    }
+    return { mode: "not_required", ...(statement ? { statement } : {}) }
+  }
+
+  if (!Array.isArray(raw.required) || raw.required.length === 0 || raw.required.length > 20) {
+    throw new CatalogSourceError("Structured compatibility requires 1-20 required fields", "CATALOG_INVALID")
+  }
+  const required = raw.required.map(item => compatibilityKey(nonEmptyString(item, "compatibility.required", 40)))
+  if (new Set(required.map(item => item.toLowerCase())).size !== required.length) {
+    throw new CatalogSourceError("Structured compatibility required fields must be unique", "CATALOG_INVALID")
+  }
+  if (!raw.attributes || typeof raw.attributes !== "object" || Array.isArray(raw.attributes)) {
+    throw new CatalogSourceError("Structured compatibility requires an attributes object", "CATALOG_INVALID")
+  }
+  const rawAttributes = Object.entries(raw.attributes as Record<string, unknown>)
+  if (rawAttributes.length === 0 || rawAttributes.length > 20) {
+    throw new CatalogSourceError("Structured compatibility attributes must contain 1-20 fields", "CATALOG_INVALID")
+  }
+  const attributes: Record<string, string[]> = {}
+  for (const [rawKey, values] of rawAttributes) {
+    const key = compatibilityKey(rawKey)
+    attributes[key] = compatibilityStringArray(values, key)
+  }
+  for (const requiredKey of required) {
+    if (!Object.keys(attributes).some(key => key.toLowerCase() === requiredKey.toLowerCase())) {
+      throw new CatalogSourceError(`Structured compatibility is missing values for required field ${requiredKey}`, "CATALOG_INVALID")
+    }
+  }
+
+  let questions: Record<string, string> | undefined
+  if (raw.questions !== undefined) {
+    if (!raw.questions || typeof raw.questions !== "object" || Array.isArray(raw.questions)) {
+      throw new CatalogSourceError("Catalog compatibility questions must be an object", "CATALOG_INVALID")
+    }
+    const entries = Object.entries(raw.questions as Record<string, unknown>)
+    if (entries.length > 20) throw new CatalogSourceError("Catalog compatibility questions cannot exceed 20 fields", "CATALOG_INVALID")
+    questions = {}
+    for (const [rawKey, question] of entries) {
+      const key = compatibilityKey(rawKey)
+      questions[key] = nonEmptyString(question, `compatibility.questions.${key}`, 300)
+    }
+  }
+
+  return {
+    mode: "structured",
+    required,
+    attributes,
+    ...(questions && Object.keys(questions).length ? { questions } : {}),
+    ...(statement ? { statement } : {}),
+  }
+}
+
 function parseProduct(value: unknown): VibeProduct {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new CatalogSourceError("Each catalog product must be an object", "CATALOG_INVALID")
@@ -121,10 +230,12 @@ function parseProduct(value: unknown): VibeProduct {
     priceCents: item.priceCents as number,
     image: imageUrl(item.image),
     variant: optionalString(item.variant, "variant", 500),
+    availability: availabilityStatus(item.availability),
+    compatibility: productCompatibility(item.compatibility),
   }
 }
 
-function parseCatalogDocument(value: unknown): VibeProduct[] {
+export function parseCatalogDocument(value: unknown): VibeProduct[] {
   const rawProducts = Array.isArray(value)
     ? value
     : value && typeof value === "object" && Array.isArray((value as Record<string, unknown>).products)
@@ -146,6 +257,14 @@ function parseCatalogDocument(value: unknown): VibeProduct[] {
 async function fetchRemoteCatalog(rawUrl: string): Promise<VibeProduct[]> {
   const url = await validatedCatalogUrl(rawUrl)
   const headers: Record<string, string> = { accept: "application/json" }
+  if (process.env.VERCEL_ENV === "preview" && process.env.VIBECART_PILOT_CATALOG_ENABLED === "true"
+    && url.hostname === process.env.VERCEL_URL && url.pathname === "/api/pilot/catalog" && !url.search && !url.hash) {
+    if (!process.env.VERCEL_OIDC_TOKEN || !process.env.VIBECART_MERCHANT_API_KEY) {
+      throw new CatalogSourceError("Private pilot feed authentication is unavailable", "CATALOG_CONFIG_INVALID")
+    }
+    headers["x-vercel-trusted-oidc-idp-token"] = process.env.VERCEL_OIDC_TOKEN
+    headers["x-vibecart-merchant-key"] = process.env.VIBECART_MERCHANT_API_KEY
+  }
   const bearer = process.env.VIBECART_CATALOG_BEARER_TOKEN?.trim()
   if (bearer) headers.authorization = `Bearer ${bearer}`
 
@@ -181,7 +300,7 @@ async function fetchRemoteCatalog(rawUrl: string): Promise<VibeProduct[]> {
 }
 
 export async function listCatalogProducts(): Promise<VibeProduct[]> {
-  const rawUrl = process.env.VIBECART_CATALOG_URL?.trim()
+  const rawUrl = configuredCatalogUrl()
   if (!rawUrl) return PRODUCTS
 
   if (cache && cache.url === rawUrl && cache.expiresAt > Date.now()) return cache.products

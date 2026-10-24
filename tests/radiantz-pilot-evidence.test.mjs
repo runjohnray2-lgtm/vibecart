@@ -4,9 +4,10 @@ import test from "node:test"
 
 const source = await readFile("scripts/radiantz-pilot-evidence.mjs", "utf8")
 
-test("pilot evidence harness refuses production by default", () => {
-  assert.match(source, /VIBECART_PILOT_ALLOW_PRODUCTION/)
-  assert.match(source, /Refusing to run the pilot evidence harness against production/)
+test("pilot evidence harness unconditionally refuses production", () => {
+  assert.doesNotMatch(source, /VIBECART_PILOT_ALLOW_PRODUCTION/)
+  assert.match(source, /production is forbidden/)
+  assert.match(source, /VIBECART_PILOT_APPROVED_PREVIEW_HOST/)
 })
 
 test("pilot evidence harness requires an explicit checkout opt-in", () => {

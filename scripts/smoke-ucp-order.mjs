@@ -1,3 +1,4 @@
+const outputDir = process.env.VIBECART_UCP_PAYLOAD_DIR ?? "/tmp/vibecart-ucp-payloads"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { Buffer } from "node:buffer"
 import ts from "typescript"
@@ -63,11 +64,11 @@ const notFound = errorPayload("not_found", "Order not found.", "unrecoverable")
 const unauthorized = errorPayload("unauthorized", "Not authorized to access this order.", "unrecoverable")
 const unavailable = errorPayload("service_unavailable", "Order service is temporarily unavailable.", "recoverable")
 
-await mkdir("/tmp/vibecart-ucp-payloads", { recursive: true })
+await mkdir(outputDir, { recursive: true })
 await Promise.all([
-  writeFile("/tmp/vibecart-ucp-payloads/order.json", `${JSON.stringify(payload, null, 2)}\n`),
-  writeFile("/tmp/vibecart-ucp-payloads/order-not-found.json", `${JSON.stringify(notFound, null, 2)}\n`),
-  writeFile("/tmp/vibecart-ucp-payloads/order-unauthorized.json", `${JSON.stringify(unauthorized, null, 2)}\n`),
-  writeFile("/tmp/vibecart-ucp-payloads/order-unavailable.json", `${JSON.stringify(unavailable, null, 2)}\n`),
+  writeFile(`${outputDir}/order.json`, `${JSON.stringify(payload, null, 2)}\n`),
+  writeFile(`${outputDir}/order-not-found.json`, `${JSON.stringify(notFound, null, 2)}\n`),
+  writeFile(`${outputDir}/order-unauthorized.json`, `${JSON.stringify(unauthorized, null, 2)}\n`),
+  writeFile(`${outputDir}/order-unavailable.json`, `${JSON.stringify(unavailable, null, 2)}\n`),
 ])
 console.log("Generated UCP order success/error payloads through released contract metadata")

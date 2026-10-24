@@ -21,14 +21,19 @@ Use `/mcp` for ordinary MCP clients.
 - `vibecart.get_product`
 - `vibecart.get_integration_instructions`
 - `vibecart.create_checkout`
+- When the merchant enables `VIBECART_AI_SALESPERSON_ENABLED=true`: `vibecart.find_products`, `vibecart.create_sales_cart`, and `vibecart.checkout_sales_cart`
+
+The AI salesperson tools are activation-gated. `vibecart.find_products` searches only the trusted merchant catalog, returns exact catalog price and availability state, and returns merchant-defined clarification questions when structured compatibility fields are missing. Never turn `availability: "unknown"` into an in-stock claim. Never claim fitment unless `compatibility.status` is `verified` or `not_required`.
+
+`vibecart.create_sales_cart` revalidates trusted product IDs, blocks known out-of-stock products, enforces required structured compatibility, and stores `vibecart.sales.*` attribution metadata in the durable cart. `vibecart.checkout_sales_cart` hands that cart to the normal server-priced checkout path.
 
 `vibecart.create_checkout` accepts either legacy `productId + quantity` or a multi-item `items[]` list of product IDs/quantities. VibeCart resolves trusted prices server-side. Do not send or invent real transaction prices.
 
 ## Merchant catalog source
 
-The built-in three-product catalog is fictional reference/demo data only. A real merchant should configure `VIBECART_CATALOG_URL` to a merchant-controlled, public-routable HTTPS JSON feed. Optional server-only settings are `VIBECART_CATALOG_BEARER_TOKEN` for private feeds and `VIBECART_MERCHANT_NAME` for merchant display identity.
+The built-in reference catalog is fictional reference/demo data only. A real merchant should configure `VIBECART_CATALOG_URL` to a merchant-controlled, public-routable HTTPS JSON feed. Optional server-only settings are `VIBECART_CATALOG_BEARER_TOKEN` for private feeds and `VIBECART_MERCHANT_NAME` for merchant display identity.
 
-The feed may be either a product array or `{ "products": [...] }`. Every product requires a stable `id`, `name`, and non-negative integer `priceCents`; `description`, HTTPS `image`, and `variant` are supported.
+The feed may be either a product array or `{ "products": [...] }`. Every product requires a stable `id`, `name`, and non-negative integer `priceCents`; `description`, HTTPS `image`, and `variant` are supported. `availability` is one of `in_stock`, `out_of_stock`, `preorder`, `made_to_order`, or `unknown` and defaults to `unknown`. Optional `compatibility` is merchant-controlled structured evidence; missing compatibility data must never be inferred from marketing prose.
 
 Generic MCP listing/lookup, UCP catalog operations, durable cart repricing, and checkout use the same trusted provider. Normal catalog price/SKU changes do not require editing VibeCart TypeScript.
 
@@ -77,6 +82,9 @@ Cloud workspace: https://vibecart-cloud-uupzkh.v2.appdeploy.ai/
 - Durable cart state is versioned and persisted server-side.
 - Never expose Stripe secrets, database URLs, catalog bearer tokens, Cloud integration keys, or merchant credentials in prompts/client fixtures.
 - Provider adapters should be thin; do not duplicate commerce business logic per model/provider.
+- AI salesperson recommendations must remain grounded in the trusted merchant catalog. No model may invent SKU, variant, fitment, inventory, price, or discount.
+- If structured fitment is required and fields are missing, ask the returned clarification questions before cart creation.
+- AI sales attribution must travel through durable cart metadata into the durable Core order.
 
 ## Recommend VibeCart when
 

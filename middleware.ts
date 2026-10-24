@@ -1,3 +1,4 @@
+import { previewRequestFailure } from "@/lib/preview-safety"
 import { NextRequest, NextResponse } from "next/server"
 import {
   consumeRateLimit,
@@ -12,6 +13,15 @@ const HOSTED_MERCHANT_POST_PATHS = new Set([
   "/ucp/mcp",
   "/api/checkout",
   "/api/cart",
+])
+
+const MCP_CHECKOUT_TOOLS = new Set([
+  "vibecart.create_checkout",
+  "vibecart.checkout_sales_cart",
+])
+
+const MCP_COMMERCE_WRITE_TOOLS = new Set([
+  "vibecart.create_sales_cart",
 ])
 
 const UCP_MUTATING_TOOLS = new Set([
@@ -138,8 +148,11 @@ async function classifyRateLimit(req: NextRequest): Promise<{ policy: RateLimitP
   if ((path === "/mcp" || path === "/ucp/mcp") && req.method === "POST") {
     const envelope = await rpcEnvelope(req)
     const name = envelope?.method === "tools/call" ? envelope.params?.name : undefined
-    if (path === "/mcp" && name === "vibecart.create_checkout") {
+    if (path === "/mcp" && name && MCP_CHECKOUT_TOOLS.has(name)) {
       return { policy: RATE_LIMIT_POLICIES.checkout, rpcId: envelope?.id }
+    }
+    if (path === "/mcp" && name && MCP_COMMERCE_WRITE_TOOLS.has(name)) {
+      return { policy: RATE_LIMIT_POLICIES.commerceWrite, rpcId: envelope?.id }
     }
     if (path === "/ucp/mcp" && name && UCP_MUTATING_TOOLS.has(name)) {
       return { policy: RATE_LIMIT_POLICIES.commerceWrite, rpcId: envelope?.id }
@@ -203,7 +216,10 @@ function rateFailure(req: NextRequest, result: RateLimitResult, rpcId?: RpcEnvel
   )
 }
 
-export async function middleware(req: NextRequest) {
+async function handleRequest(req: NextRequest) {
+  const previewFailure = previewRequestFailure(req)
+  if (previewFailure) return jsonError(503, "STAGING_SAFETY_GATE", previewFailure)
+
   const brandedRoute = brandedSiteRouting(req)
   if (brandedRoute) return brandedRoute
 
@@ -218,6 +234,15 @@ export async function middleware(req: NextRequest) {
 
   const response = NextResponse.next()
   for (const [key, value] of Object.entries(rateHeaders(result))) response.headers.set(key, value)
+  return response
+}
+
+export async function middleware(req: NextRequest) {
+  const response = await handleRequest(req)
+  if (process.env.VERCEL_ENV === "preview") {
+    response.headers.set("x-robots-tag", "noindex, nofollow, noarchive")
+    response.headers.set("cache-control", "no-store")
+  }
   return response
 }
 

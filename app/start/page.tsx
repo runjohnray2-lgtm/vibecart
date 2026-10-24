@@ -117,6 +117,28 @@ export default function StartPage() {
           </article>
         </section>
 
+        <section className="rounded-2xl border border-sky-500/30 bg-sky-500/10 p-7 md:p-9">
+          <p className="text-sm font-semibold uppercase tracking-[0.14em] text-sky-300">Payment durability</p>
+          <h2 className="mt-2 text-3xl font-bold">Core saves the paid order before optional Cloud work begins.</h2>
+          <div className="mt-6 grid gap-3 text-sm md:grid-cols-3">
+            <div className="rounded-lg border border-sky-500/20 bg-neutral-950/60 p-4">
+              <p className="font-semibold text-sky-200">1 · Stripe verifies payment</p>
+              <p className="mt-2 leading-6 text-neutral-400">VibeCart accepts only a valid signed payment-ready Stripe event.</p>
+            </div>
+            <div className="rounded-lg border border-sky-500/20 bg-neutral-950/60 p-4">
+              <p className="font-semibold text-sky-200">2 · Core durable order</p>
+              <p className="mt-2 leading-6 text-neutral-400">Order, lines, payment event, tenant-scoped cart state, and optional Cloud outbox commit together.</p>
+            </div>
+            <div className="rounded-lg border border-sky-500/20 bg-neutral-950/60 p-4">
+              <p className="font-semibold text-sky-200">3 · Optional Cloud handoff</p>
+              <p className="mt-2 leading-6 text-neutral-400">Cloud can receive and retry downstream work without becoming a prerequisite for Core commerce.</p>
+            </div>
+          </div>
+          <p className="mt-5 text-sm leading-6 text-neutral-300">
+            If Core cannot save the order, Stripe receives a retryable response. If optional Cloud is unavailable after Core commits, the Core order stays authoritative and the Cloud outbox can retry later.
+          </p>
+        </section>
+
         <section className="rounded-2xl border border-neutral-800 bg-neutral-900 p-7 md:p-9">
           <p className="text-sm font-semibold uppercase tracking-[0.14em] text-emerald-400">Merchant catalog contract</p>
           <h2 className="mt-2 text-3xl font-bold">One HTTPS JSON feed. Same source for agents, carts and checkout.</h2>
