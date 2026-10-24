@@ -41,6 +41,7 @@ export const SHOPIFY_PRODUCTS_QUERY = `query VibeCartProducts($cursor: String, $
       updatedAt
       featuredMedia { preview { image { url } } }
       images(first: 20) { nodes { id url } }
+      variantsCount { count precision }
       variants(first: 100) {
         pageInfo { hasNextPage endCursor }
         nodes { id title sku price inventoryPolicy inventoryQuantity }
