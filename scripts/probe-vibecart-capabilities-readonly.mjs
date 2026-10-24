@@ -1,0 +1,120 @@
+/**
+ * Safe public VibeCart MCP/UCP capability probe. Does NOT call tools/call,
+ * create carts/orders, access Shopify Admin, or use credentials.
+ *
+ * VIBECART_READONLY_BASE_URL=https://vibecart.vercel.app \
+ *   node scripts/probe-vibecart-capabilities-readonly.mjs
+ *
+ * A successful result proves discovery and tool-list reachability only;
+ * it does not prove a real merchant feed, external agent compatibility,
+ * staging isolation, or checkout readiness.
+ */
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const UCP_VERSION = '2026-04-08'
+const REQUIRED_CATALOG_TOOLS = ['search_catalog', 'lookup_catalog', 'get_product']
+const REQUIRED_GENERIC_TOOLS = ['vibecart.list_products', 'vibecart.get_product']
+
+export function validatePublicTarget(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) throw new Error('VIBECART_READONLY_BASE_URL is required')
+  let url
+  try { url = new URL(raw) } catch { throw new Error('Invalid public VibeCart URL') }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port ||
+      url.pathname !== '/' || url.search || url.hash ||
+      !/^vibecart(?:-[a-z0-9-]+)?\.vercel\.app$/.test(url.hostname)) {
+    throw new Error('Probe only accepts an HTTPS public vibecart*.vercel.app origin')
+  }
+  return url.origin
+}
+
+export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = fetch } = {}) {
+  const origin = validatePublicTarget(baseUrl)
+  const operations = []
+  async function readJson(relative, method = 'GET', rpcMethod = null) {
+    if (method === 'POST' && !['initialize', 'tools/list'].includes(rpcMethod)) {
+      throw new Error('Read-only probe forbids this RPC method')
+    }
+    operations.push(method + ' ' + relative + (rpcMethod ? ' ' + rpcMethod : ''))
+    const response = await fetchImpl(origin + relative, {
+      method,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(8000),
+      headers: { accept: 'application/json', ...(rpcMethod ? { 'content-type': 'application/json' } : {}) },
+      ...(rpcMethod ? { body: JSON.stringify({
+        jsonrpc: '2.0', id: rpcMethod === 'initialize' ? 1 : 2, method: rpcMethod,
+        ...(rpcMethod === 'initialize' ? { params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'vibecart-readonly-probe', version: '1.0.0' } } } : {}),
+      }) } : {}),
+    })
+    if (!response?.ok) throw new Error(relative + ' ' + (rpcMethod || 'GET') + ' returned HTTP ' + (response?.status ?? 'unavailable'))
+    if (!(response.headers?.get('content-type') || '').toLowerCase().includes('application/json')) {
+      throw new Error(relative + ' did not return JSON')
+    }
+    const body = await response.text()
+    if (body.length > 256 * 1024) throw new Error(relative + ' response exceeded probe limit')
+    let parsed
+    try { parsed = JSON.parse(body) } catch { throw new Error(relative + ' returned malformed JSON') }
+    if (rpcMethod && (parsed?.jsonrpc !== '2.0' || parsed?.id !== (rpcMethod === 'initialize' ? 1 : 2) || parsed?.error || !parsed?.result)) {
+      throw new Error(relative + ' ' + rpcMethod + ' returned invalid JSON-RPC')
+    }
+    return rpcMethod ? parsed.result : parsed
+  }
+  const discovery = await readJson('/.well-known/ucp')
+  const capabilities = discovery?.ucp?.capabilities
+  const services = discovery?.ucp?.services?.['dev.ucp.shopping']
+  if (discovery?.ucp?.version !== UCP_VERSION || !capabilities ||
+      !Array.isArray(services) || !services.some(s => s?.transport === 'mcp' && s?.endpoint === origin + '/ucp/mcp')) {
+    throw new Error('UCP discovery version/service endpoint mismatch')
+  }
+  for (const name of ['dev.ucp.shopping.catalog.search', 'dev.ucp.shopping.catalog.lookup']) {
+    if (!Array.isArray(capabilities[name]) || capabilities[name].length === 0) {
+      throw new Error('UCP discovery missing ' + name)
+    }
+  }
+  const genericInit = await readJson('/mcp', 'POST', 'initialize')
+  const genericList = await readJson('/mcp', 'POST', 'tools/list')
+  const ucpInit = await readJson('/ucp/mcp', 'POST', 'initialize')
+  const ucpList = await readJson('/ucp/mcp', 'POST', 'tools/list')
+  if (genericInit?.serverInfo?.name !== 'vibecart' || ucpInit?.serverInfo?.name !== 'vibecart-ucp') {
+    throw new Error('MCP initialize returned unexpected server identity')
+  }
+  const names = result => {
+    if (!Array.isArray(result?.tools)) throw new Error('MCP tools/list missing tools')
+    const list = result.tools.map(tool => tool?.name)
+    if (list.some(name => typeof name !== 'string') || new Set(list).size !== list.length) {
+      throw new Error('MCP tools/list contains invalid or duplicate names')
+    }
+    return list
+  }
+  const genericTools = names(genericList)
+  const ucpTools = names(ucpList)
+  for (const name of REQUIRED_GENERIC_TOOLS) {
+    if (!genericTools.includes(name)) throw new Error('Generic MCP missing ' + name)
+  }
+  for (const name of REQUIRED_CATALOG_TOOLS) {
+    if (!ucpTools.includes(name)) throw new Error('UCP MCP missing ' + name)
+  }
+  return {
+    discoveryVerified: true,
+    genericMcpInitialized: true,
+    ucpMcpInitialized: true,
+    genericTools,
+    ucpTools,
+    requestCount: operations.length,
+    methodsUsed: [...new Set(operations.map(op => op.split(' ')[0]))],
+    readOnly: true,
+    realMerchantCatalogVerified: false,
+    checkoutVerified: false,
+    note: 'Public capability discovery only. No tools/call, catalog read, cart, checkout, database or payment request.',
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    const result = await probeVibeCartCapabilitiesReadOnly({ baseUrl: process.env.VIBECART_READONLY_BASE_URL })
+    console.log(JSON.stringify(result))
+  } catch {
+    console.error('Read-only MCP/UCP probe failed; check public endpoint, protocol and advertised capabilities.')
+    process.exitCode = 1
+  }
+}
