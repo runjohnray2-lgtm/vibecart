@@ -95,6 +95,7 @@ test('read-only audit traverses a real adapter contract and returns aggregates, 
     verified: true, traversalVerified: true, catalogReady: true, readOnly: true, currency: 'USD',
     productPages: 1, publishedProductFamilies: 1, catalogVariants: 1, skippedRecords: 0,
   })
+  assert.equal(result.missingImages, 0)
   assert.equal(calls.length, 3)
   assert.ok(calls.every(c => c.document.trim().startsWith('query ')))
   assert.doesNotMatch(JSON.stringify(result), /SYN-101|SYNTHETIC test light|65\.99|ProductVariant/)
@@ -186,5 +187,5 @@ test('read-only audit flags missing Shopify images without exposing private cata
   assert.equal(result.catalogReady, false)
   assert.equal(result.verified, false)
   assert.match(result.note, /missing images/)
-  assert.doesNotMatch(JSON.stringify(result), /PRIVATE-IMAGELESS-SKU|SYNTHETIC IMAGELESS LIGHT|44\\.99|ProductVariant/)
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE-IMAGELESS-SKU|SYNTHETIC IMAGELESS LIGHT|44\.99|ProductVariant/)
 })
