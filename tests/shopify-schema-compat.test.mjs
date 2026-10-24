@@ -9,7 +9,7 @@ const { SHOPIFY_PRODUCTS_QUERY } = modules['shopify-catalog-sync']
 test('Admin query uses schema-verified featuredMedia and returns continuation cursor', () => {
   assert.match(SHOPIFY_PRODUCTS_QUERY, /featuredMedia\s*\{\s*preview\s*\{\s*image\s*\{\s*url\s*\}/)
   assert.doesNotMatch(SHOPIFY_PRODUCTS_QUERY, /featuredImage/)
-  assert.match(SHOPIFY_PRODUCTS_QUERY, /media\(first: 20\)\s*\{\s*nodes\s*\{\s*id\s+preview\s*\{\s*image\s*\{\s*url\s*\}/)
+  assert.match(SHOPIFY_PRODUCTS_QUERY, /media\(first: 5\)\s*\{\s*nodes\s*\{\s*id\s+preview\s*\{\s*image\s*\{\s*url\s*\}/)
   assert.doesNotMatch(SHOPIFY_PRODUCTS_QUERY, /\bimages\s*\(/)
   assert.doesNotMatch(SHOPIFY_PRODUCTS_QUERY, /inventoryQuantity\s+image\s*\{/)
   assert.match(SHOPIFY_PRODUCTS_QUERY, /variants\(first: 100\)\s*\{\s*pageInfo\s*\{\s*hasNextPage\s+endCursor\s*\}/)
@@ -65,4 +65,17 @@ test('null featuredMedia uses Admin media preview fallback without inventing var
   assert.equal(result.products[0].priceCents, 1250)
   assert.equal(result.products[0].shopify.inventoryPolicy, 'CONTINUE')
   assert.equal(result.products[0].image, 'https://cdn.shopify.com/media-fallback.jpg')
+})
+
+test('nested Admin query uses bounded first-page connections to avoid Shopify requested-cost blowups', () => {
+  // Shopify imposes a 1,000-point per-query cap before executing GraphQL.
+  // This is a conservative connection-size guard, NOT a live cost calculation.
+  const products = Number(/products\\(first: (\\d+)/.exec(SHOPIFY_PRODUCTS_QUERY)?.[1])
+  const variants = Number(/variants\\(first: (\\d+)/.exec(SHOPIFY_PRODUCTS_QUERY)?.[1])
+  const media = Number(/media\\(first: (\\d+)/.exec(SHOPIFY_PRODUCTS_QUERY)?.[1])
+  assert.equal(products, 5)
+  assert.equal(variants, 100)
+  assert.equal(media, 5)
+  assert.ok(products * (variants + media) <= 600, 'nested connection request is too large')
+  assert.match(SHOPIFY_PRODUCTS_QUERY, /pageInfo\\s*\\{\\s*hasNextPage\\s+endCursor\\s*\\}/)
 })
