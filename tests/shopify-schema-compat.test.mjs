@@ -12,6 +12,7 @@ test('Admin query uses schema-verified featuredMedia and returns continuation cu
   assert.doesNotMatch(SHOPIFY_PRODUCTS_QUERY, /inventoryQuantity\s+image\s*\{/)
   assert.match(SHOPIFY_PRODUCTS_QUERY, /variants\(first: 100\)\s*\{\s*pageInfo\s*\{\s*hasNextPage\s+endCursor\s*\}/)
   assert.match(SHOPIFY_PRODUCTS_QUERY, /inventoryPolicy/)
+  assert.match(SHOPIFY_PRODUCTS_QUERY, /variantsCount\s*\{\s*count\s+precision\s*\}/)
 })
 
 test('featuredMedia preview maps without changing real variant IDs, exact cents or DENY/CONTINUE policy', () => {
