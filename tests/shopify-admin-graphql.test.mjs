@@ -21,10 +21,11 @@ const variants = (start, count, hasNextPage, endCursor) => ({
   nodes: Array.from({ length: count }, (_, i) => variant(start + i)),
   pageInfo: { hasNextPage, endCursor },
 })
-const product = (variantConnection = variants(1, 100, true, 'v100')) => ({
+const product = (variantConnection = variants(1, 100, true, 'v100'), expectedCount = 225, precision = 'EXACT') => ({
   id: PRODUCT, title: 'SYNTHETIC light', description: 'Synthetic fixture',
   status: 'ACTIVE', publishedAt: '2026-10-18T00:00:00Z',
   variants: variantConnection,
+  variantsCount: { count: expectedCount, precision },
 })
 const productEnvelope = p => ({ data: { products: {
   nodes: [p], pageInfo: { hasNextPage: false, endCursor: null },
@@ -116,4 +117,24 @@ test('currency is read and validated without a default or credential exposure', 
   await assert.rejects(broken.fetchShopCurrency(), /currencyCode is required/)
   const code = fs.readFileSync('lib/shopify-admin-graphql.ts', 'utf8')
   assert.doesNotMatch(code, /process\.env|fetch\(|Authorization|shpat_|mutation\s*\{/)
+})
+
+test('Admin catalog source requires independently exact Shopify variant counts before exposing a page', async () => {
+  const one = variants(1, 1, false, null)
+  const broken = [
+    product(one, 225),
+    product(one, 1, 'AT_LEAST'),
+    { ...product(one, 1), variantsCount: undefined },
+  ]
+  for (const item of broken) {
+    const source = createShopifyAdminCatalogSource(async document => {
+      assert.match(document, /variantsCount\s*\{\s*count\s+precision\s*\}/)
+      return productEnvelope(item)
+    })
+    await assert.rejects(source.fetchPage(null), /exact variantsCount missing, approximate or mismatched/)
+  }
+  const source = createShopifyAdminCatalogSource(async () => productEnvelope(product(one, 1)))
+  const page = await source.fetchPage(null)
+  assert.equal(page.products.length, 1)
+  assert.equal(page.products[0].variants.nodes.length, 1)
 })
