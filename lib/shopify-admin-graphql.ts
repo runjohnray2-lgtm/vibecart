@@ -80,6 +80,7 @@ export function createShopifyAdminCatalogSource(
       for (const product of page.products) {
         if (!record(product) || !record(product.variantsCount) ||
             product.variantsCount.precision !== 'EXACT' ||
+            typeof product.variantsCount.count !== 'number' ||
             !Number.isSafeInteger(product.variantsCount.count) ||
             product.variantsCount.count < 0 ||
             !record(product.variants) || !Array.isArray(product.variants.nodes) ||
