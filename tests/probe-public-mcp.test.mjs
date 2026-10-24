@@ -5,6 +5,7 @@ import { probePublicMcp } from '../scripts/probe-public-mcp.mjs'
 const ID = 'gid://shopify/ProductVariant/123'
 const product = { id: ID, name: 'Synthetic light', priceCents: 6599 }
 const agentProfileUrl = 'https://agent.example/profile.json'
+const READ_ONLY_NAMES = new Set(['search_catalog', 'lookup_catalog', 'get_product', 'vibecart.list_products', 'vibecart.get_product'])
 const ucpProduct = {
   id: ID, price_range: { min: { amount: 6599, currency: 'USD' }, max: { amount: 6599, currency: 'USD' } },
   variants: [{ id: ID, price: { amount: 6599, currency: 'USD' } }],
@@ -132,7 +133,7 @@ test('negotiated UCP search/lookup/get prove independent Shopify identity and pr
   assert.deepEqual(toolCalls.map(x => x.body.params.name), [
     'search_catalog', 'lookup_catalog', 'get_product', 'vibecart.list_products', 'vibecart.get_product',
   ])
-  assert.ok(toolCalls.every(x => !/cart|checkout|order|stripe/i.test(x.body.params.name)))
+  assert.ok(toolCalls.every(x => READ_ONLY_NAMES.has(x.body.params.name)))
   assert.ok(toolCalls.slice(0, 3).every(x => x.body.params.arguments.meta['ucp-agent'].profile === agentProfileUrl))
 })
 
@@ -211,7 +212,7 @@ test('protected Preview read-only probe sends short-lived OIDC only to the expli
   assert.ok(calls.every(call => call.url.startsWith(`https://${approvedPreviewHost}/`)))
   assert.ok(calls.every(call => call.headers['x-vercel-trusted-oidc-idp-token'] === 'synthetic-test-token'))
   assert.ok(calls.every(call => call.redirect === 'manual'))
-  assert.ok(calls.every(call => !/cart|checkout|order|stripe/i.test(call.body?.params?.name ?? '')))
+  assert.ok(calls.every(call => !call.body?.params?.name || READ_ONLY_NAMES.has(call.body.params.name)))
 })
 
 test('protected Preview OIDC rejects production, unapproved and missing-token destinations before network', async () => {
