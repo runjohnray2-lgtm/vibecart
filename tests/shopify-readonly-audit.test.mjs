@@ -146,7 +146,7 @@ test('read-only audit does not certify catalog completeness when Shopify records
   assert.equal(result.publishedProductFamilies, 0)
   assert.equal(result.catalogVariants, 0)
   assert.ok(result.skippedRecords > 0)
-  assert.match(result.note, /complete VibeCart catalog NOT verified/)
+  assert.match(result.note, /prevent complete VibeCart catalog verification/)
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE-SYN-101|UNPUBLISHED SYNTHETIC/)
 })
 
