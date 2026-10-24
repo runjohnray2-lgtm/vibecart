@@ -96,9 +96,16 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
   if (index.size !== feed.products.length) {
     throw new Error('Shopify audit variant index and catalog disagree')
   }
+  // A successful Shopify traversal proves transport and exact pagination, NOT
+  // that every record mapped into a usable VibeCart catalog. In particular,
+  // unpublished, invalid or partially rejected product families are skipped.
+  // Never label such an audit as fully verified without exposing the omissions.
+  const catalogReady = result.skipped.length === 0 && result.warnings.length === 0
   // Aggregate-only output: no product IDs, SKUs, names, prices or credentials.
   return {
-    verified: true,
+    verified: catalogReady,
+    traversalVerified: true,
+    catalogReady,
     readOnly: true,
     currency,
     productPages: result.pages,
@@ -106,7 +113,9 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
     catalogVariants: feed.products.length,
     skippedRecords: result.skipped.length,
     warnings: result.warnings.length,
-    note: 'Shopify Admin read-only traversal and local VibeCart catalog contract only; MCP/UCP, freshness after audit and checkout NOT verified.',
+    note: catalogReady
+      ? 'Shopify Admin exact traversal and local VibeCart catalog contract verified; MCP/UCP, freshness after audit and checkout NOT verified.'
+      : 'Shopify Admin exact traversal completed, but records were skipped or warned; complete VibeCart catalog NOT verified. MCP/UCP and checkout NOT verified.',
   }
 }
 
