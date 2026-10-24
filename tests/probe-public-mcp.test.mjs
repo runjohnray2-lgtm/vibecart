@@ -15,9 +15,9 @@ function mockFetch({ products = [product], annotations = { readOnlyHint: true, d
   const fetchImpl = async (url, options) => {
     if (options.signal.aborted) throw new Error('unexpected abort')
     const body = options.body ? JSON.parse(options.body) : null
-    calls.push({ url, method: options.method, body })
+    calls.push({ url, method: options.method, body, headers: options.headers, redirect: options.redirect })
     if (url.endsWith('/.well-known/ucp')) return json({ ucp: { version: '2026-04-08', services: {
-      'dev.ucp.shopping': [{ transport: 'mcp', endpoint: badUcpEndpoint ? 'https://evil.example/ucp/mcp' : 'https://merchant.example/ucp/mcp' }],
+      'dev.ucp.shopping': [{ transport: 'mcp', endpoint: badUcpEndpoint ? 'https://evil.example/ucp/mcp' : `${new URL(url).origin}/ucp/mcp` }],
     }, capabilities: { 'dev.ucp.shopping.catalog.search': [{}], 'dev.ucp.shopping.catalog.lookup': [{}] } } })
     if (url.endsWith('/ucp/mcp')) {
       const expected = badUcpPrice ? {
@@ -196,4 +196,43 @@ test('UCP search refuses false discovery, repeated cursors and wrong price', asy
   ] }).fetchImpl }), /cursor missing or repeated/)
   await assert.rejects(probePublicMcp({ ...base, fetchImpl: mockFetch({ badUcpPrice: true }).fetchImpl }),
     /search_catalog expected Shopify variant price/)
+})
+
+test('protected Preview read-only probe sends short-lived OIDC only to the explicitly approved host', async () => {
+  const approvedPreviewHost = 'vibecart-git-agent-radiantz-promptmeter.vercel.app'
+  const { fetchImpl, calls } = mockFetch()
+  const result = await probePublicMcp({
+    baseUrl: `https://${approvedPreviewHost}/`, expectedProductId: ID,
+    expectedPriceCents: 6599, previewOidcToken: 'synthetic-test-token',
+    approvedPreviewHost, fetchImpl,
+  })
+  assert.equal(result.independentShopifyPriceMatched, true)
+  assert.ok(calls.length > 0)
+  assert.ok(calls.every(call => call.url.startsWith(`https://${approvedPreviewHost}/`)))
+  assert.ok(calls.every(call => call.headers['x-vercel-trusted-oidc-idp-token'] === 'synthetic-test-token'))
+  assert.ok(calls.every(call => call.redirect === 'manual'))
+  assert.ok(calls.every(call => !/cart|checkout|order|stripe/i.test(call.body?.params?.name ?? '')))
+})
+
+test('protected Preview OIDC rejects production, unapproved and missing-token destinations before network', async () => {
+  const approvedPreviewHost = 'vibecart-git-agent-radiantz-promptmeter.vercel.app'
+  const { fetchImpl, calls } = mockFetch()
+  for (const options of [
+    { baseUrl: 'https://vibecart.vercel.app/', previewOidcToken: 'dummy', approvedPreviewHost: 'vibecart.vercel.app' },
+    { baseUrl: 'https://evil.example/', previewOidcToken: 'dummy', approvedPreviewHost: 'evil.example' },
+    { baseUrl: 'https://other-preview.vercel.app/', previewOidcToken: 'dummy', approvedPreviewHost },
+    { baseUrl: `https://${approvedPreviewHost}/`, previewOidcToken: '', approvedPreviewHost },
+    { baseUrl: `https://${approvedPreviewHost}/`, approvedPreviewHost },
+    { baseUrl: `https://${approvedPreviewHost}:8443/`, previewOidcToken: 'dummy', approvedPreviewHost },
+  ]) {
+    await assert.rejects(probePublicMcp({ ...options, fetchImpl }), /Preview OIDC/)
+  }
+  assert.equal(calls.length, 0)
+})
+
+test('ordinary public probe never forwards OIDC credentials', async () => {
+  const { fetchImpl, calls } = mockFetch()
+  await probePublicMcp({ baseUrl: 'https://merchant.example/', fetchImpl })
+  assert.ok(calls.length > 0)
+  assert.ok(calls.every(call => !('x-vercel-trusted-oidc-idp-token' in call.headers)))
 })
