@@ -1,0 +1,142 @@
+/**
+ * Operator-only, read-only Shopify Admin -> VibeCart catalog acceptance audit.
+ * Runs locally with an authorized Admin READ token; never serves a feed, writes
+ * merchant data, creates carts/orders, or prints raw Shopify catalog records.
+ *
+ * SHOPIFY_AUDIT_SHOP=example.myshopify.com
+ * SHOPIFY_AUDIT_READ_TOKEN=<private token>
+ * SHOPIFY_AUDIT_CURRENCY=USD
+ * node scripts/audit-shopify-catalog-readonly.mjs
+ *
+ * The TypeScript loader is a development dependency, so this is NOT a deployed
+ * runtime endpoint. Keep credentials in the private shell/secret manager.
+ */
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { loadTsModules } from '../tests/helpers/shopify-test-utils.mjs'
+
+const MODULE_PATHS = [
+  'lib/shopify-catalog-mapper.ts',
+  'lib/shopify-catalog-sync.ts',
+  'lib/shopify-variant-pages.ts',
+  'lib/shopify-admin-graphql.ts',
+]
+
+export function createReadOnlyShopifyTransport({
+  shopDomain, token, apiVersion = '2026-10', allowedDocuments,
+  fetchImpl = fetch, maxRequests = 120,
+}) {
+  if (typeof shopDomain !== 'string' ||
+      !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shopDomain)) {
+    throw new Error('Shopify audit requires an exact *.myshopify.com shop domain')
+  }
+  if (typeof token !== 'string' || !token.trim()) {
+    throw new Error('Shopify audit requires a private read-only Admin token')
+  }
+  if (typeof apiVersion !== 'string' || !/^\d{4}-(01|04|07|10)$/.test(apiVersion)) {
+    throw new Error('Shopify audit requires a pinned quarterly Admin API version')
+  }
+  if (!(allowedDocuments instanceof Set) || allowedDocuments.size !== 4 ||
+      [...allowedDocuments].some(doc => typeof doc !== 'string' || !doc.trim().startsWith('query '))) {
+    throw new Error('Shopify audit requires four approved read-only GraphQL documents')
+  }
+  if (!Number.isSafeInteger(maxRequests) || maxRequests < 1 || maxRequests > 120) {
+    throw new Error('Shopify audit request limit must be between 1 and 120')
+  }
+  const endpoint = 'https://' + shopDomain + '/admin/api/' + apiVersion + '/graphql.json'
+  let requests = 0
+  return async (document, variables) => {
+    if (!allowedDocuments.has(document)) {
+      throw new Error('Shopify audit refused an unapproved GraphQL operation')
+    }
+    if (++requests > maxRequests) throw new Error('Shopify audit request limit reached')
+    const response = await fetchImpl(endpoint, {
+      method: 'POST',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(8000),
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json',
+        'x-shopify-access-token': token,
+      },
+      body: JSON.stringify({ query: document, variables }),
+    })
+    if (!response || !response.ok) {
+      throw new Error('Shopify audit HTTP ' + (response?.status ?? 'unavailable'))
+    }
+    if (!(response.headers.get('content-type') || '').toLowerCase().includes('application/json')) {
+      throw new Error('Shopify audit expected JSON')
+    }
+    const body = await response.text()
+    if (body.length > 1024 * 1024) throw new Error('Shopify audit response too large')
+    try {
+      return JSON.parse(body)
+    } catch {
+      throw new Error('Shopify audit received malformed JSON')
+    }
+  }
+}
+
+export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode, modules } = {}) {
+  if (typeof execute !== 'function') throw new Error('Shopify audit needs a read-only transport')
+  if (typeof expectedCurrencyCode !== 'string' || !expectedCurrencyCode.trim()) {
+    throw new Error('Shopify audit requires the merchant expected currency')
+  }
+  const loaded = modules ?? await loadTsModules(MODULE_PATHS)
+  const { createShopifyAdminCatalogSource } = loaded['shopify-admin-graphql']
+  const { syncShopifyCatalog, toCatalogFeed, buildVariantIndex } = loaded['shopify-catalog-sync']
+  const source = createShopifyAdminCatalogSource(execute)
+  const currency = await source.fetchShopCurrency()
+  const result = await syncShopifyCatalog({
+    shopCurrencyCode: currency, expectedCurrencyCode,
+    fetchPage: source.fetchPage,
+  })
+  const feed = toCatalogFeed(result.snapshot)
+  const index = buildVariantIndex(result.snapshot)
+  if (index.size !== feed.products.length) {
+    throw new Error('Shopify audit variant index and catalog disagree')
+  }
+  // Aggregate-only output: no product IDs, SKUs, names, prices or credentials.
+  return {
+    verified: true,
+    readOnly: true,
+    currency,
+    productPages: result.pages,
+    publishedProductFamilies: result.snapshot.products.size,
+    catalogVariants: feed.products.length,
+    skippedRecords: result.skipped.length,
+    warnings: result.warnings.length,
+    note: 'Shopify Admin read-only traversal and local VibeCart catalog contract only; MCP/UCP, freshness after audit and checkout NOT verified.',
+  }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    const loaded = await loadTsModules(MODULE_PATHS)
+    const sync = loaded['shopify-catalog-sync']
+    const variant = loaded['shopify-variant-pages']
+    const admin = loaded['shopify-admin-graphql']
+    const allowedDocuments = new Set([
+      sync.SHOPIFY_SHOP_CURRENCY_QUERY,
+      sync.SHOPIFY_PRODUCTS_QUERY,
+      variant.SHOPIFY_VARIANTS_QUERY,
+      admin.SHOPIFY_PRODUCTS_COUNT_QUERY,
+    ])
+    const execute = createReadOnlyShopifyTransport({
+      shopDomain: process.env.SHOPIFY_AUDIT_SHOP,
+      token: process.env.SHOPIFY_AUDIT_READ_TOKEN,
+      apiVersion: process.env.SHOPIFY_AUDIT_API_VERSION ?? '2026-10',
+      allowedDocuments,
+    })
+    const result = await auditShopifyCatalogReadOnly({
+      execute,
+      expectedCurrencyCode: process.env.SHOPIFY_AUDIT_CURRENCY,
+      modules: loaded,
+    })
+    console.log(JSON.stringify(result))
+  } catch (error) {
+    // Do not print private token, Shopify response body, or raw catalog details.
+    console.error('Shopify read-only catalog audit failed; verify private credentials, schema, exact counts and pagination.')
+    process.exitCode = 1
+  }
+}
