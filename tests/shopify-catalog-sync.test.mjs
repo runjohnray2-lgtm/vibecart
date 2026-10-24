@@ -290,6 +290,20 @@ test('delete webhooks accept numeric ids and global ids', async () => {
   assert.equal(toCatalogFeed(result.snapshot).products.length, 4)
 })
 
+test('product delete webhooks ignore cross-resource and malformed ids with matching numeric suffixes', async () => {
+  const { result } = await fullSync()
+  const before = toCatalogFeed(result.snapshot)
+  const rejected = applyProductDeleted(result.snapshot, [
+    V(1), 'gid://shopify/Collection/2', 'gid://shopify/Product/3?other=1',
+    'gid://shopify/Product/03', '/Product/2', '3.0', -1,
+  ])
+  assert.equal(rejected.removed, 0, 'non-Product identities must never remove a real product')
+  assert.deepEqual(toCatalogFeed(rejected.snapshot), before)
+  const accepted = applyProductDeleted(rejected.snapshot, [P(3)])
+  assert.equal(accepted.removed, 1, 'valid Product GIDs must continue to delete')
+  assert.equal(toCatalogFeed(accepted.snapshot).products.length, before.products.length - 1)
+})
+
 test('currency must be verified, never assumed', async () => {
   const fetchPage = async () => page2
   await assert.rejects(() => syncShopifyCatalog({ shopCurrencyCode: 'EUR', expectedCurrencyCode: 'USD', fetchPage }), /does not match/)
