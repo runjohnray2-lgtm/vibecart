@@ -39,3 +39,35 @@ Create `tests/fixtures/radiantz/shop-products.json` in a reviewed PR:
 ## What this does not prove
 
 It does not prove the live store syncs, that an AI agent can buy anything, or that any assistant will surface these products. Live OAuth, per-merchant storage, a served feed, the cart-to-order flow, and checkout behavior for `DENY` items remain gated on #56 and Codex's #91/#93, and on owner approval.
+
+## Read-only verification of a protected Vercel Preview
+
+`scripts/probe-public-mcp.mjs` can now send the short-lived Vercel development
+OIDC token to an **exactly allowlisted non-production Preview origin**. This
+unblocks MCP/UCP discovery and catalog checks behind Deployment Protection
+without disabling protection or enabling cart/order/payment calls.
+
+Provide `VERCEL_OIDC_TOKEN` and `VIBECART_PILOT_APPROVED_PREVIEW_HOST`
+through a private operator environment. Do not put token values in command
+arguments, public CI, logs, issues or repository files. Then run:
+
+```sh
+node scripts/probe-public-mcp.mjs \
+  --base-url "https://$VIBECART_PILOT_APPROVED_PREVIEW_HOST/" \
+  --expected-product-id 'gid://shopify/ProductVariant/VERIFIED_ID' \
+  --expected-price-cents VERIFIED_USD_CENTS \
+  --use-preview-oidc
+```
+
+Replace the placeholders using a **fresh independent read-only Shopify check**.
+The probe rejects an absent token, an unapproved host, known production hosts,
+non-HTTPS origins, credentialed URLs, and redirects. It sends OIDC only to
+same-origin discovery/MCP/UCP endpoints. For negotiated UCP catalog search,
+lookup and get-product checks, additionally supply `--agent-profile-url`
+with a reviewed public HTTPS agent profile. The probe never invokes cart,
+checkout, order, fulfillment, or payment tools.
+
+**No protected Preview or live Radiantz retrieval has been verified by adding
+this option.** The Preview must have a real, authorized, current catalog feed;
+a 403 or demo catalog is not acceptance. This read-only path does not lift
+Issue #108's database, Stripe TEST-mode, tenant, or cost gates for writes.
