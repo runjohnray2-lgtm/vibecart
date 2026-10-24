@@ -69,8 +69,25 @@ export function createShopifyAdminCatalogSource(
     }
     return { productId, variants: connectionOf(data.product.variants, 'variants') }
   }
+  const fetchHydratedPage = withHydratedShopifyVariants(fetchProducts, { fetchVariantPage, ...options })
   return {
     fetchShopCurrency,
-    fetchPage: withHydratedShopifyVariants(fetchProducts, { fetchVariantPage, ...options }),
+    fetchPage: async (cursor: string | null): Promise<ShopifyProductsPage> => {
+      const page = await fetchHydratedPage(cursor)
+      // Pagination flags alone cannot prove completeness if an upstream
+      // adapter silently drops a variant page. Require Shopify's independently
+      // reported exact count for every hydrated product.
+      for (const product of page.products) {
+        if (!record(product) || !record(product.variantsCount) ||
+            product.variantsCount.precision !== 'EXACT' ||
+            !Number.isSafeInteger(product.variantsCount.count) ||
+            product.variantsCount.count < 0 ||
+            !record(product.variants) || !Array.isArray(product.variants.nodes) ||
+            product.variants.nodes.length !== product.variantsCount.count) {
+          throw new Error('Shopify exact variantsCount missing, approximate or mismatched; refusing incomplete product page')
+        }
+      }
+      return page
+    },
   }
 }
