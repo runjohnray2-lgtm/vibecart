@@ -32,7 +32,11 @@ const productEnvelope = p => ({ data: { products: {
 } } })
 // Count comes from an independent, unfiltered Shopify Admin query, never from
 // the product page being tested.
-const withCount = (execute, count = 1, precision = 'EXACT') => async (document, variables) => {
+const withCount = (execute, ...args) => async (document, variables) => {
+  // Distinguish an omitted fixture argument (default count 1) from an
+  // explicitly undefined Shopify count, which must fail closed.
+  const count = args.length > 0 ? args[0] : 1
+  const precision = args.length > 1 ? args[1] : 'EXACT'
   if (document.includes('VibeCartProductsCount')) {
     assert.match(document, /productsCount\(limit: null\)/)
     return { data: { productsCount: { count, precision } } }
