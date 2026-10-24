@@ -8,18 +8,20 @@ test("homepage sells the shipped agent-commerce platform rather than the old che
   const source = await readFile("app/page.tsx", "utf8")
   assert.match(source, /Commerce infrastructure for AI-built apps and the agents that use them/)
   assert.match(source, /Durable multi-item cart/)
-  assert.match(source, /Official MCP Registry \+ released UCP/)
+  assert.match(source, /MCP Registry \+ released UCP/)
   assert.match(source, /trusted multi-item checkout/i)
   assert.doesNotMatch(source, /Deliberately not a commerce platform/)
   assert.doesNotMatch(source, /no shared multi-item cart/i)
 })
 
-test("homepage links recurring revenue CTA directly to the live Cloud workspace", async () => {
+test("homepage exposes the founding-merchant and Cloud adoption paths", async () => {
   const source = await readFile("app/page.tsx", "utf8")
   assert.ok(source.includes(cloudUrl))
-  assert.match(source, /Start VibeCart Cloud — \$29\/month/)
   assert.match(source, /\$29<span/)
   assert.match(source, /Open Cloud workspace/)
+  assert.match(source, /Compare options/)
+  assert.match(source, /href="\/founding-merchant"/)
+  assert.match(source, /href="\/cloud"/)
 })
 
 test("Cloud sales page separates recurring Cloud from custom done-for-you setup", async () => {
