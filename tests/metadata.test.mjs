@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 
-test("public discovery metadata describes the four supported tools", async () => {
+test("public discovery metadata describes the supported commerce capabilities", async () => {
   const metadata = JSON.parse(await readFile("public/.well-known/vibecart.json", "utf8"))
   assert.equal(metadata.name, "VibeCart")
   assert.deepEqual(metadata.capabilities, [
@@ -10,6 +10,9 @@ test("public discovery metadata describes the four supported tools", async () =>
     "get_product",
     "get_integration_instructions",
     "create_checkout",
+    "durable_multi_item_cart",
+    "trusted_server_side_repricing",
+    "released_ucp_catalog_and_cart",
   ])
   assert.equal(metadata.payments.platform_fee, false)
   assert.equal(metadata.payments.merchant_of_record, false)
