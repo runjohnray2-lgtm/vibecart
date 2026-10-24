@@ -61,7 +61,7 @@ export type ShopifyCatalogSnapshot = {
   products: ReadonlyMap<string, ShopifyCatalogProduct[]>
 }
 
-export type ShopifyVariantRef = { productId: string; variantId: string; sku?: string }
+export type ShopifyVariantRef = { productId: string; variantId: string; sku?: string; inventoryPolicy: 'DENY' | 'CONTINUE' }
 
 export type ShopifyApplyResult = {
   snapshot: ShopifyCatalogSnapshot
@@ -266,16 +266,20 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
   return { products }
 }
 
-/** Server-side lookup keyed by catalog id (the Shopify variant id). Keeps the ids and SKU the feed drops. */
+/** Server-only lookup keyed by Shopify variant id. Retains identity, SKU and policy lost in the public feed.\n * A cached policy is NOT checkout authorization: Codex must independently recheck live sellability. */
 export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string, ShopifyVariantRef> {
   const index = new Map<string, ShopifyVariantRef>()
   for (const variants of snapshot.products.values()) {
     for (const p of variants) {
       if (index.has(p.id)) throw new Error('duplicate Shopify variant id in snapshot: ' + p.id)
+      if (p.shopify.inventoryPolicy !== 'DENY' && p.shopify.inventoryPolicy !== 'CONTINUE') {
+        throw new Error('Shopify variant index missing or invalid inventoryPolicy for ' + p.id)
+      }
       index.set(p.id, {
         productId: p.shopify.productId,
         variantId: p.shopify.variantId,
         ...(p.sku ? { sku: p.sku } : {}),
+        inventoryPolicy: p.shopify.inventoryPolicy,
       })
     }
   }

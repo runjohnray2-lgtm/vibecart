@@ -5,7 +5,7 @@ import { loadTsModules } from './helpers/shopify-test-utils.mjs'
 
 // Synthetic Shopify data only. No merchant API, database, payment, or network calls.
 const modules = await loadTsModules(['lib/shopify-catalog-mapper.ts', 'lib/shopify-catalog-sync.ts'])
-const { applyProducts, createSnapshot, syncShopifyCatalog, toCatalogFeed } = modules['shopify-catalog-sync']
+const { applyProducts, buildVariantIndex, createSnapshot, syncShopifyCatalog, toCatalogFeed } = modules['shopify-catalog-sync']
 const productId = n => 'gid://shopify/Product/' + n
 const variantId = n => 'gid://shopify/ProductVariant/' + n
 const opts = { shopCurrencyCode: 'USD', expectedCurrencyCode: 'USD' }
@@ -34,7 +34,11 @@ test('direct sync preserves verified CONTINUE and DENY policies at zero stock wi
   assert.deepEqual(variants.map(p => p.shopify.productId), [productId(701), productId(701)])
   assert.deepEqual(variants.map(p => p.shopify.variantId), [variantId(7011), variantId(7012)])
   assert.deepEqual(toCatalogFeed(result.snapshot).products.map(p => p.priceCents), [6599, 6599])
+  const index = buildVariantIndex(result.snapshot)
+  assert.deepEqual([...index.values()].map(ref => ref.inventoryPolicy), ['CONTINUE', 'DENY'])
+  assert.equal(index.get(variantId(7012)).inventoryPolicy, 'DENY')
   assert.equal(JSON.stringify(toCatalogFeed(result.snapshot)).includes('inventoryQuantity'), false)
+  assert.equal(JSON.stringify(toCatalogFeed(result.snapshot)).includes('inventoryPolicy'), false)
 })
 
 test('missing or invalid policy removes an entire family and its stale variants without mutating the base', () => {
@@ -68,4 +72,17 @@ test('paged sync excludes unverified-policy family and retains valid sibling fam
   assert.equal(result.upserted, 1)
   assert.deepEqual(toCatalogFeed(result.snapshot).products.map(p => p.id), [variantId(7041)])
   assert.deepEqual(toCatalogFeed(base), before)
+})
+
+test('server-side index rejects snapshots missing a verified Shopify inventory policy', () => {
+  const result = applyProducts(createSnapshot('USD'), [family(705, ['DENY'])])
+  const valid = result.snapshot.products.get('705')
+  assert.equal(valid.length, 1)
+  const malformed = {
+    ...result.snapshot,
+    products: new Map([['705', valid.map(p => ({
+      ...p, shopify: { ...p.shopify, inventoryPolicy: undefined },
+    }))]]),
+  }
+  assert.throws(() => buildVariantIndex(malformed), /missing or invalid inventoryPolicy/)
 })

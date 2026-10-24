@@ -64,7 +64,7 @@ test('real sync consumes all 225 hydrated variants and preserves Shopify IDs, ex
   for (const n of [1, 2, 100, 101, 200, 225]) {
     const id = `gid://shopify/ProductVariant/${n}`
     assert.equal(feed.products.find(p => p.id === id)?.priceCents, n % 2 ? 6599 : 7000)
-    assert.deepEqual(index.get(id), { productId: PRODUCT_ID, variantId: id, sku: `SYNTH-${n}` })
+    assert.deepEqual(index.get(id), { productId: PRODUCT_ID, variantId: id, sku: `SYNTH-${n}`, inventoryPolicy: n % 2 ? 'CONTINUE' : 'DENY' })
     const entry = result.snapshot.products.get('94001')?.find(p => p.id === id)
     assert.equal(entry?.shopify.inventoryPolicy, n % 2 ? 'CONTINUE' : 'DENY')
   }
