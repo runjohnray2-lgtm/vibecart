@@ -70,12 +70,12 @@ test('null featuredMedia uses Admin media preview fallback without inventing var
 test('nested Admin query uses bounded first-page connections to avoid Shopify requested-cost blowups', () => {
   // Shopify imposes a 1,000-point per-query cap before executing GraphQL.
   // This is a conservative connection-size guard, NOT a live cost calculation.
-  const products = Number(/products\\(first: (\\d+)/.exec(SHOPIFY_PRODUCTS_QUERY)?.[1])
-  const variants = Number(/variants\\(first: (\\d+)/.exec(SHOPIFY_PRODUCTS_QUERY)?.[1])
-  const media = Number(/media\\(first: (\\d+)/.exec(SHOPIFY_PRODUCTS_QUERY)?.[1])
+  const products = Number(/products\(first: (\d+)/.exec(SHOPIFY_PRODUCTS_QUERY)?.[1])
+  const variants = Number(/variants\(first: (\d+)/.exec(SHOPIFY_PRODUCTS_QUERY)?.[1])
+  const media = Number(/media\(first: (\d+)/.exec(SHOPIFY_PRODUCTS_QUERY)?.[1])
   assert.equal(products, 5)
   assert.equal(variants, 100)
   assert.equal(media, 5)
   assert.ok(products * (variants + media) <= 600, 'nested connection request is too large')
-  assert.match(SHOPIFY_PRODUCTS_QUERY, /pageInfo\\s*\\{\\s*hasNextPage\\s+endCursor\\s*\\}/)
+  assert.match(SHOPIFY_PRODUCTS_QUERY, /pageInfo\s*\{\s*hasNextPage\s+endCursor\s*\}/)
 })
