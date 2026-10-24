@@ -205,6 +205,26 @@ test('products with a truncated variant list are skipped whole', () => {
   assert.match(result.skipped[0].reason, /truncated/)
 })
 
+test('GraphQL variants without explicit complete pagination evidence fail closed', () => {
+  const raw = {
+    id: 'gid://shopify/Product/9876',
+    title: 'SYNTHETIC large light strip',
+    status: 'ACTIVE',
+    publishedAt: '2026-10-18T00:00:00Z',
+    variants: { nodes: [{ id: 'gid://shopify/ProductVariant/1234', price: '65.99' }] },
+  }
+  for (const pageInfo of [undefined, {}, { hasNextPage: 'false' }, { hasNextPage: null }]) {
+    const variants = { ...raw.variants, ...(pageInfo === undefined ? {} : { pageInfo }) }
+    const result = mapShopifyProducts([{ ...raw, variants }], USD)
+    assert.equal(result.products.length, 0)
+    assert.match(result.skipped[0].reason, /pagination status unknown/)
+  }
+  const complete = mapShopifyProducts([{ ...raw, variants: { ...raw.variants, pageInfo: { hasNextPage: false } } }], USD)
+  assert.equal(complete.products.length, 1, 'completed GraphQL connections still map')
+  const rest = mapShopifyProducts([{ ...raw, variants: raw.variants.nodes }], USD)
+  assert.equal(rest.products.length, 1, 'REST arrays remain supported')
+})
+
 test('accepted input wrappers: array, { products: [] }, { products: { nodes } }', () => {
   const p = fixtures.defaultTitleOnly
   assert.equal(mapShopifyProducts([p], USD).products.length, 1)

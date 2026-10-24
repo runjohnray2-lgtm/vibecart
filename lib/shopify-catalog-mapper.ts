@@ -210,9 +210,17 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
       continue
     }
     const connection = entry.variants
-    if (isObject(connection) && isObject(connection.pageInfo) && connection.pageInfo.hasNextPage === true) {
-      skip(productId, undefined, 'variant list is truncated (pageInfo.hasNextPage); fetch every variant before exposing this product')
-      continue
+    if (isObject(connection)) {
+      // A GraphQL connection must prove its variant list is complete.
+      // Legacy REST arrays are not connections and remain supported.
+      if (!isObject(connection.pageInfo) || typeof connection.pageInfo.hasNextPage !== 'boolean') {
+        skip(productId, undefined, 'variant pagination status unknown: pageInfo.hasNextPage missing or invalid')
+        continue
+      }
+      if (connection.pageInfo.hasNextPage) {
+        skip(productId, undefined, 'variant list is truncated (pageInfo.hasNextPage); fetch every variant before exposing this product')
+        continue
+      }
     }
     const variants = asList(entry.variants)
     if (variants.length === 0) {
@@ -222,7 +230,13 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
 
     const images = asList(entry.images)
     const description = describe(entry)
-    const fallbackImage = imageUrl(entry.featuredImage) ?? imageUrl(entry.image) ?? imageUrl(images[0])
+    const featuredMedia = isObject(entry.featuredMedia) ? entry.featuredMedia : undefined
+    const preview = featuredMedia && isObject(featuredMedia.preview) ? featuredMedia.preview : undefined
+    const mediaPreviewImage = preview ? imageUrl(preview.image) : undefined
+    const mediaFallback = asList(entry.media)
+      .map(item => isObject(item) && isObject(item.preview) ? imageUrl(item.preview.image) : undefined)
+      .find(url => url !== undefined)
+    const fallbackImage = mediaPreviewImage ?? mediaFallback ?? imageUrl(entry.featuredImage) ?? imageUrl(entry.image) ?? imageUrl(images[0])
 
     for (const variant of variants) {
       if (!isObject(variant)) {

@@ -26,11 +26,16 @@ export const SHOPIFY_SYNC_FLAG = 'VIBECART_SHOPIFY_SYNC_ENABLED'
 
 export const MAX_FEED_PRODUCTS = 10_000
 
-/** Reference queries for the future connector. Not executed or verified against a live shop. */
+/** Reference queries for the future connector. Schema fields reflect the read-only Radiantz Admin check; not executed by this module. */
 export const SHOPIFY_SHOP_CURRENCY_QUERY = 'query { shop { currencyCode } }'
 
+// Shopify rejects single Admin GraphQL queries above 1,000 requested cost points.
+// Nesting 100 variants beneath 100 products can exceed that limit before any
+// data is returned. Keep the first product page small; hydrate all remaining
+// variants and products with the existing cursor-based pagination. The exact
+// requested cost must still be checked against the live shop's API response.
 export const SHOPIFY_PRODUCTS_QUERY = `query VibeCartProducts($cursor: String, $query: String) {
-  products(first: 100, after: $cursor, query: $query) {
+  products(first: 5, after: $cursor, query: $query) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
@@ -39,11 +44,12 @@ export const SHOPIFY_PRODUCTS_QUERY = `query VibeCartProducts($cursor: String, $
       status
       publishedAt
       updatedAt
-      featuredImage { url }
-      images(first: 20) { nodes { id url } }
+      featuredMedia { preview { image { url } } }
+      media(first: 5) { nodes { id preview { image { url } } } }
+      variantsCount { count precision }
       variants(first: 100) {
-        pageInfo { hasNextPage }
-        nodes { id title sku price inventoryPolicy inventoryQuantity image { url } }
+        pageInfo { hasNextPage endCursor }
+        nodes { id title sku price inventoryPolicy inventoryQuantity }
       }
     }
   }
@@ -55,7 +61,7 @@ export type ShopifyCatalogSnapshot = {
   products: ReadonlyMap<string, ShopifyCatalogProduct[]>
 }
 
-export type ShopifyVariantRef = { productId: string; variantId: string; sku?: string }
+export type ShopifyVariantRef = { productId: string; variantId: string; sku?: string; inventoryPolicy: 'DENY' | 'CONTINUE' }
 
 export type ShopifyApplyResult = {
   snapshot: ShopifyCatalogSnapshot
@@ -76,8 +82,10 @@ export type ShopifySyncOptions = {
   /** Currency this merchant catalog is sold in. Must equal the shop currency. */
   expectedCurrencyCode: string
   fetchPage: (cursor: string | null) => Promise<ShopifyProductsPage>
-  /** Existing snapshot for an incremental sync. Omit for a full sync. */
+  /** Existing snapshot to reconcile. Omit to build a new snapshot. */
   base?: ShopifyCatalogSnapshot
+  /** Reserved unsafe legacy option. Destructive pruning is disabled pending independent traversal proof. */
+  fullRefresh?: boolean
   maxPages?: number
   includeUnpublished?: boolean
 }
@@ -105,11 +113,29 @@ function productKey(raw: unknown): string | undefined {
   return id ? (shopifyNumericId(id) ?? id) : undefined
 }
 
-/** True when neither publishedAt nor published_at was returned at all (explicit null is handled by the mapper). */
+/** Trusted sync must positively verify status; missing is not ACTIVE. */
+function statusUnknown(raw: unknown): boolean {
+  if (typeof raw !== 'object' || raw === null) return false
+  const status = (raw as Record<string, unknown>).status
+  return typeof status !== 'string' || status.trim().length === 0
+}
+
+/** Null means explicitly unpublished; other publication values require a valid ISO timestamp. */
 function publicationUnknown(raw: unknown): boolean {
   if (typeof raw !== 'object' || raw === null) return false
   const entry = raw as Record<string, unknown>
-  return entry.publishedAt === undefined && entry.published_at === undefined
+  const publishedAt = entry.publishedAt !== undefined ? entry.publishedAt : entry.published_at
+  if (publishedAt === null) return false
+  if (typeof publishedAt !== 'string') return true
+  const match = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(publishedAt)
+  if (!match || !Number.isFinite(Date.parse(publishedAt))) return true
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (month < 1 || month > 12 || day < 1) return true
+  const lastDay = new Date(0)
+  lastDay.setUTCFullYear(year, month, 0)
+  return day > lastDay.getUTCDate()
 }
 
 export function createSnapshot(currencyCode: string): ShopifyCatalogSnapshot {
@@ -127,6 +153,11 @@ export function applyProducts(
   rawProducts: unknown[],
   options: { includeUnpublished?: boolean } = {},
 ): ShopifyApplyResult {
+  // A public snapshot must never be populated with unpublished Shopify items,
+  // even when a caller accidentally forwards a diagnostic-only mapper option.
+  if (options.includeUnpublished) {
+    throw new Error('includeUnpublished is not permitted for public catalog snapshots')
+  }
   const next = new Map(snapshot.products)
   const skipped: ShopifyMapSkip[] = []
   const warnings: string[] = []
@@ -144,6 +175,16 @@ export function applyProducts(
       if (unknownKey && next.delete(unknownKey)) removed += 1
       continue
     }
+    if (statusUnknown(raw)) {
+      const id = rawProductId(raw)
+      skipped.push({
+        ...(id ? { productId: id } : {}),
+        reason: 'product status unknown: status was not returned, so the product is not exposed',
+      })
+      const unknownKey = productKey(raw)
+      if (unknownKey && next.delete(unknownKey)) removed += 1
+      continue
+    }
     const mapped = mapShopifyProducts([raw], {
       currencyCode: snapshot.currencyCode,
       includeUnpublished: options.includeUnpublished,
@@ -152,6 +193,31 @@ export function applyProducts(
     warnings.push(...mapped.warnings)
     const key = productKey(raw)
     if (!key) continue
+    // A partial variant family can misrepresent Shopify's purchasable choices.
+    // Keep individual diagnostics, but do not publish valid siblings when any
+    // variant in the same product was rejected by the mapper.
+    if (mapped.products.length > 0 && mapped.skipped.length > 0) {
+      const id = rawProductId(raw)
+      skipped.push({
+        ...(id ? { productId: id } : {}),
+        reason: 'product variants incomplete: ' + mapped.skipped.length + ' rejected variant(s); entire family omitted',
+      })
+      if (next.delete(key)) removed += 1
+      continue
+    }
+    // Direct sync callers can bypass the GraphQL adapter. Require an actual
+    // Shopify DENY/CONTINUE policy for every variant before publishing a family.
+    // Zero quantity remains allowed for either policy; checkout authorization is separate.
+    if (mapped.products.length > 0 && mapped.products.some(
+      product => product.shopify.inventoryPolicy !== 'DENY' && product.shopify.inventoryPolicy !== 'CONTINUE',
+    )) {
+      skipped.push({
+        ...(rawProductId(raw) ? { productId: rawProductId(raw) } : {}),
+        reason: 'inventory policy missing or invalid; entire family omitted',
+      })
+      if (next.delete(key)) removed += 1
+      continue
+    }
     if (mapped.products.length > 0) {
       next.set(key, mapped.products)
       upserted += 1
@@ -200,15 +266,20 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
   return { products }
 }
 
-/** Server-side lookup keyed by catalog id (the Shopify variant id). Keeps the ids and SKU the feed drops. */
+/** Server-only lookup keyed by Shopify variant id. Retains identity, SKU and policy lost in the public feed.\n * A cached policy is NOT checkout authorization: Codex must independently recheck live sellability. */
 export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string, ShopifyVariantRef> {
   const index = new Map<string, ShopifyVariantRef>()
   for (const variants of snapshot.products.values()) {
     for (const p of variants) {
+      if (index.has(p.id)) throw new Error('duplicate Shopify variant id in snapshot: ' + p.id)
+      if (p.shopify.inventoryPolicy !== 'DENY' && p.shopify.inventoryPolicy !== 'CONTINUE') {
+        throw new Error('Shopify variant index missing or invalid inventoryPolicy for ' + p.id)
+      }
       index.set(p.id, {
         productId: p.shopify.productId,
         variantId: p.shopify.variantId,
         ...(p.sku ? { sku: p.sku } : {}),
+        inventoryPolicy: p.shopify.inventoryPolicy,
       })
     }
   }
@@ -230,9 +301,27 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
     throw new Error('base snapshot currency ' + options.base.currencyCode + ' does not match ' + shopCurrency)
   }
 
+  // Public sync must fail closed on unpublished-product overrides before any
+  // caller-supplied Shopify transport can be invoked.
+  if (options.includeUnpublished) {
+    throw new Error('includeUnpublished is not permitted for public Shopify catalog sync')
+  }
+
+  // fetchPage is injected and may apply an unknown Shopify query/filter. Without
+  // independent unfiltered traversal proof, absence is NOT evidence of deletion.
+  if (options.fullRefresh) {
+    throw new Error('fullRefresh requires independently verified unfiltered traversal; use explicit products/delete events instead')
+  }
+
   const maxPages = options.maxPages ?? 200
+  // Overrides may tighten the default but cannot bypass the product-page request cap.
+  // Validate before invoking the caller's potentially metered Shopify transport.
+  if (!Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 200) {
+    throw new Error('invalid Shopify product pagination limits')
+  }
   let snapshot = options.base ?? createSnapshot(shopCurrency)
   const seenCursors = new Set<string>()
+  const seenProductKeys = new Set<string>()
   const skipped: ShopifyMapSkip[] = []
   const warnings: string[] = []
   let upserted = 0
@@ -246,6 +335,17 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
     const page = await options.fetchPage(cursor)
     if (!page || !Array.isArray(page.products) || !page.pageInfo || typeof page.pageInfo.hasNextPage !== 'boolean') {
       throw new Error('fetchPage returned an invalid page')
+    }
+    // Product pages must never repeat an identity: later pages could overwrite a variant family.
+    for (const raw of page.products) {
+      const key = productKey(raw)
+      if (!key) {
+        // An unidentified product cannot be reconciled safely in either a full
+        // or incremental batch. Abort atomically rather than silently skipping it.
+        throw new Error('Shopify sync contains a product with an invalid id')
+      }
+      if (seenProductKeys.has(key)) throw new Error('duplicate Shopify product id across sync pages: ' + key)
+      seenProductKeys.add(key)
     }
     const applied = applyProducts(snapshot, page.products, { includeUnpublished: options.includeUnpublished })
     snapshot = applied.snapshot
@@ -262,5 +362,7 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
     cursor = nextCursor
   }
 
+  // Reject ambiguous variant ownership before a caller can publish or index the snapshot.
+  buildVariantIndex(snapshot)
   return { snapshot, pages, upserted, removed, skipped, warnings }
 }
