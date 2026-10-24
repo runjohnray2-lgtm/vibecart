@@ -88,11 +88,11 @@ test('read-only audit traverses a real adapter contract and returns aggregates, 
   }
   const result = await auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' })
   assert.deepEqual({
-    verified: result.verified, readOnly: result.readOnly, currency: result.currency,
+    verified: result.verified, traversalVerified: result.traversalVerified, catalogReady: result.catalogReady, readOnly: result.readOnly, currency: result.currency,
     productPages: result.productPages, publishedProductFamilies: result.publishedProductFamilies,
     catalogVariants: result.catalogVariants, skippedRecords: result.skippedRecords,
   }, {
-    verified: true, readOnly: true, currency: 'USD',
+    verified: true, traversalVerified: true, catalogReady: true, readOnly: true, currency: 'USD',
     productPages: 1, publishedProductFamilies: 1, catalogVariants: 1, skippedRecords: 0,
   })
   assert.equal(calls.length, 3)
@@ -109,4 +109,42 @@ test('read-only audit fails on currency mismatch or independently incomplete Sho
   }
   await assert.rejects(auditShopifyCatalogReadOnly({ execute: currency, expectedCurrencyCode: 'EUR' }), /does not match/)
   await assert.rejects(auditShopifyCatalogReadOnly({ execute: currency, expectedCurrencyCode: 'USD' }), /incomplete/)
+})
+
+test('read-only audit does not certify catalog completeness when Shopify records are omitted', async () => {
+  const execute = async document => {
+    if (document.includes('shop { currencyCode }')) {
+      return { data: { shop: { currencyCode: 'USD' } } }
+    }
+    if (document.includes('VibeCartProductsCount')) {
+      return { data: { productsCount: { count: 1, precision: 'EXACT' } } }
+    }
+    if (document.includes('VibeCartProducts(')) {
+      return { data: { products: {
+        nodes: [{
+          id: 'gid://shopify/Product/100', title: 'UNPUBLISHED SYNTHETIC',
+          status: 'ACTIVE', publishedAt: null,
+          variantsCount: { count: 1, precision: 'EXACT' },
+          variants: { nodes: [{
+            id: 'gid://shopify/ProductVariant/101', title: 'Red',
+            sku: 'PRIVATE-SYN-101', price: '19.99',
+            inventoryPolicy: 'CONTINUE', inventoryQuantity: 0,
+          }], pageInfo: { hasNextPage: false, endCursor: null } },
+        }],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      } } }
+    }
+    throw new Error('unexpected query')
+  }
+  const result = await auditShopifyCatalogReadOnly({
+    execute, expectedCurrencyCode: 'USD',
+  })
+  assert.equal(result.traversalVerified, true, 'exact Shopify traversal succeeded')
+  assert.equal(result.catalogReady, false, 'an omitted family must fail catalog acceptance')
+  assert.equal(result.verified, false, 'do not claim a fully verified usable catalog')
+  assert.equal(result.publishedProductFamilies, 0)
+  assert.equal(result.catalogVariants, 0)
+  assert.ok(result.skippedRecords > 0)
+  assert.match(result.note, /complete VibeCart catalog NOT verified/)
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE-SYN-101|UNPUBLISHED SYNTHETIC/)
 })
