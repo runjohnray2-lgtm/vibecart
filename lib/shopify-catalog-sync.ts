@@ -237,7 +237,13 @@ export function applyProductDeleted(
   const next = new Map(snapshot.products)
   let removed = 0
   for (const id of ids) {
-    const key = productKey({ id })
+    // A products/delete event must identify a Product, not an arbitrary Shopify
+    // resource with the same numeric suffix (e.g. ProductVariant/123).
+    // Keep legacy REST numeric ids, but reject malformed/cross-resource GIDs.
+    const raw = shopifyId(id)
+    const key = raw && (/^[1-9]\d*$/.test(raw)
+      ? raw
+      : /^gid:\/\/shopify\/Product\/([1-9]\d*)$/.exec(raw)?.[1])
     if (key && next.delete(key)) removed += 1
   }
   return { snapshot: { currencyCode: snapshot.currencyCode, products: next }, removed }
