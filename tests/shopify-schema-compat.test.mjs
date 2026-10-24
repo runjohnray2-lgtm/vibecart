@@ -9,6 +9,8 @@ const { SHOPIFY_PRODUCTS_QUERY } = modules['shopify-catalog-sync']
 test('Admin query uses schema-verified featuredMedia and returns continuation cursor', () => {
   assert.match(SHOPIFY_PRODUCTS_QUERY, /featuredMedia\s*\{\s*preview\s*\{\s*image\s*\{\s*url\s*\}/)
   assert.doesNotMatch(SHOPIFY_PRODUCTS_QUERY, /featuredImage/)
+  assert.match(SHOPIFY_PRODUCTS_QUERY, /media\(first: 20\)\s*\{\s*nodes\s*\{\s*id\s+preview\s*\{\s*image\s*\{\s*url\s*\}/)
+  assert.doesNotMatch(SHOPIFY_PRODUCTS_QUERY, /\bimages\s*\(/)
   assert.doesNotMatch(SHOPIFY_PRODUCTS_QUERY, /inventoryQuantity\s+image\s*\{/)
   assert.match(SHOPIFY_PRODUCTS_QUERY, /variants\(first: 100\)\s*\{\s*pageInfo\s*\{\s*hasNextPage\s+endCursor\s*\}/)
   assert.match(SHOPIFY_PRODUCTS_QUERY, /inventoryPolicy/)
@@ -42,4 +44,25 @@ test('null featuredMedia falls back to images connection', () => {
   }
   const result = mapShopifyProducts([raw], { currencyCode: 'USD' })
   assert.equal(result.products[0].image, 'https://cdn.shopify.com/backup.jpg')
+})
+
+test('null featuredMedia uses Admin media preview fallback without inventing variant identity or price', () => {
+  const raw = {
+    id: 'gid://shopify/Product/123', title: 'SYNTHETIC LED', status: 'ACTIVE',
+    publishedAt: '2026-10-18T00:00:00Z', featuredMedia: null,
+    media: { nodes: [
+      { id: 'gid://shopify/MediaImage/1', preview: { image: null } },
+      { id: 'gid://shopify/MediaImage/2', preview: { image: { url: 'https://cdn.shopify.com/media-fallback.jpg' } } },
+    ] },
+    variants: { nodes: [
+      { id: 'gid://shopify/ProductVariant/456', price: '12.50', inventoryPolicy: 'CONTINUE', inventoryQuantity: 0 },
+    ], pageInfo: { hasNextPage: false } },
+  }
+  const result = mapShopifyProducts([raw], { currencyCode: 'USD' })
+  assert.equal(result.skipped.length, 0)
+  assert.equal(result.products.length, 1)
+  assert.equal(result.products[0].id, 'gid://shopify/ProductVariant/456')
+  assert.equal(result.products[0].priceCents, 1250)
+  assert.equal(result.products[0].shopify.inventoryPolicy, 'CONTINUE')
+  assert.equal(result.products[0].image, 'https://cdn.shopify.com/media-fallback.jpg')
 })
