@@ -14,7 +14,6 @@ import { fileURLToPath } from 'node:url'
 
 const UCP_VERSION = '2026-04-08'
 const REQUIRED_CATALOG_TOOLS = ['search_catalog', 'lookup_catalog', 'get_product']
-const REQUIRED_GENERIC_TOOLS = ['vibecart.list_products', 'vibecart.get_product']
 
 export function validatePublicTarget(raw) {
   if (typeof raw !== 'string' || !raw.trim()) throw new Error('VIBECART_READONLY_BASE_URL is required')
