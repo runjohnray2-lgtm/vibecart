@@ -6,6 +6,24 @@
 const READ_ONLY_TOOLS = new Set(['vibecart.list_products', 'vibecart.get_product'])
 const READ_ONLY_UCP_TOOLS = new Set(['search_catalog', 'lookup_catalog', 'get_product'])
 
+function previewOidcHeaders(origin, token, approvedHost) {
+  if (token === undefined) return {}
+  const url = new URL(origin)
+  // A Preview OIDC token is a credential. Never send it to a caller-supplied
+  // origin without an independent, exact non-production host allowlist.
+  const productionHosts = new Set([
+    'vibecart.vercel.app', 'vibecart-promptmeter.vercel.app',
+    'vibecart-git-main-promptmeter.vercel.app',
+  ])
+  if (typeof token !== 'string' || !token.trim() ||
+      typeof approvedHost !== 'string' ||
+      !/^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.vercel\.app$/.test(approvedHost) ||
+      url.hostname !== approvedHost || url.port || productionHosts.has(url.hostname)) {
+    throw new Error('Preview OIDC requires a token and an explicitly approved non-production Vercel Preview host')
+  }
+  return { 'x-vercel-trusted-oidc-idp-token': token }
+}
+
 function originOf(baseUrl) {
   const url = new URL(baseUrl)
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
@@ -14,13 +32,13 @@ function originOf(baseUrl) {
   return url.origin
 }
 
-async function jsonRequest(fetchImpl, url, { method = 'GET', body } = {}) {
+async function jsonRequest(fetchImpl, url, { method = 'GET', body, extraHeaders = {} } = {}) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 8000)
   try {
     const response = await fetchImpl(url, {
       method, redirect: 'manual', signal: controller.signal,
-      headers: { accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}) },
+      headers: { accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}), ...extraHeaders },
       ...(body ? { body: JSON.stringify(body) } : {}),
     })
     if (response.status < 200 || response.status >= 300) throw new Error(`read-only probe HTTP ${response.status}`)
@@ -42,8 +60,10 @@ function rpcResult(value, id) {
   return value.result
 }
 
-export async function probePublicMcp({ baseUrl, expectedProductId, expectedPriceCents, agentProfileUrl, fetchImpl = fetch }) {
+export async function probePublicMcp({ baseUrl, expectedProductId, expectedPriceCents, agentProfileUrl, previewOidcToken, approvedPreviewHost, fetchImpl = fetch }) {
   const origin = originOf(baseUrl)
+  const extraHeaders = previewOidcHeaders(origin, previewOidcToken, approvedPreviewHost)
+  const request = (url, options) => jsonRequest(fetchImpl, url, { ...options, extraHeaders })
   if (expectedProductId !== undefined &&
       (typeof expectedProductId !== 'string' || !/^gid:\/\/shopify\/ProductVariant\/[1-9]\d*$/.test(expectedProductId))) {
     throw new Error('expectedProductId must be a verified Shopify ProductVariant GID')
@@ -72,7 +92,7 @@ export async function probePublicMcp({ baseUrl, expectedProductId, expectedPrice
       throw new Error('agentProfileUrl must be a public HTTPS profile URL without credentials or query')
     }
   }
-  const discovery = await jsonRequest(fetchImpl, `${origin}/.well-known/ucp`)
+  const discovery = await request(`${origin}/.well-known/ucp`)
   const ucp = discovery?.ucp
   if (!ucp || typeof ucp.version !== 'string' ||
       !ucp.capabilities?.['dev.ucp.shopping.catalog.search'] ||
@@ -83,7 +103,7 @@ export async function probePublicMcp({ baseUrl, expectedProductId, expectedPrice
   if (ucpEndpoint !== `${origin}/ucp/mcp`) {
     throw new Error('UCP discovery must advertise same-origin /ucp/mcp transport')
   }
-  const rpc = async (id, method, params = {}) => rpcResult(await jsonRequest(fetchImpl, `${origin}/mcp`, {
+  const rpc = async (id, method, params = {}) => rpcResult(await request(`${origin}/mcp`, {
     method: 'POST', body: { jsonrpc: '2.0', id, method, params },
   }), id)
   const initialized = await rpc(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'vibecart-read-only-probe', version: '1.0.0' } })
@@ -98,7 +118,7 @@ export async function probePublicMcp({ baseUrl, expectedProductId, expectedPrice
       throw new Error(`MCP tool ${name} is missing or not explicitly read-only`)
     }
   }
-  const ucpRpc = async (id, method, params = {}) => rpcResult(await jsonRequest(fetchImpl, ucpEndpoint, {
+  const ucpRpc = async (id, method, params = {}) => rpcResult(await request(ucpEndpoint, {
     method: 'POST', body: { jsonrpc: '2.0', id, method, params },
   }), id)
   const ucpInitialized = await ucpRpc(10, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'vibecart-read-only-probe', version: '1.0.0' } })
@@ -222,14 +242,17 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const expectedProductId = flag('--expected-product-id')
   const priceArg = flag('--expected-price-cents')
   const agentProfileUrl = flag('--agent-profile-url')
+  const usePreviewOidc = args.includes('--use-preview-oidc')
   const priceValid = priceArg === undefined || (/^(0|[1-9]\d*)$/.test(priceArg) && Number.isSafeInteger(Number(priceArg)))
   if (!baseUrl || !priceValid || (priceArg !== undefined && !expectedProductId) ||
-      args.some(v => v.startsWith('--') && !['--base-url', '--expected-product-id', '--expected-price-cents', '--agent-profile-url'].includes(v)) ||
-      args.length !== 2 + (expectedProductId ? 2 : 0) + (priceArg !== undefined ? 2 : 0) + (agentProfileUrl ? 2 : 0)) {
-    console.error('Usage: node scripts/probe-public-mcp.mjs --base-url https://example.com/ [--expected-product-id gid://shopify/ProductVariant/123 --expected-price-cents 6599 --agent-profile-url https://agent.example/profile.json]')
+      args.some(v => v.startsWith('--') && !['--base-url', '--expected-product-id', '--expected-price-cents', '--agent-profile-url', '--use-preview-oidc'].includes(v)) ||
+      args.length !== 2 + (expectedProductId ? 2 : 0) + (priceArg !== undefined ? 2 : 0) + (agentProfileUrl ? 2 : 0) + (usePreviewOidc ? 1 : 0)) {
+    console.error('Usage: node scripts/probe-public-mcp.mjs --base-url https://example.com/ [--expected-product-id gid://shopify/ProductVariant/123 --expected-price-cents 6599 --agent-profile-url https://agent.example/profile.json] [--use-preview-oidc]')
     process.exitCode = 2
   } else {
-    probePublicMcp({ baseUrl, expectedProductId, expectedPriceCents: priceArg === undefined ? undefined : Number(priceArg), agentProfileUrl })
+    probePublicMcp({ baseUrl, expectedProductId, expectedPriceCents: priceArg === undefined ? undefined : Number(priceArg), agentProfileUrl,
+      ...(usePreviewOidc ? { previewOidcToken: process.env.VERCEL_OIDC_TOKEN,
+        approvedPreviewHost: process.env.VIBECART_PILOT_APPROVED_PREVIEW_HOST } : {}) })
       .then(result => console.log(JSON.stringify(result)))
       .catch(error => { console.error(`Read-only MCP probe failed: ${error.message}`); process.exitCode = 1 })
   }
