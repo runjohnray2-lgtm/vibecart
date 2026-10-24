@@ -78,21 +78,51 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
   if (genericInit?.serverInfo?.name !== 'vibecart' || ucpInit?.serverInfo?.name !== 'vibecart-ucp') {
     throw new Error('MCP initialize returned unexpected server identity')
   }
-  const names = result => {
+  const toolsOf = result => {
     if (!Array.isArray(result?.tools)) throw new Error('MCP tools/list missing tools')
-    const list = result.tools.map(tool => tool?.name)
-    if (list.some(name => typeof name !== 'string') || new Set(list).size !== list.length) {
+    const names = result.tools.map(tool => tool?.name)
+    if (names.some(name => typeof name !== 'string') || new Set(names).size !== names.length) {
       throw new Error('MCP tools/list contains invalid or duplicate names')
     }
-    return list
+    return result.tools
   }
-  const genericTools = names(genericList)
-  const ucpTools = names(ucpList)
-  for (const name of REQUIRED_GENERIC_TOOLS) {
-    if (!genericTools.includes(name)) throw new Error('Generic MCP missing ' + name)
+  const genericListed = toolsOf(genericList)
+  const ucpListed = toolsOf(ucpList)
+  const genericTools = genericListed.map(tool => tool.name)
+  const ucpTools = ucpListed.map(tool => tool.name)
+  // A tool name alone is not proof that a compatible agent can invoke it.
+  // Fail closed when a deployed endpoint advertises stale or unsafe catalog schemas.
+  function requireCatalogSchema(listed, name, required, protocol) {
+    const tool = listed.find(entry => entry.name === name)
+    if (!tool) throw new Error(protocol + ' MCP missing ' + name)
+    const schema = tool.inputSchema
+    if (schema?.type !== 'object' || !schema.properties ||
+        !required.every(field => schema.required?.includes(field) && schema.properties[field])) {
+      throw new Error(protocol + ' MCP incompatible input schema for ' + name)
+    }
+    if (protocol === 'Generic') {
+      if (tool.annotations?.readOnlyHint !== true || tool.annotations?.destructiveHint !== false ||
+          (name === 'vibecart.get_product' && schema.properties.productId?.type !== 'string')) {
+        throw new Error('Generic MCP unsafe or incompatible catalog tool ' + name)
+      }
+    } else {
+      const meta = schema.properties.meta
+      const catalog = schema.properties.catalog
+      if (meta?.type !== 'object' || !meta.required?.includes('ucp-agent') ||
+          catalog?.type !== 'object') {
+        throw new Error('UCP MCP incompatible meta/catalog schema for ' + name)
+      }
+      const key = name === 'lookup_catalog' ? 'ids' : name === 'get_product' ? 'id' : null
+      if (key && (!catalog.required?.includes(key) ||
+          catalog.properties?.[key]?.type !== (key === 'ids' ? 'array' : 'string'))) {
+        throw new Error('UCP MCP incompatible catalog lookup schema for ' + name)
+      }
+    }
   }
+  requireCatalogSchema(genericListed, 'vibecart.list_products', [], 'Generic')
+  requireCatalogSchema(genericListed, 'vibecart.get_product', ['productId'], 'Generic')
   for (const name of REQUIRED_CATALOG_TOOLS) {
-    if (!ucpTools.includes(name)) throw new Error('UCP MCP missing ' + name)
+    requireCatalogSchema(ucpListed, name, ['meta', 'catalog'], 'UCP')
   }
   return {
     discoveryVerified: true,
