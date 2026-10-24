@@ -101,20 +101,20 @@ export function createShopifyAdminCatalogSource(
           throw new Error('Shopify product continuation cursor is not the expected cursor')
         }
         const page = await fetchHydratedPage(cursor)
-      // Pagination flags alone cannot prove completeness if an upstream
-      // adapter silently drops a variant page. Require Shopify's independently
-      // reported exact count for every hydrated product.
-      for (const product of page.products) {
-        if (!record(product) || !record(product.variantsCount) ||
-            product.variantsCount.precision !== 'EXACT' ||
-            typeof product.variantsCount.count !== 'number' ||
-            !Number.isSafeInteger(product.variantsCount.count) ||
-            product.variantsCount.count < 0 ||
-            !record(product.variants) || !Array.isArray(product.variants.nodes) ||
-            product.variants.nodes.length !== product.variantsCount.count) {
-          throw new Error('Shopify exact variantsCount missing, approximate or mismatched; refusing incomplete product page')
+        // Pagination flags alone cannot prove completeness if an upstream
+        // adapter silently drops a variant page. Require Shopify's independently
+        // reported exact count for every hydrated product.
+        for (const product of page.products) {
+          if (!record(product) || !record(product.variantsCount) ||
+              product.variantsCount.precision !== 'EXACT' ||
+              typeof product.variantsCount.count !== 'number' ||
+              !Number.isSafeInteger(product.variantsCount.count) ||
+              product.variantsCount.count < 0 ||
+              !record(product.variants) || !Array.isArray(product.variants.nodes) ||
+              product.variants.nodes.length !== product.variantsCount.count) {
+            throw new Error('Shopify exact variantsCount missing, approximate or mismatched; refusing incomplete product page')
+          }
         }
-      }
         if (!traversal) throw new Error('Shopify product traversal missing independent count')
         for (const product of page.products) {
           const id = (product as { id: string }).id
