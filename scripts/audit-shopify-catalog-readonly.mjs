@@ -100,7 +100,11 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
   // that every record mapped into a usable VibeCart catalog. In particular,
   // unpublished, invalid or partially rejected product families are skipped.
   // Never label such an audit as fully verified without exposing the omissions.
-  const catalogReady = result.skipped.length === 0 && result.warnings.length === 0
+  // The mapper intentionally permits an empty image for products with no
+  // valid Shopify media. That is safe for parsing but not a verified merchant
+  // beta catalog: report missing images instead of silently certifying them.
+  const missingImages = feed.products.filter(product => !product.image).length
+  const catalogReady = result.skipped.length === 0 && result.warnings.length === 0 && missingImages === 0
   // Aggregate-only output: no product IDs, SKUs, names, prices or credentials.
   return {
     verified: catalogReady,
@@ -111,11 +115,12 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
     productPages: result.pages,
     publishedProductFamilies: result.snapshot.products.size,
     catalogVariants: feed.products.length,
+    missingImages,
     skippedRecords: result.skipped.length,
     warnings: result.warnings.length,
     note: catalogReady
       ? 'Shopify Admin exact traversal and local VibeCart catalog contract verified; MCP/UCP, freshness after audit and checkout NOT verified.'
-      : 'Shopify Admin exact traversal completed, but records were skipped or warned; complete VibeCart catalog NOT verified. MCP/UCP and checkout NOT verified.',
+      : 'Shopify Admin exact traversal completed, but records were skipped, warned or have missing images; complete VibeCart catalog NOT verified. MCP/UCP and checkout NOT verified.',
   }
 }
 
