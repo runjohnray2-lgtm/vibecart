@@ -304,6 +304,34 @@ test('product delete webhooks ignore cross-resource and malformed ids with match
   assert.equal(toCatalogFeed(accepted.snapshot).products.length, before.products.length - 1)
 })
 
+test('sync refuses cross-resource or malformed product identities without replacing cached products', async () => {
+  const original = gqlProduct(1, 'SYNTHETIC original', [[11, 'One', 'GOOD', '10.00']])
+  const base = applyProducts(createSnapshot('USD'), [original]).snapshot
+  const before = toCatalogFeed(base)
+  const badIds = [
+    V(1), 'gid://shopify/Collection/1', 'gid://shopify/Product/1?other=1',
+    'gid://shopify/Product/01', '/Product/1', '1.0', '01', '0',
+  ]
+  for (const id of badIds) {
+    const impostor = { ...original, id, title: 'SYNTHETIC impostor' }
+    const direct = applyProducts(base, [impostor])
+    assert.equal(direct.upserted, 0, 'invalid product identity must not be cached: ' + id)
+    assert.deepEqual(toCatalogFeed(direct.snapshot), before)
+    await assert.rejects(() => syncShopifyCatalog({
+      ...OPTS, base,
+      fetchPage: async () => ({ products: [impostor], pageInfo: { hasNextPage: false, endCursor: null } }),
+    }), /invalid id/, 'sync must reject invalid product identity: ' + id)
+  }
+  const invalidPreferredGid = { ...original, admin_graphql_api_id: V(1) }
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS, base,
+    fetchPage: async () => ({ products: [invalidPreferredGid], pageInfo: { hasNextPage: false, endCursor: null } }),
+  }), /invalid id/)
+  const validNumeric = { ...original, id: '1' }
+  assert.equal(applyProducts(base, [validNumeric]).upserted, 1, 'valid REST numeric product id remains supported')
+  assert.deepEqual(toCatalogFeed(base), before, 'failed sync leaves the last good snapshot untouched')
+})
+
 test('currency must be verified, never assumed', async () => {
   const fetchPage = async () => page2
   await assert.rejects(() => syncShopifyCatalog({ shopCurrencyCode: 'EUR', expectedCurrencyCode: 'USD', fetchPage }), /does not match/)

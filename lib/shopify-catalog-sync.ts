@@ -105,7 +105,10 @@ export function shopifyNumericId(id: string): string | undefined {
 function rawProductId(raw: unknown): string | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const entry = raw as Record<string, unknown>
-  return shopifyId(entry.admin_graphql_api_id) ?? shopifyId(entry.id)
+  const id = shopifyId(entry.admin_graphql_api_id) ?? shopifyId(entry.id)
+  // Never treat a ProductVariant, Collection, or malformed GID as a Product
+  // merely because it ends with the same digits as an existing product.
+  return id && /^(?:[1-9]\d*|gid:\/\/shopify\/Product\/[1-9]\d*)$/.test(id) ? id : undefined
 }
 
 function productKey(raw: unknown): string | undefined {
