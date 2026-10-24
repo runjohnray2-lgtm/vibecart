@@ -216,3 +216,60 @@ test('empty but EXACT Shopify traversal is not certified as a merchant-ready cat
   assert.equal(result.verified, false)
   assert.match(result.note, /no usable products/)
 })
+
+
+test('read-only audit counts legitimate unpublished exclusions but rejects a malformed published family', async () => {
+  const variant = (id, price = '12.00') => ({
+    id: 'gid://shopify/ProductVariant/' + id,
+    title: 'Red', sku: 'SYNTHETIC-' + id, price,
+    inventoryPolicy: 'CONTINUE', inventoryQuantity: 0,
+  })
+  const product = (id, status, publishedAt, price = '12.00') => ({
+    id: 'gid://shopify/Product/' + id,
+    title: 'SYNTHETIC PRODUCT ' + id,
+    status, publishedAt,
+    featuredMedia: { preview: { image: { url: 'https://cdn.shopify.com/synthetic.jpg' } } },
+    variantsCount: { count: 1, precision: 'EXACT' },
+    variants: { nodes: [variant(id + 1000, price)], pageInfo: { hasNextPage: false, endCursor: null } },
+  })
+  const base = [
+    product(100, 'ACTIVE', '2026-10-18T00:00:00Z'),
+    product(200, 'DRAFT', null),
+    product(300, 'ARCHIVED', '2026-10-18T00:00:00Z'),
+  ]
+  const run = async products => auditShopifyCatalogReadOnly({
+    expectedCurrencyCode: 'USD',
+    execute: async document => {
+      if (document.includes('shop { currencyCode }')) {
+        return { data: { shop: { currencyCode: 'USD' } } }
+      }
+      if (document.includes('VibeCartProductsCount')) {
+        return { data: { productsCount: { count: products.length, precision: 'EXACT' } } }
+      }
+      if (document.includes('VibeCartProducts(')) {
+        return { data: { products: {
+          nodes: products,
+          pageInfo: { hasNextPage: false, endCursor: null },
+        } } }
+      }
+      throw new Error('unexpected query')
+    },
+  })
+  const valid = await run(base)
+  assert.equal(valid.traversalVerified, true)
+  assert.equal(valid.verified, true, 'normal draft and archived products do not invalidate a published feed')
+  assert.equal(valid.publishedProductFamilies, 1)
+  assert.equal(valid.catalogVariants, 1)
+  assert.equal(valid.skippedRecords, 2)
+  assert.equal(valid.excludedUnpublished, 2)
+  assert.equal(valid.invalidSkippedRecords, 0)
+  assert.doesNotMatch(JSON.stringify(valid), /SYNTHETIC PRODUCT|SYNTHETIC-1100/)
+
+  const invalid = await run([...base, product(400, 'ACTIVE', '2026-10-18T00:00:00Z', '12.345')])
+  assert.equal(invalid.traversalVerified, true)
+  assert.equal(invalid.verified, false, 'a rejected published variant must still block readiness')
+  assert.equal(invalid.excludedUnpublished, 2)
+  assert.ok(invalid.invalidSkippedRecords > 0)
+  assert.equal(invalid.publishedProductFamilies, 1)
+  assert.equal(invalid.catalogVariants, 1)
+})
