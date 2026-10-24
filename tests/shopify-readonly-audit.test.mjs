@@ -148,3 +148,43 @@ test('read-only audit does not certify catalog completeness when Shopify records
   assert.match(result.note, /complete VibeCart catalog NOT verified/)
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE-SYN-101|UNPUBLISHED SYNTHETIC/)
 })
+
+
+test('read-only audit flags missing Shopify images without exposing private catalog details', async () => {
+  const execute = async document => {
+    if (document.includes('shop { currencyCode }')) {
+      return { data: { shop: { currencyCode: 'USD' } } }
+    }
+    if (document.includes('VibeCartProductsCount')) {
+      return { data: { productsCount: { count: 1, precision: 'EXACT' } } }
+    }
+    if (document.includes('VibeCartProducts(')) {
+      return { data: { products: {
+        nodes: [{
+          id: 'gid://shopify/Product/300', title: 'SYNTHETIC IMAGELESS LIGHT',
+          description: 'Synthetic only', status: 'ACTIVE', publishedAt: '2026-10-18T00:00:00Z',
+          featuredMedia: null, media: { nodes: [] },
+          variantsCount: { count: 1, precision: 'EXACT' },
+          variants: { nodes: [{
+            id: 'gid://shopify/ProductVariant/301', title: 'Red',
+            sku: 'PRIVATE-IMAGELESS-SKU', price: '44.99',
+            inventoryPolicy: 'CONTINUE', inventoryQuantity: 0,
+          }], pageInfo: { hasNextPage: false, endCursor: null } },
+        }],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      } } }
+    }
+    throw new Error('unexpected query')
+  }
+  const result = await auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' })
+  assert.equal(result.traversalVerified, true)
+  assert.equal(result.publishedProductFamilies, 1)
+  assert.equal(result.catalogVariants, 1)
+  assert.equal(result.skippedRecords, 0)
+  assert.equal(result.warnings, 0)
+  assert.equal(result.missingImages, 1)
+  assert.equal(result.catalogReady, false)
+  assert.equal(result.verified, false)
+  assert.match(result.note, /missing images/)
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE-IMAGELESS-SKU|SYNTHETIC IMAGELESS LIGHT|44\\.99|ProductVariant/)
+})
