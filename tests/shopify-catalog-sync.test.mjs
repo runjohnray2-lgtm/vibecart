@@ -103,6 +103,45 @@ test('trusted snapshot rejects catalog-to-Shopify variant identity mismatch befo
   assert.equal(buildVariantIndex(aliasSnapshot).get('9031').variantId, V(9031))
 })
 
+test('snapshot rejects wrong Shopify product ownership in both public feed and server index', async () => {
+  const source = gqlProduct(905, 'SYNTHETIC ownership', [[9051, 'Red', 'SYN-9051', '10.00']])
+  const trusted = applyProducts(createSnapshot('USD'), [source]).snapshot
+  const before = toCatalogFeed(trusted)
+  const [[familyKey, variants]] = [...trusted.products]
+
+  for (const wrongProductId of [P(906), V(905), 'gid://shopify/Product/0905']) {
+    const corrupted = {
+      currencyCode: trusted.currencyCode,
+      products: new Map([[familyKey, [{
+        ...variants[0],
+        shopify: { ...variants[0].shopify, productId: wrongProductId },
+      }]]]),
+    }
+    assert.throws(() => toCatalogFeed(corrupted), /snapshot product id mismatch/)
+    assert.throws(() => buildVariantIndex(corrupted), /snapshot product id mismatch/)
+    await assert.rejects(() => syncShopifyCatalog({
+      ...OPTS, base: corrupted,
+      fetchPage: async () => ({ products: [], pageInfo: { hasNextPage: false, endCursor: null } }),
+    }), /snapshot product id mismatch/)
+  }
+
+  const miskeyed = { currencyCode: trusted.currencyCode, products: new Map([['906', variants]]) }
+  assert.throws(() => toCatalogFeed(miskeyed), /snapshot product id mismatch/)
+  assert.throws(() => buildVariantIndex(miskeyed), /snapshot product id mismatch/)
+
+  // A REST numeric Product id is the same Shopify identity as its Admin GID.
+  const alias = {
+    currencyCode: trusted.currencyCode,
+    products: new Map([[familyKey, [{
+      ...variants[0],
+      shopify: { ...variants[0].shopify, productId: '905' },
+    }]]]),
+  }
+  assert.deepEqual(toCatalogFeed(alias), before)
+  assert.equal(buildVariantIndex(alias).get(V(9051)).productId, '905')
+  assert.deepEqual(toCatalogFeed(trusted), before, 'last-known-good snapshot remains unchanged')
+})
+
 test('cross-product variant collision fails closed in index and atomic sync', async () => {
   const first = gqlProduct(501, 'SYNTHETIC Alpha', [[777, 'Red', 'ALPHA', '65.99']])
   const second = gqlProduct(502, 'SYNTHETIC Beta', [[777, 'Amber', 'BETA', '70.00']])
