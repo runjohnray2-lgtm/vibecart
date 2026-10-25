@@ -301,9 +301,9 @@ test('read-only audit counts legitimate unpublished exclusions but rejects a mal
 })
 
 test('read-only transport retries only bounded Shopify throttling without exceeding request budget', async () => {
-  const ok = json({ data: { shop: { currencyCode: 'USD' } } })
-  const throttled = new Response('', { status: 429, headers: { 'retry-after': '0' } })
-  const graphqlThrottle = json({ errors: [{ message: 'throttled', extensions: { code: 'THROTTLED' } }] })
+  const ok = () => json({ data: { shop: { currencyCode: 'USD' } } })
+  const throttled = () => new Response('', { status: 429, headers: { 'retry-after': '0' } })
+  const graphqlThrottle = () => json({ errors: [{ message: 'throttled', extensions: { code: 'THROTTLED' } }] })
 
   for (const responses of [[throttled, ok], [graphqlThrottle, ok]]) {
     let calls = 0
@@ -311,7 +311,7 @@ test('read-only transport retries only bounded Shopify throttling without exceed
     const execute = createReadOnlyShopifyTransport({
       ...opts,
       sleepImpl: async ms => { delays.push(ms) },
-      fetchImpl: async () => responses[calls++],
+      fetchImpl: async () => responses[calls++](),
     })
     assert.deepEqual(await execute(READ, {}), { data: { shop: { currencyCode: 'USD' } } })
     assert.equal(calls, 2)
@@ -333,7 +333,7 @@ test('read-only transport retries only bounded Shopify throttling without exceed
   const execute = createReadOnlyShopifyTransport({
     ...opts, maxRequests: 1,
     sleepImpl: async () => {},
-    fetchImpl: async () => { calls++; return throttled },
+    fetchImpl: async () => { calls++; return throttled() },
   })
   await assert.rejects(execute(READ, {}), /request limit reached/)
   assert.equal(calls, 1, 'retry attempts must count toward the hard request budget')
