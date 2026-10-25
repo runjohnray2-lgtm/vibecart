@@ -589,3 +589,47 @@ test('sync module stays isolated: imports only a type and the mapper, no payment
   assert.doesNotMatch(code, /stripe|checkout|cart-store|neon|process\.env|fetch\(/i)
   assert.deepEqual(syncSource.match(/from '[^']+'/g), ["from '@/lib/products'", "from '@/lib/shopify-catalog-mapper'"])
 })
+
+test('Shopify SKUs remain exact and unsupported SKUs never silently enter a partial catalog family', async () => {
+  const trusted = gqlProduct(980, 'SYNTHETIC trusted', [[9801, 'One', '  SKU-9801  ', '10.00']])
+  const base = applyProducts(createSnapshot('USD'), [trusted]).snapshot
+  const before = toCatalogFeed(base)
+  assert.equal(buildVariantIndex(base).get(V(9801)).sku, '  SKU-9801  ',
+    'merchant SKU whitespace must not be silently trimmed')
+  assert.doesNotMatch(JSON.stringify(before), /SKU-9801/,
+    'the exact SKU belongs only in the server-side index')
+
+  const updated = gqlProduct(980, 'SYNTHETIC updated', [
+    [9801, 'One', 'GOOD', '11.00'],
+    [9802, 'Two', 'SECOND', '12.00'],
+  ])
+  for (const [badSku, expected] of [
+    ['X'.repeat(201), /variant sku is longer than 200/],
+    [42, /variant sku is not a string/],
+  ]) {
+    const poisoned = {
+      ...updated,
+      variants: {
+        ...updated.variants,
+        nodes: updated.variants.nodes.map((variant, i) =>
+          i === 1 ? { ...variant, sku: badSku } : variant),
+      },
+    }
+    const direct = applyProducts(base, [poisoned])
+    assert.equal(direct.upserted, 0, 'a rejected SKU must not publish valid siblings')
+    assert.equal(direct.removed, 1, 'stale product family must be removed from new snapshot')
+    assert.equal(toCatalogFeed(direct.snapshot).products.length, 0)
+    assert.ok(direct.skipped.some(item => expected.test(item.reason)))
+    assert.ok(direct.skipped.some(item => /entire family omitted/.test(item.reason)))
+
+    const synced = await syncShopifyCatalog({
+      ...OPTS, base,
+      fetchPage: async () => ({
+        products: [poisoned], pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    })
+    assert.equal(toCatalogFeed(synced.snapshot).products.length, 0)
+    assert.deepEqual(toCatalogFeed(base), before,
+      'invalid SKU must not mutate the last-known-good snapshot')
+  }
+})
