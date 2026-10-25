@@ -404,8 +404,20 @@ test('direct sync omits a whole family with cross-resource or malformed Shopify 
         index === 1 ? { ...variant, admin_graphql_api_id: P(9312) } : variant),
     },
   }
-  assert.equal(applyProducts(base, [wrongPreferredId]).upserted, 0,
-    'invalid preferred Admin GID must not fall back to a numeric id')
+  // A malformed preferred Admin GID paired with a valid variant id is now a
+  // conflicting dual identity, not a skippable single malformed id. Reject
+  // the whole batch atomically so a stale trusted price cannot be replaced.
+  assert.throws(() => applyProducts(base, [wrongPreferredId]),
+    /conflicting Shopify ProductVariant ids/,
+    'invalid preferred Admin GID must not fall back to another variant id')
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS, base,
+    fetchPage: async () => ({
+      products: [wrongPreferredId], pageInfo: { hasNextPage: false, endCursor: null },
+    }),
+  }), /conflicting Shopify ProductVariant ids/)
+  assert.deepEqual(toCatalogFeed(base), before,
+    'conflicting preferred Admin identity must not mutate last known-good snapshot')
 
   const restVariant = {
     ...valid,
