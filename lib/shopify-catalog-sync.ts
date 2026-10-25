@@ -111,6 +111,49 @@ function rawProductId(raw: unknown): string | undefined {
   return id && /^(?:[1-9]\d*|gid:\/\/shopify\/Product\/[1-9]\d*)$/.test(id) ? id : undefined
 }
 
+/**
+ * Shopify REST ids and Admin GIDs must identify the same resource when both
+ * are supplied. Preferring one silently can associate another variant's price
+ * or SKU with the wrong identity. GraphQL-only GIDs remain valid.
+ */
+function assertMatchingIds(raw: Record<string, unknown>, resource: 'Product' | 'ProductVariant'): void {
+  if (raw.admin_graphql_api_id === undefined || raw.id === undefined) return
+  const preferred = shopifyId(raw.admin_graphql_api_id)
+  const other = shopifyId(raw.id)
+  const prefix = 'gid://shopify/' + resource + '/'
+  const key = (id: string | undefined): string | undefined => {
+    if (!id) return undefined
+    if (/^[1-9]\\d*$/.test(id)) return id
+    if (!id.startsWith(prefix)) return undefined
+    const tail = id.slice(prefix.length)
+    return /^[1-9]\\d*$/.test(tail) ? tail : undefined
+  }
+  const first = key(preferred)
+  const second = key(other)
+  if (!first || !second || first !== second) {
+    throw new Error('conflicting Shopify ' + resource + ' ids')
+  }
+}
+
+function assertMatchingRecordIds(raw: unknown): void {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return
+  const entry = raw as Record<string, unknown>
+  assertMatchingIds(entry, 'Product')
+  const variants = entry.variants
+  const list = Array.isArray(variants) ? variants
+    : variants && typeof variants === 'object'
+      ? (variants as Record<string, unknown>).nodes ?? (variants as Record<string, unknown>).edges
+      : undefined
+  if (!Array.isArray(list)) return
+  for (const item of list) {
+    const variant = item && typeof item === 'object' && !Array.isArray(item) && 'node' in item
+      ? (item as Record<string, unknown>).node : item
+    if (variant && typeof variant === 'object' && !Array.isArray(variant)) {
+      assertMatchingIds(variant as Record<string, unknown>, 'ProductVariant')
+    }
+  }
+}
+
 function productKey(raw: unknown): string | undefined {
   const id = rawProductId(raw)
   return id ? (shopifyNumericId(id) ?? id) : undefined
@@ -168,6 +211,8 @@ export function applyProducts(
   let removed = 0
 
   for (const raw of rawProducts) {
+    // Fail atomically rather than trusting a mismatched REST/GID identity.
+    assertMatchingRecordIds(raw)
     if (!options.includeUnpublished && publicationUnknown(raw)) {
       const id = rawProductId(raw)
       skipped.push({
