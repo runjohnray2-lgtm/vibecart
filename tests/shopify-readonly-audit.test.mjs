@@ -299,3 +299,66 @@ test('read-only audit counts legitimate unpublished exclusions but rejects a mal
   assert.equal(invalid.publishedProductFamilies, 1)
   assert.equal(invalid.catalogVariants, 1)
 })
+
+test('read-only transport retries only bounded Shopify throttling without exceeding request budget', async () => {
+  const ok = json({ data: { shop: { currencyCode: 'USD' } } })
+  const throttled = new Response('', { status: 429, headers: { 'retry-after': '0' } })
+  const graphqlThrottle = json({ errors: [{ message: 'throttled', extensions: { code: 'THROTTLED' } }] })
+
+  for (const responses of [[throttled, ok], [graphqlThrottle, ok]]) {
+    let calls = 0
+    const delays = []
+    const execute = createReadOnlyShopifyTransport({
+      ...opts,
+      sleepImpl: async ms => { delays.push(ms) },
+      fetchImpl: async () => responses[calls++],
+    })
+    assert.deepEqual(await execute(READ, {}), { data: { shop: { currencyCode: 'USD' } } })
+    assert.equal(calls, 2)
+    assert.deepEqual(delays, [responses[0] === throttled ? 0 : 250])
+  }
+
+  for (const responses of [[throttled, throttled, throttled], [graphqlThrottle, graphqlThrottle, graphqlThrottle]]) {
+    let calls = 0
+    const execute = createReadOnlyShopifyTransport({
+      ...opts,
+      sleepImpl: async () => {},
+      fetchImpl: async () => responses[calls++],
+    })
+    await assert.rejects(execute(READ, {}), /bounded retries exhausted/)
+    assert.equal(calls, 3, 'retry count is bounded')
+  }
+
+  let calls = 0
+  const execute = createReadOnlyShopifyTransport({
+    ...opts, maxRequests: 1,
+    sleepImpl: async () => {},
+    fetchImpl: async () => { calls++; return throttled },
+  })
+  await assert.rejects(execute(READ, {}), /request limit reached/)
+  assert.equal(calls, 1, 'retry attempts must count toward the hard request budget')
+
+  for (const response of [
+    new Response('', { status: 429, headers: { 'retry-after': '60' } }),
+    new Response('', { status: 503 }),
+  ]) {
+    let attempts = 0
+    const execute = createReadOnlyShopifyTransport({
+      ...opts,
+      sleepImpl: async () => { throw new Error('unexpected retry') },
+      fetchImpl: async () => { attempts++; return response },
+    })
+    await assert.rejects(execute(READ, {}), /Shopify audit/)
+    assert.equal(attempts, 1, 'do not retry long Retry-After or non-throttle failures')
+  }
+
+  let errorCalls = 0
+  const otherError = json({ errors: [{ message: 'bad query', extensions: { code: 'GRAPHQL_VALIDATION_FAILED' } }] })
+  const noRetry = createReadOnlyShopifyTransport({
+    ...opts,
+    sleepImpl: async () => { throw new Error('unexpected retry') },
+    fetchImpl: async () => { errorCalls++; return otherError },
+  })
+  assert.deepEqual(await noRetry(READ, {}), { errors: [{ message: 'bad query', extensions: { code: 'GRAPHQL_VALIDATION_FAILED' } }] })
+  assert.equal(errorCalls, 1, 'non-throttle GraphQL errors must not be retried')
+})
