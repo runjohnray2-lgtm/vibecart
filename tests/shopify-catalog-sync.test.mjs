@@ -421,6 +421,35 @@ test('direct sync omits a whole family with cross-resource or malformed Shopify 
     'valid ProductVariant GIDs remain supported')
 })
 
+test('conflicting REST and Admin identities fail atomically instead of mispricing another Shopify item', async () => {
+  const product = gqlProduct(941, 'SYNTHETIC trusted', [[9411, 'One', 'GOOD', '10.00']])
+  const base = applyProducts(createSnapshot('USD'), [product]).snapshot
+  const before = toCatalogFeed(base)
+  const dual = {
+    ...product, admin_graphql_api_id: P(941), id: 941,
+    variants: {
+      ...product.variants,
+      nodes: product.variants.nodes.map(variant => ({
+        ...variant, admin_graphql_api_id: V(9411), id: 9411,
+      })),
+    },
+  }
+  assert.equal(applyProducts(base, [dual]).upserted, 1, 'matching REST and GID representations remain valid')
+  const badProduct = { ...dual, id: 942 }
+  const badVariant = {
+    ...dual,
+    variants: { ...dual.variants, nodes: [{ ...dual.variants.nodes[0], id: 9412 }] },
+  }
+  for (const [raw, resource] of [[badProduct, 'Product'], [badVariant, 'ProductVariant']]) {
+    assert.throws(() => applyProducts(base, [raw]), new RegExp('conflicting Shopify ' + resource + ' ids'))
+    await assert.rejects(() => syncShopifyCatalog({
+      ...OPTS, base,
+      fetchPage: async () => ({ products: [raw], pageInfo: { hasNextPage: false, endCursor: null } }),
+    }), new RegExp('conflicting Shopify ' + resource + ' ids'))
+    assert.deepEqual(toCatalogFeed(base), before, 'rejected update cannot mutate the trusted snapshot')
+  }
+})
+
 test('currency must be verified, never assumed', async () => {
   const fetchPage = async () => page2
   await assert.rejects(() => syncShopifyCatalog({ shopCurrencyCode: 'EUR', expectedCurrencyCode: 'USD', fetchPage }), /does not match/)
