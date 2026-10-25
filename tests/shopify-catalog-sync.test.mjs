@@ -75,6 +75,34 @@ test('feed carries only catalog-contract fields; identifiers stay in the server-
   assert.equal(index.get('nope'), undefined)
 })
 
+test('trusted snapshot rejects catalog-to-Shopify variant identity mismatch before feed or order index', async () => {
+  const source = gqlProduct(903, 'SYNTHETIC identity', [[9031, 'Small', 'SKU-9031', '10.00']])
+  const trusted = applyProducts(createSnapshot('USD'), [source]).snapshot
+  const originalFeed = toCatalogFeed(trusted)
+  const [[key, variants]] = [...trusted.products]
+  const poisoned = new Map(trusted.products)
+  poisoned.set(key, [{
+    ...variants[0],
+    shopify: { ...variants[0].shopify, variantId: V(9032) },
+  }])
+  const corrupted = { currencyCode: trusted.currencyCode, products: poisoned }
+
+  assert.throws(() => toCatalogFeed(corrupted), /catalog id and variant id mismatch/)
+  assert.throws(() => buildVariantIndex(corrupted), /catalog id and variant id mismatch/)
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS, base: corrupted,
+    fetchPage: async () => ({ products: [], pageInfo: { hasNextPage: false, endCursor: null } }),
+  }), /catalog id and variant id mismatch/)
+  assert.deepEqual(toCatalogFeed(trusted), originalFeed, 'original trusted snapshot remains unchanged')
+
+  // Numeric REST and Admin GID forms are aliases of the SAME variant and are valid.
+  const aliases = new Map(trusted.products)
+  aliases.set(key, [{ ...variants[0], id: '9031' }])
+  const aliasSnapshot = { currencyCode: trusted.currencyCode, products: aliases }
+  assert.equal(toCatalogFeed(aliasSnapshot).products[0].id, '9031')
+  assert.equal(buildVariantIndex(aliasSnapshot).get('9031').variantId, V(9031))
+})
+
 test('cross-product variant collision fails closed in index and atomic sync', async () => {
   const first = gqlProduct(501, 'SYNTHETIC Alpha', [[777, 'Red', 'ALPHA', '65.99']])
   const second = gqlProduct(502, 'SYNTHETIC Beta', [[777, 'Amber', 'BETA', '70.00']])
