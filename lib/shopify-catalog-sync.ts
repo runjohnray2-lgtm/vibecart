@@ -253,25 +253,25 @@ export function applyProducts(
       const connection = entry.variants
       const graphqlConnection = connection !== null && typeof connection === 'object' && !Array.isArray(connection)
       if (graphqlConnection || 'variantsCount' in entry) {
-      const reported = entry.variantsCount
-      const entries = Array.isArray(connection) ? connection
-        : connection && typeof connection === 'object' && !Array.isArray(connection)
-          ? (connection as Record<string, unknown>).nodes ?? (connection as Record<string, unknown>).edges
-          : undefined
-      const count = reported && typeof reported === 'object' && !Array.isArray(reported)
-        ? reported as Record<string, unknown> : null
-      if (!count || count.precision !== 'EXACT' ||
-          typeof count.count !== 'number' || !Number.isSafeInteger(count.count) ||
-          count.count < 0 || !Array.isArray(entries) || entries.length !== count.count) {
-        const id = rawProductId(raw)
-        skipped.push({
-          ...(id ? { productId: id } : {}),
-          reason: 'Shopify exact variantsCount missing, approximate or mismatched; entire family omitted',
-        })
-        const key = productKey(raw)
-        if (key && next.delete(key)) removed += 1
-        continue
-      }
+        const reported = entry.variantsCount
+        const entries = Array.isArray(connection) ? connection
+          : connection && typeof connection === 'object' && !Array.isArray(connection)
+            ? (connection as Record<string, unknown>).nodes ?? (connection as Record<string, unknown>).edges
+            : undefined
+        const count = reported && typeof reported === 'object' && !Array.isArray(reported)
+          ? reported as Record<string, unknown> : null
+        if (!count || count.precision !== 'EXACT' ||
+            typeof count.count !== 'number' || !Number.isSafeInteger(count.count) ||
+            count.count < 0 || !Array.isArray(entries) || entries.length !== count.count) {
+          const id = rawProductId(raw)
+          skipped.push({
+            ...(id ? { productId: id } : {}),
+            reason: 'Shopify exact variantsCount missing, approximate or mismatched; entire family omitted',
+          })
+          const key = productKey(raw)
+          if (key && next.delete(key)) removed += 1
+          continue
+        }
       }
     }
     const mapped = mapShopifyProducts([raw], {
