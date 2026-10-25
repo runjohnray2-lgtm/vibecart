@@ -148,6 +148,25 @@ test('Money prices without a currencyCode fail closed instead of inheriting USD'
   for (const skipped of result.skipped) assert.match(skipped.reason, /price currencyCode is missing/)
 })
 
+test('conflicting dual Shopify price fields fail closed instead of silently choosing one', () => {
+  const product = {
+    id: 992, title: 'SYNTHETIC dual-price check',
+    variants: [
+      { id: 9921, price: '10.00', priceV2: { amount: '10.00', currencyCode: 'USD' } },
+      { id: 9922, price: '10.00', priceV2: { amount: '11.00', currencyCode: 'USD' } },
+      { id: 9923, price: '10.00', priceV2: { amount: '10.00', currencyCode: 'EUR' } },
+      { id: 9924, price: { amount: '9.50', currencyCode: 'USD' }, priceV2: { amount: '9.50', currencyCode: 'USD' } },
+      { id: 9925, price: '10.00', priceV2: { amount: '10.000', currencyCode: 'USD' } },
+    ],
+  }
+  const mapped = mapShopifyProducts([product], USD)
+  assert.deepEqual(mapped.products.map(p => p.id), ['9921', '9924', '9925'])
+  assert.deepEqual(mapped.products.map(p => p.priceCents), [1000, 950, 1000])
+  assert.equal(mapped.skipped.length, 2)
+  assert.match(mapped.skipped.find(p => p.variantId === '9922').reason, /conflicting Shopify price/)
+  assert.match(mapped.skipped.find(p => p.variantId === '9923').reason, /currency EUR does not match expected USD/)
+})
+
 test('currencyCode is required and must use two minor-unit digits', () => {
   assert.throws(() => mapShopifyProducts([], {}), /currencyCode is required/)
   assert.throws(() => mapShopifyProducts([]), /currencyCode is required/)
