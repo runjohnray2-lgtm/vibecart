@@ -54,13 +54,13 @@ const ucpTool = (name, key = null) => ({
 })
 const replies = [
   validUcp,
-  rpc(1, { serverInfo: { name: 'vibecart' } }),
+  rpc(1, { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'vibecart' } }),
   rpc(2, { tools: [
     genericTool('vibecart.list_products'),
     genericTool('vibecart.get_product', true),
     { name: 'vibecart.create_checkout' },
   ] }),
-  rpc(1, { serverInfo: { name: 'vibecart-ucp' } }),
+  rpc(1, { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'vibecart-ucp' } }),
   rpc(2, { tools: [
     ucpTool('search_catalog'),
     ucpTool('lookup_catalog', 'ids'),
@@ -194,5 +194,26 @@ test('probe rejects UCP tools that cannot negotiate agent profile or construct c
     assert.equal(s.requests.length, 5, 'probe must not invoke tools/call')
     assert.ok(s.requests.every(request => !request.options.body ||
       JSON.parse(request.options.body).method !== 'tools/call'))
+  }
+})
+
+test('probe rejects incompatible MCP initialize handshakes before listing more tools', async () => {
+  for (const { index, change } of [
+    { index: 1, change: init => { delete init.protocolVersion } },
+    { index: 1, change: init => { init.protocolVersion = '2024-11-05' } },
+    { index: 1, change: init => { delete init.capabilities.tools } },
+    { index: 3, change: init => { init.protocolVersion = '2024-11-05' } },
+    { index: 3, change: init => { init.capabilities.tools = null } },
+  ]) {
+    const response = structuredClone(replies[index])
+    change(response.result)
+    const s = stub({ [index]: response })
+    await assert.rejects(
+      probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl: s.fetchImpl }),
+      /incompatible protocol or tools capability/,
+    )
+    assert.equal(s.requests.length, index + 1)
+    assert.ok(s.requests.every(request => !request.options.body ||
+      ['initialize', 'tools/list'].includes(JSON.parse(request.options.body).method)))
   }
 })
