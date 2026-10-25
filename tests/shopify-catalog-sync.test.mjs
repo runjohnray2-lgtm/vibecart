@@ -681,6 +681,9 @@ test('direct Shopify variantsCount rejects truncated or approximate families wit
     withCount(-1),
     { ...original, variantsCount: null },
     { ...original, variantsCount: undefined },
+    // A false terminal GraphQL connection without an independent count must
+    // not silently publish an incomplete family.
+    (() => { const { variantsCount, ...withoutCount } = original; return withoutCount })(),
   ]
   for (const product of malformed) {
     const applied = applyProducts(base, [product])
@@ -702,6 +705,9 @@ test('direct Shopify variantsCount rejects truncated or approximate families wit
   const complete = applyProducts(base, [withCount(1)])
   assert.equal(complete.upserted, 1)
   assert.deepEqual(toCatalogFeed(complete.snapshot), before)
-  // Older REST/direct fixtures without a count remain supported.
-  assert.equal(applyProducts(createSnapshot('USD'), [original]).upserted, 1)
+  // Legacy REST arrays have no GraphQL pageInfo and remain supported.
+  const { variantsCount, ...restLike } = original
+  assert.equal(applyProducts(createSnapshot('USD'), [{
+    ...restLike, variants: original.variants.nodes,
+  }]).upserted, 1)
 })
