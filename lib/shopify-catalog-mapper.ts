@@ -265,9 +265,19 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
         skip(productId, variantId, 'variant title is longer than ' + LIMITS.variant)
         continue
       }
-      const rawSku = text(variant.sku)
-      const sku = rawSku && rawSku.length <= LIMITS.sku ? rawSku : undefined
-      if (rawSku && !sku) result.warnings.push('variant ' + variantId + ' sku is longer than ' + LIMITS.sku + ' and was dropped')
+      // A SKU is a merchant identity, not display copy. Preserve its exact
+      // bytes (including meaningful spaces) or reject the variant; silently
+      // trimming/dropping an unsupported SKU breaks downstream order mapping.
+      const rawSku = variant.sku
+      if (rawSku !== undefined && rawSku !== null && typeof rawSku !== 'string') {
+        skip(productId, variantId, 'variant sku is not a string')
+        continue
+      }
+      const sku = typeof rawSku === 'string' && rawSku.trim() ? rawSku : undefined
+      if (sku && sku.length > LIMITS.sku) {
+        skip(productId, variantId, 'variant sku is longer than ' + LIMITS.sku)
+        continue
+      }
 
       const rawPolicy = text(variant.inventoryPolicy ?? variant.inventory_policy)
       const policyUpper = rawPolicy ? rawPolicy.toUpperCase() : undefined
