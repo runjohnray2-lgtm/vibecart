@@ -483,6 +483,38 @@ test('conflicting REST and Admin identities fail atomically instead of mispricin
   }
 })
 
+test('unlabelled Shopify Money prices omit the entire family without corrupting the trusted snapshot', async () => {
+  const trusted = gqlProduct(992, 'SYNTHETIC trusted', [[9921, 'Red', 'RED', '10.00']])
+  const base = applyProducts(createSnapshot('USD'), [trusted]).snapshot
+  const before = toCatalogFeed(base)
+  const changed = gqlProduct(992, 'SYNTHETIC changed', [
+    [9921, 'Red', 'RED', '11.00'],
+    [9922, 'Amber', 'AMBER', '12.00'],
+  ])
+  const poisoned = {
+    ...changed,
+    variants: {
+      ...changed.variants,
+      nodes: changed.variants.nodes.map((variant, i) =>
+        i === 1 ? { ...variant, price: { amount: '12.00' } } : variant),
+    },
+  }
+  const direct = applyProducts(base, [poisoned])
+  assert.equal(direct.upserted, 0)
+  assert.equal(direct.removed, 1)
+  assert.equal(toCatalogFeed(direct.snapshot).products.length, 0)
+  assert.ok(direct.skipped.some(item => /price currencyCode is missing/.test(item.reason)))
+  assert.ok(direct.skipped.some(item => /entire family omitted/.test(item.reason)))
+  const synced = await syncShopifyCatalog({
+    ...OPTS, base,
+    fetchPage: async () => ({
+      products: [poisoned], pageInfo: { hasNextPage: false, endCursor: null },
+    }),
+  })
+  assert.equal(toCatalogFeed(synced.snapshot).products.length, 0)
+  assert.deepEqual(toCatalogFeed(base), before, 'last known-good snapshot must not be mutated')
+})
+
 test('currency must be verified, never assumed', async () => {
   const fetchPage = async () => page2
   await assert.rejects(() => syncShopifyCatalog({ shopCurrencyCode: 'EUR', expectedCurrencyCode: 'USD', fetchPage }), /does not match/)
