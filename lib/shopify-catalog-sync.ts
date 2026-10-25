@@ -270,7 +270,7 @@ export function applyProductDeleted(
 
 /** A REST numeric id and its Admin ProductVariant GID are the same Shopify identity. */
 function canonicalVariantKey(id: string): string {
-  const match = /^(?:([1-9]\\d*)|gid:\/\/shopify\/ProductVariant\/([1-9]\\d*))$/.exec(id)
+  const match = /^(?:([1-9]\d*)|gid:\/\/shopify\/ProductVariant\/([1-9]\d*))$/.exec(id)
   if (!match) throw new Error('invalid Shopify variant id in snapshot: ' + id)
   return match[1] ?? match[2]!
 }
