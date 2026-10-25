@@ -31,7 +31,9 @@ export function validatePublicTarget(raw) {
 export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = fetch } = {}) {
   const origin = validatePublicTarget(baseUrl)
   const operations = []
-  async function readJson(relative, method = 'GET', rpcMethod = null) {
+  let paginationRequestId = 2
+  async function readJson(relative, method = 'GET', rpcMethod = null, rpcParams = null) {
+    const rpcId = rpcMethod === 'initialize' ? 1 : rpcParams ? ++paginationRequestId : 2
     if (method === 'POST' && !['initialize', 'tools/list'].includes(rpcMethod)) {
       throw new Error('Read-only probe forbids this RPC method')
     }
@@ -42,8 +44,8 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
       signal: AbortSignal.timeout(8000),
       headers: { accept: 'application/json', ...(rpcMethod ? { 'content-type': 'application/json' } : {}) },
       ...(rpcMethod ? { body: JSON.stringify({
-        jsonrpc: '2.0', id: rpcMethod === 'initialize' ? 1 : 2, method: rpcMethod,
-        ...(rpcMethod === 'initialize' ? { params: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: 'vibecart-readonly-probe', version: '1.0.0' } } } : {}),
+        jsonrpc: '2.0', id: rpcId, method: rpcMethod,
+        ...(rpcMethod === 'initialize' ? { params: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: 'vibecart-readonly-probe', version: '1.0.0' } } } : rpcParams ? { params: rpcParams } : {}),
       }) } : {}),
     })
     if (!response?.ok) throw new Error(relative + ' ' + (rpcMethod || 'GET') + ' returned HTTP ' + (response?.status ?? 'unavailable'))
@@ -54,10 +56,32 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
     if (body.length > 256 * 1024) throw new Error(relative + ' response exceeded probe limit')
     let parsed
     try { parsed = JSON.parse(body) } catch { throw new Error(relative + ' returned malformed JSON') }
-    if (rpcMethod && (parsed?.jsonrpc !== '2.0' || parsed?.id !== (rpcMethod === 'initialize' ? 1 : 2) || parsed?.error || !parsed?.result)) {
+    if (rpcMethod && (parsed?.jsonrpc !== '2.0' || parsed?.id !== rpcId || parsed?.error || !parsed?.result)) {
       throw new Error(relative + ' ' + rpcMethod + ' returned invalid JSON-RPC')
     }
     return rpcMethod ? parsed.result : parsed
+  }
+  // MCP tools/list can be paginated. Checking only page one can falsely
+  // claim complete capability discovery (or miss required catalog tools).
+  // Bound traversal and fail closed on malformed, repeated or empty cursors.
+  async function readAllTools(relative) {
+    const tools = []
+    const seenCursors = new Set()
+    let cursor = null
+    for (let page = 0; page < 20; page++) {
+      const result = await readJson(relative, 'POST', 'tools/list', cursor === null ? null : { cursor })
+      if (!Array.isArray(result?.tools)) throw new Error(relative + ' MCP tools/list missing tools')
+      tools.push(...result.tools)
+      if (tools.length > 1000) throw new Error(relative + ' MCP tools/list exceeded tool limit')
+      if (result.nextCursor == null) return { tools }
+      if (typeof result.nextCursor !== 'string' || !result.nextCursor.trim() ||
+          seenCursors.has(result.nextCursor) || result.tools.length === 0) {
+        throw new Error(relative + ' MCP tools/list invalid pagination cursor')
+      }
+      seenCursors.add(result.nextCursor)
+      cursor = result.nextCursor
+    }
+    throw new Error(relative + ' MCP tools/list exceeded page limit')
   }
   const discovery = await readJson('/.well-known/ucp')
   const capabilities = discovery?.ucp?.capabilities
@@ -100,10 +124,10 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
   }
   const genericInit = await readJson('/mcp', 'POST', 'initialize')
   requireInitialize(genericInit, 'vibecart')
-  const genericList = await readJson('/mcp', 'POST', 'tools/list')
+  const genericList = await readAllTools('/mcp')
   const ucpInit = await readJson('/ucp/mcp', 'POST', 'initialize')
   requireInitialize(ucpInit, 'vibecart-ucp')
-  const ucpList = await readJson('/ucp/mcp', 'POST', 'tools/list')
+  const ucpList = await readAllTools('/ucp/mcp')
   const toolsOf = result => {
     if (!Array.isArray(result?.tools)) throw new Error('MCP tools/list missing tools')
     const names = result.tools.map(tool => tool?.name)
