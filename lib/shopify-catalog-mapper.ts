@@ -154,18 +154,29 @@ function describe(product: Json): string {
 }
 
 function variantPriceCents(variant: Json, expectedCurrency: string): number {
-  const raw = variant.price ?? variant.priceV2
-  if (isObject(raw)) {
-    const currency = text(raw.currencyCode)
-    // MoneyV2 prices must carry their own currency. Assuming the shop currency
-    // for an unlabelled Money object can silently misprice a merchant catalog.
-    if (!currency) throw new Error('price currencyCode is missing')
-    if (currency.toUpperCase() !== expectedCurrency) {
-      throw new Error('price currency ' + currency + ' does not match expected ' + expectedCurrency)
+  const parse = (raw: unknown): number => {
+    if (isObject(raw)) {
+      const currency = text(raw.currencyCode)
+      // MoneyV2 prices must carry their own currency. Assuming the shop currency
+      // for an unlabelled Money object can silently misprice a merchant catalog.
+      if (!currency) throw new Error('price currencyCode is missing')
+      if (currency.toUpperCase() !== expectedCurrency) {
+        throw new Error('price currency ' + currency + ' does not match expected ' + expectedCurrency)
+      }
+      return priceToCents(raw.amount)
     }
-    return priceToCents(raw.amount)
+    return priceToCents(raw)
   }
-  return priceToCents(raw)
+  // Mixed REST/GraphQL snapshots can carry both representations. Never silently
+  // prefer one if the other disagrees: the chosen cents could be the wrong price.
+  if (variant.price != null && variant.priceV2 != null) {
+    const cents = parse(variant.price)
+    if (cents !== parse(variant.priceV2)) {
+      throw new Error('conflicting Shopify price and priceV2 amounts')
+    }
+    return cents
+  }
+  return parse(variant.price ?? variant.priceV2)
 }
 
 function productList(input: unknown): unknown[] {
