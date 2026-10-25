@@ -361,13 +361,23 @@ function canonicalVariantKey(id: string): string {
   return match[1] ?? match[2]!
 }
 
+/** A snapshot's family key must identify the same Shopify Product as every variant's owner. */
+function assertSnapshotProductOwnership(familyKey: string, product: ShopifyCatalogProduct): void {
+  const id = product.shopify.productId
+  const match = /^(?:([1-9]\\d*)|gid:\/\/shopify\/Product\/([1-9]\\d*))$/.exec(id)
+  if (!match || (match[1] ?? match[2]) !== familyKey) {
+    throw new Error('Shopify snapshot product id mismatch for catalog variant: ' + product.id)
+  }
+}
+
 /** Deterministic feed for VIBECART_CATALOG_URL: only fields the catalog parser accepts, sorted by id. */
 export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED_PRODUCTS): { products: VibeProduct[] } {
   const seen = new Set<string>()
   const seenVariantKeys = new Set<string>()
   const products: VibeProduct[] = []
-  for (const variants of snapshot.products.values()) {
+  for (const [familyKey, variants] of snapshot.products) {
     for (const p of variants) {
+      assertSnapshotProductOwnership(familyKey, p)
       if (seen.has(p.id)) throw new Error('duplicate catalog id in snapshot: ' + p.id)
       seen.add(p.id)
       const key = canonicalVariantKey(p.shopify.variantId)
@@ -398,8 +408,9 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
 export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string, ShopifyVariantRef> {
   const index = new Map<string, ShopifyVariantRef>()
   const seenVariantKeys = new Set<string>()
-  for (const variants of snapshot.products.values()) {
+  for (const [familyKey, variants] of snapshot.products) {
     for (const p of variants) {
+      assertSnapshotProductOwnership(familyKey, p)
       if (index.has(p.id)) throw new Error('duplicate Shopify variant id in snapshot: ' + p.id)
       const key = canonicalVariantKey(p.shopify.variantId)
       // A catalog id must identify the SAME real Shopify variant as the
