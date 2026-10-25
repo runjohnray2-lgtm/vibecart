@@ -123,10 +123,10 @@ function assertMatchingIds(raw: Record<string, unknown>, resource: 'Product' | '
   const prefix = 'gid://shopify/' + resource + '/'
   const key = (id: string | undefined): string | undefined => {
     if (!id) return undefined
-    if (/^[1-9]\\d*$/.test(id)) return id
+    if (/^[1-9]\d*$/.test(id)) return id
     if (!id.startsWith(prefix)) return undefined
     const tail = id.slice(prefix.length)
-    return /^[1-9]\\d*$/.test(tail) ? tail : undefined
+    return /^[1-9]\d*$/.test(tail) ? tail : undefined
   }
   const first = key(preferred)
   const second = key(other)
