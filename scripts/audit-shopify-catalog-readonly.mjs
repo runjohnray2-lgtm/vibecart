@@ -78,7 +78,7 @@ export function createReadOnlyShopifyTransport({
       const retry = async () => {
         if (attempt === 2) return false
         const raw = response?.headers?.get('retry-after')
-        const seconds = typeof raw === 'string' && /^\\d+(?:\\.\\d+)?$/.test(raw.trim())
+        const seconds = typeof raw === 'string' && /^\d+(?:\.\d+)?$/.test(raw.trim())
           ? Number(raw.trim()) : null
         if (seconds !== null && (!Number.isFinite(seconds) || seconds > 2)) {
           throw new Error('Shopify audit throttled; Retry-After exceeds safe wait limit')
