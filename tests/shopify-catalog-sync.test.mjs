@@ -665,3 +665,43 @@ test('Shopify SKUs remain exact and unsupported SKUs never silently enter a part
       'invalid SKU must not mutate the last-known-good snapshot')
   }
 })
+
+test('direct Shopify variantsCount rejects truncated or approximate families without corrupting the trusted snapshot', async () => {
+  const original = gqlProduct(760, 'SYNTHETIC complete', [[7601, 'One', 'SKU-7601', '19.99']])
+  const base = applyProducts(createSnapshot('USD'), [original]).snapshot
+  const before = toCatalogFeed(base)
+  const withCount = (count, precision = 'EXACT') => ({
+    ...original,
+    variantsCount: { count, precision },
+  })
+  const malformed = [
+    withCount(2),                 // A false terminal pageInfo cannot hide missing variants.
+    withCount(1, 'AT_LEAST'),     // An approximate count is not completeness proof.
+    withCount('1'),              // No string coercion.
+    withCount(-1),
+    { ...original, variantsCount: null },
+    { ...original, variantsCount: undefined },
+  ]
+  for (const product of malformed) {
+    const applied = applyProducts(base, [product])
+    assert.equal(applied.removed, 1)
+    assert.equal(applied.upserted, 0)
+    assert.match(applied.skipped[0].reason, /exact variantsCount missing, approximate or mismatched/)
+    assert.deepEqual(toCatalogFeed(applied.snapshot).products, [])
+
+    const synced = await syncShopifyCatalog({
+      ...OPTS, base,
+      fetchPage: async () => ({
+        products: [product], pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    })
+    assert.deepEqual(toCatalogFeed(synced.snapshot).products, [])
+    assert.deepEqual(toCatalogFeed(base), before, 'failed family must not mutate last good snapshot')
+  }
+
+  const complete = applyProducts(base, [withCount(1)])
+  assert.equal(complete.upserted, 1)
+  assert.deepEqual(toCatalogFeed(complete.snapshot), before)
+  // Older REST/direct fixtures without a count remain supported.
+  assert.equal(applyProducts(createSnapshot('USD'), [original]).upserted, 1)
+})
