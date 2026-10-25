@@ -371,6 +371,12 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
       if (seen.has(p.id)) throw new Error('duplicate catalog id in snapshot: ' + p.id)
       seen.add(p.id)
       const key = canonicalVariantKey(p.shopify.variantId)
+      // A catalog id must identify the SAME real Shopify variant as the
+      // server-only lookup. A mismatched persisted snapshot could otherwise
+      // display one variant's price while routing an order to another.
+      if (canonicalVariantKey(p.id) !== key) {
+        throw new Error('Shopify catalog id and variant id mismatch: ' + p.id)
+      }
       if (seenVariantKeys.has(key)) throw new Error('duplicate Shopify variant id in snapshot: ' + key)
       seenVariantKeys.add(key)
       products.push({
@@ -396,6 +402,12 @@ export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string,
     for (const p of variants) {
       if (index.has(p.id)) throw new Error('duplicate Shopify variant id in snapshot: ' + p.id)
       const key = canonicalVariantKey(p.shopify.variantId)
+      // A catalog id must identify the SAME real Shopify variant as the
+      // server-only lookup. A mismatched persisted snapshot could otherwise
+      // display one variant's price while routing an order to another.
+      if (canonicalVariantKey(p.id) !== key) {
+        throw new Error('Shopify catalog id and variant id mismatch: ' + p.id)
+      }
       if (seenVariantKeys.has(key)) throw new Error('duplicate Shopify variant id in snapshot: ' + key)
       seenVariantKeys.add(key)
       if (p.shopify.inventoryPolicy !== 'DENY' && p.shopify.inventoryPolicy !== 'CONTINUE') {
