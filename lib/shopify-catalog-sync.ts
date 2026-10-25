@@ -208,6 +208,22 @@ export function applyProducts(
       if (next.delete(key)) removed += 1
       continue
     }
+    // Direct sync callers can also bypass the GraphQL variant-page identity guard.
+    // Only REST numeric variant ids or exact ProductVariant GIDs can enter the
+    // trusted feed. A Product/Collection GID with the same numeric suffix must
+    // never be treated as a purchasable Shopify variant.
+    const invalidVariant = mapped.products.find(product =>
+      !/^(?:[1-9]\d*|gid:\/\/shopify\/ProductVariant\/[1-9]\d*)$/.test(product.shopify.variantId),
+    )
+    if (invalidVariant) {
+      skipped.push({
+        ...(rawProductId(raw) ? { productId: rawProductId(raw) } : {}),
+        variantId: invalidVariant.shopify.variantId,
+        reason: 'invalid Shopify ProductVariant id; entire family omitted',
+      })
+      if (next.delete(key)) removed += 1
+      continue
+    }
     // Direct sync callers can bypass the GraphQL adapter. Require an actual
     // Shopify DENY/CONTINUE policy for every variant before publishing a family.
     // Zero quantity remains allowed for either policy; checkout authorization is separate.
