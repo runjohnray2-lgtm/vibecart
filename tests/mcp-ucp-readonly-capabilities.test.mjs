@@ -33,11 +33,21 @@ const ucpTool = (name, key = null) => ({
   inputSchema: {
     type: 'object', required: ['meta', 'catalog'],
     properties: {
-      meta: { type: 'object', required: ['ucp-agent'], properties: { 'ucp-agent': { type: 'object' } } },
+      meta: {
+        type: 'object', required: ['ucp-agent'],
+        properties: { 'ucp-agent': {
+          type: 'object', required: ['profile'],
+          properties: { profile: { type: 'string', format: 'uri' } },
+        } },
+      },
       catalog: {
         type: 'object',
         ...(key ? { required: [key] } : {}),
-        properties: key ? { [key]: { type: key === 'ids' ? 'array' : 'string' } } : {},
+        properties: key
+          ? { [key]: key === 'ids'
+            ? { type: 'array', minItems: 1, items: { type: 'string' } }
+            : { type: 'string', minLength: 1 } }
+          : { query: { type: 'string' } },
       },
     },
   },
@@ -159,4 +169,30 @@ test('probe rejects UCP lookup tools with incompatible input schemas', async () 
   ] }) })
   await assert.rejects(probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl: s.fetchImpl }), /incompatible catalog lookup schema/)
   assert.equal(s.requests.length, 5)
+})
+
+test('probe rejects UCP tools that cannot negotiate agent profile or construct catalog requests', async () => {
+  const invalid = [
+    { name: 'search_catalog', mutate: tool => { delete tool.inputSchema.properties.catalog.properties.query }, error: /catalog search schema/ },
+    { name: 'search_catalog', mutate: tool => { delete tool.inputSchema.properties.meta.properties['ucp-agent'].required }, error: /meta\/catalog schema/ },
+    { name: 'lookup_catalog', mutate: tool => { tool.inputSchema.properties.catalog.properties.ids.items.type = 'integer' }, error: /catalog lookup schema/ },
+    { name: 'lookup_catalog', mutate: tool => { tool.inputSchema.properties.catalog.properties.ids.minItems = 0 }, error: /catalog lookup schema/ },
+    { name: 'get_product', mutate: tool => { tool.inputSchema.properties.catalog.properties.id.minLength = 0 }, error: /catalog lookup schema/ },
+  ]
+  for (const { name, mutate, error } of invalid) {
+    const tools = [
+      ucpTool('search_catalog'),
+      ucpTool('lookup_catalog', 'ids'),
+      ucpTool('get_product', 'id'),
+    ]
+    mutate(tools.find(tool => tool.name === name))
+    const s = stub({ 4: rpc(2, { tools }) })
+    await assert.rejects(
+      probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl: s.fetchImpl }),
+      error,
+    )
+    assert.equal(s.requests.length, 5, 'probe must not invoke tools/call')
+    assert.ok(s.requests.every(request => !request.options.body ||
+      JSON.parse(request.options.body).method !== 'tools/call'))
+  }
 })
