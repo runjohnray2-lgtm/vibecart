@@ -25,6 +25,7 @@ const MODULE_PATHS = [
 export function createReadOnlyShopifyTransport({
   shopDomain, token, apiVersion = '2026-10', allowedDocuments,
   fetchImpl = fetch, maxRequests = 120,
+  sleepImpl = ms => new Promise(resolve => setTimeout(resolve, ms)),
 }) {
   if (typeof shopDomain !== 'string' ||
       !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shopDomain)) {
@@ -43,6 +44,7 @@ export function createReadOnlyShopifyTransport({
   if (!Number.isSafeInteger(maxRequests) || maxRequests < 1 || maxRequests > 120) {
     throw new Error('Shopify audit request limit must be between 1 and 120')
   }
+  if (typeof sleepImpl !== 'function') throw new Error('Shopify audit requires a bounded retry timer')
   // Keep the approved operations immutable for this transport. A caller may
   // otherwise add a mutation to the original Set after construction and have
   // its Admin token sent with a write-capable GraphQL document.
@@ -56,31 +58,61 @@ export function createReadOnlyShopifyTransport({
     if (!approvedDocuments.has(document)) {
       throw new Error('Shopify audit refused an unapproved GraphQL operation')
     }
-    if (++requests > maxRequests) throw new Error('Shopify audit request limit reached')
-    const response = await fetchImpl(endpoint, {
-      method: 'POST',
-      redirect: 'manual',
-      signal: AbortSignal.timeout(8000),
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-        'x-shopify-access-token': token,
-      },
-      body: JSON.stringify({ query: document, variables }),
-    })
-    if (!response || !response.ok) {
-      throw new Error('Shopify audit HTTP ' + (response?.status ?? 'unavailable'))
+    // Shopify may throttle an otherwise valid read-only Admin query with HTTP
+    // 429 or a GraphQL THROTTLED error. Retry at most twice, never outside the
+    // approved query allowlist, and charge EVERY attempt against maxRequests.
+    // A long Retry-After is not shortened: stop rather than hammering Shopify.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (++requests > maxRequests) throw new Error('Shopify audit request limit reached')
+      const response = await fetchImpl(endpoint, {
+        method: 'POST',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(8000),
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+          'x-shopify-access-token': token,
+        },
+        body: JSON.stringify({ query: document, variables }),
+      })
+      const retry = async () => {
+        if (attempt === 2) return false
+        const raw = response?.headers?.get('retry-after')
+        const seconds = typeof raw === 'string' && /^\\d+(?:\\.\\d+)?$/.test(raw.trim())
+          ? Number(raw.trim()) : null
+        if (seconds !== null && (!Number.isFinite(seconds) || seconds > 2)) {
+          throw new Error('Shopify audit throttled; Retry-After exceeds safe wait limit')
+        }
+        const waitMs = seconds === null ? 250 * (2 ** attempt) : Math.ceil(seconds * 1000)
+        await sleepImpl(waitMs)
+        return true
+      }
+      if (response?.status === 429) {
+        if (await retry()) continue
+        throw new Error('Shopify audit HTTP 429; bounded retries exhausted')
+      }
+      if (!response || !response.ok) {
+        throw new Error('Shopify audit HTTP ' + (response?.status ?? 'unavailable'))
+      }
+      if (!(response.headers.get('content-type') || '').toLowerCase().includes('application/json')) {
+        throw new Error('Shopify audit expected JSON')
+      }
+      const body = await response.text()
+      if (body.length > 1024 * 1024) throw new Error('Shopify audit response too large')
+      let parsed
+      try {
+        parsed = JSON.parse(body)
+      } catch {
+        throw new Error('Shopify audit received malformed JSON')
+      }
+      if (Array.isArray(parsed?.errors) && parsed.errors.length > 0 &&
+          parsed.errors.every(error => error?.extensions?.code === 'THROTTLED')) {
+        if (await retry()) continue
+        throw new Error('Shopify audit GraphQL throttled; bounded retries exhausted')
+      }
+      return parsed
     }
-    if (!(response.headers.get('content-type') || '').toLowerCase().includes('application/json')) {
-      throw new Error('Shopify audit expected JSON')
-    }
-    const body = await response.text()
-    if (body.length > 1024 * 1024) throw new Error('Shopify audit response too large')
-    try {
-      return JSON.parse(body)
-    } catch {
-      throw new Error('Shopify audit received malformed JSON')
-    }
+    throw new Error('Shopify audit retries exhausted')
   }
 }
 
