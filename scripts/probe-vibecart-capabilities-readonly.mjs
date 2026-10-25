@@ -16,6 +16,56 @@ const UCP_VERSION = '2026-04-08'
 const MCP_PROTOCOL_VERSION = '2025-06-18'
 const REQUIRED_CATALOG_TOOLS = ['search_catalog', 'lookup_catalog', 'get_product']
 
+const MAX_PROBE_BODY_BYTES = 256 * 1024
+
+/**
+ * Bound actual response bytes, not JavaScript string length. A missing or
+ * incorrect Content-Length must not allow a public endpoint to stream an
+ * unbounded body into an operator's read-only capability probe.
+ */
+export async function readBoundedProbeBody(response, relative) {
+  const declared = response.headers?.get('content-length')
+  if (typeof declared === 'string' && /^\d+$/.test(declared.trim()) &&
+      Number(declared) > MAX_PROBE_BODY_BYTES) {
+    throw new Error(relative + ' response exceeded probe limit')
+  }
+  if (response.body && typeof response.body.getReader === 'function') {
+    const reader = response.body.getReader()
+    const chunks = []
+    let bytes = 0
+    let complete = false
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (!(value instanceof Uint8Array)) throw new Error(relative + ' returned invalid response bytes')
+        bytes += value.byteLength
+        if (bytes > MAX_PROBE_BODY_BYTES) throw new Error(relative + ' response exceeded probe limit')
+        chunks.push(value)
+      }
+      complete = true
+    } finally {
+      if (!complete && typeof reader.cancel === 'function') {
+        try { await reader.cancel() } catch { /* preserve the original read error */ }
+      }
+      if (typeof reader.releaseLock === 'function') reader.releaseLock()
+    }
+    const buffer = new Uint8Array(bytes)
+    let offset = 0
+    for (const chunk of chunks) {
+      buffer.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer)
+  }
+  // Minimal test transports may expose text() without a streaming body.
+  const body = await response.text()
+  if (new TextEncoder().encode(body).byteLength > MAX_PROBE_BODY_BYTES) {
+    throw new Error(relative + ' response exceeded probe limit')
+  }
+  return body
+}
+
 export function validatePublicTarget(raw) {
   if (typeof raw !== 'string' || !raw.trim()) throw new Error('VIBECART_READONLY_BASE_URL is required')
   let url
@@ -52,8 +102,7 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
     if (!(response.headers?.get('content-type') || '').toLowerCase().includes('application/json')) {
       throw new Error(relative + ' did not return JSON')
     }
-    const body = await response.text()
-    if (body.length > 256 * 1024) throw new Error(relative + ' response exceeded probe limit')
+    const body = await readBoundedProbeBody(response, relative)
     let parsed
     try { parsed = JSON.parse(body) } catch { throw new Error(relative + ' returned malformed JSON') }
     if (rpcMethod && (parsed?.jsonrpc !== '2.0' || parsed?.id !== rpcId || parsed?.error || !parsed?.result)) {
