@@ -91,6 +91,33 @@ test('cross-product variant collision fails closed in index and atomic sync', as
   assert.equal(base.products.size, 0, 'failed sync must not mutate the previous snapshot')
 })
 
+test('REST and Admin GID aliases of one variant cannot appear as two catalog entries', async () => {
+  const first = gqlProduct(801, 'SYNTHETIC first', [[888, 'Red', 'FIRST', '65.99']])
+  const second = gqlProduct(802, 'SYNTHETIC second', [[888, 'Amber', 'SECOND', '70.00']])
+  const restAlias = {
+    ...second,
+    variants: {
+      ...second.variants,
+      nodes: second.variants.nodes.map(variant => ({ ...variant, id: '888' })),
+    },
+  }
+  const base = createSnapshot('USD')
+  const applied = applyProducts(base, [first, restAlias])
+  assert.equal(applied.upserted, 2, 'both representations pass the individual Shopify ID checks')
+  assert.throws(() => toCatalogFeed(applied.snapshot), /duplicate Shopify variant id in snapshot/)
+  assert.throws(() => buildVariantIndex(applied.snapshot), /duplicate Shopify variant id in snapshot/)
+
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS,
+    base,
+    fetchPage: async () => ({
+      products: [first, restAlias],
+      pageInfo: { hasNextPage: false, endCursor: null },
+    }),
+  }), /duplicate Shopify variant id in snapshot/)
+  assert.equal(base.products.size, 0, 'failed sync must not mutate the last known-good snapshot')
+})
+
 test('duplicate product identities within or across pages fail closed without changing the last good snapshot', async () => {
   const first = gqlProduct(601, 'First', [[6101, 'Red', 'FIRST', '65.99']])
   const repeated = gqlProduct(601, 'Second', [[6102, 'Amber', 'SECOND', '70.00']], { id: 601 })
