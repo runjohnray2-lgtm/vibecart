@@ -130,6 +130,24 @@ test('a different shop currency is honored but embedded currencies are never con
   assert.equal(mapped.products[0].priceCents, 1000)
 })
 
+test('Money prices without a currencyCode fail closed instead of inheriting USD', () => {
+  const product = {
+    id: 991, title: 'SYNTHETIC currency check',
+    variants: [
+      { id: 9911, price: { amount: '10.00' } },
+      { id: 9912, priceV2: { amount: '11.00', currencyCode: ' ' } },
+      { id: 9913, priceV2: { amount: '12.00', currencyCode: 42 } },
+      { id: 9914, priceV2: { amount: '13.00', currencyCode: 'USD' } },
+      { id: 9915, price: '14.00' },
+    ],
+  }
+  const result = mapShopifyProducts([product], USD)
+  assert.deepEqual(result.products.map(p => p.id), ['9914', '9915'])
+  assert.deepEqual(result.products.map(p => p.priceCents), [1300, 1400])
+  assert.equal(result.skipped.length, 3)
+  for (const skipped of result.skipped) assert.match(skipped.reason, /price currencyCode is missing/)
+})
+
 test('currencyCode is required and must use two minor-unit digits', () => {
   assert.throws(() => mapShopifyProducts([], {}), /currencyCode is required/)
   assert.throws(() => mapShopifyProducts([]), /currencyCode is required/)
