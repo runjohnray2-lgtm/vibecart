@@ -364,7 +364,7 @@ function canonicalVariantKey(id: string): string {
 /** A snapshot's family key must identify the same Shopify Product as every variant's owner. */
 function assertSnapshotProductOwnership(familyKey: string, product: ShopifyCatalogProduct): void {
   const id = product.shopify.productId
-  const match = /^(?:([1-9]\\d*)|gid:\/\/shopify\/Product\/([1-9]\\d*))$/.exec(id)
+  const match = /^(?:([1-9]\d*)|gid:\/\/shopify\/Product\/([1-9]\d*))$/.exec(id)
   if (!match || (match[1] ?? match[2]) !== familyKey) {
     throw new Error('Shopify snapshot product id mismatch for catalog variant: ' + product.id)
   }
