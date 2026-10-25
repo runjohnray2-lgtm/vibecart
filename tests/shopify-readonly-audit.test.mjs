@@ -33,6 +33,32 @@ test('read-only transport uses exact Shopify host, POST, no redirects and only a
   assert.equal(calls.length, 1, 'rejected mutation must not make a network request')
 })
 
+test('read-only transport freezes its allowlist and refuses mixed query/mutation documents', async () => {
+  const mutable = new Set(DOCS)
+  let networkCalls = 0
+  const execute = createReadOnlyShopifyTransport({
+    ...opts, allowedDocuments: mutable,
+    fetchImpl: async () => { networkCalls++; return json({ data: {} }) },
+  })
+  // A mutable Set supplied by a caller must never expand Admin token authority.
+  mutable.delete(READ)
+  const injected = 'mutation DeleteProduct { productDelete(id: "test") { deletedProductId } }'
+  mutable.add(injected)
+  await assert.rejects(execute(injected, {}), /unapproved GraphQL operation/)
+  await execute(READ, {})
+  assert.equal(networkCalls, 1, 'only the originally approved query reached the transport')
+
+  for (const unsafe of [
+    'query Safe { shop { id } } mutation DeleteProduct { productDelete(id: "test") { deletedProductId } }',
+    'query Safe { shop { id } } subscription Watch { shop { id } }',
+  ]) {
+    const documents = new Set([...DOCS].slice(0, 3).concat(unsafe))
+    assert.throws(() => createReadOnlyShopifyTransport({
+      ...opts, allowedDocuments: documents,
+    }), /read-only GraphQL queries only/)
+  }
+})
+
 test('read-only transport refuses unsafe hosts, missing tokens and excessive requests', async () => {
   for (const shopDomain of ['radiantz.com', 'evil.myshopify.com.attacker.test', 'localhost',
     'https://synthetic-shop.myshopify.com', 'synthetic-shop.myshopify.com:443']) {
