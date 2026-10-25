@@ -4,12 +4,20 @@ import { probeVibeCartCapabilitiesReadOnly, validatePublicTarget } from '../scri
 
 const origin = 'https://vibecart.vercel.app'
 const rpc = (id, result) => ({ jsonrpc: '2.0', id, result })
+const official = (spec, schema) => ({
+  version: '2026-04-08',
+  spec: 'https://ucp.dev/2026-04-08/' + spec,
+  schema: 'https://ucp.dev/2026-04-08/' + schema,
+})
 const validUcp = {
   ucp: { version: '2026-04-08',
-    services: { 'dev.ucp.shopping': [{ transport: 'mcp', endpoint: origin + '/ucp/mcp' }] },
+    services: { 'dev.ucp.shopping': [{
+      transport: 'mcp', endpoint: origin + '/ucp/mcp',
+      ...official('specification/overview', 'services/shopping/mcp.openrpc.json'),
+    }] },
     capabilities: {
-      'dev.ucp.shopping.catalog.search': [{ version: '2026-04-08' }],
-      'dev.ucp.shopping.catalog.lookup': [{ version: '2026-04-08' }],
+      'dev.ucp.shopping.catalog.search': [official('specification/catalog/search', 'schemas/shopping/catalog_search.json')],
+      'dev.ucp.shopping.catalog.lookup': [official('specification/catalog/lookup', 'schemas/shopping/catalog_lookup.json')],
     },
   },
 }
@@ -87,6 +95,39 @@ test('probe rejects missing UCP discovery catalog capabilities', async () => {
   const s = stub({ 0: { ucp: { ...validUcp.ucp, capabilities: {} } } })
   await assert.rejects(probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl: s.fetchImpl }), /missing/)
   assert.equal(s.requests.length, 1)
+})
+
+test('probe rejects stale or untrusted UCP discovery metadata without contacting MCP', async () => {
+  const search = validUcp.ucp.capabilities['dev.ucp.shopping.catalog.search'][0]
+  const service = validUcp.ucp.services['dev.ucp.shopping'][0]
+  const invalid = [
+    { ucp: { ...validUcp.ucp, capabilities: {
+      ...validUcp.ucp.capabilities,
+      'dev.ucp.shopping.catalog.search': [{ ...search, version: '2025-01-01' }],
+    } } },
+    { ucp: { ...validUcp.ucp, capabilities: {
+      ...validUcp.ucp.capabilities,
+      'dev.ucp.shopping.catalog.search': [{ ...search, schema: 'https://attacker.example/schema.json' }],
+    } } },
+    { ucp: { ...validUcp.ucp, capabilities: {
+      ...validUcp.ucp.capabilities,
+      'dev.ucp.shopping.catalog.search': [{ ...search, spec: 'https://ucp.dev/2025-01-01/specification/catalog/search' }],
+    } } },
+    { ucp: { ...validUcp.ucp, services: { 'dev.ucp.shopping': [{
+      ...service, schema: 'https://ucp.dev.evil.test/schema.json',
+    }] } } },
+    { ucp: { ...validUcp.ucp, services: { 'dev.ucp.shopping': [{
+      ...service, version: '2025-01-01',
+    }] } } },
+  ]
+  for (const discovery of invalid) {
+    const s = stub({ 0: discovery })
+    await assert.rejects(
+      probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl: s.fetchImpl }),
+      /UCP discovery/,
+    )
+    assert.equal(s.requests.length, 1, 'invalid discovery must not trigger MCP requests')
+  }
 })
 
 test('probe rejects missing catalog tools without attempting calls', async () => {
