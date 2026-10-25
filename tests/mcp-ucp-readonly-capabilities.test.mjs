@@ -217,3 +217,64 @@ test('probe rejects incompatible MCP initialize handshakes before listing more t
       ['initialize', 'tools/list'].includes(JSON.parse(request.options.body).method)))
   }
 })
+
+function pagedStub(payloads) {
+  let index = 0
+  const requests = []
+  return { requests, fetchImpl: async (url, options) => {
+    requests.push({ url, options })
+    const payload = payloads[index++]
+    if (!payload) throw new Error('unexpected pagination request')
+    return { ok: true, status: 200, headers: { get: () => 'application/json' }, text: async () => JSON.stringify(payload) }
+  } }
+}
+
+test('probe exhausts paginated generic and UCP tool lists without invoking tools', async () => {
+  const s = pagedStub([
+    replies[0], replies[1],
+    rpc(2, { tools: [genericTool('vibecart.list_products')], nextCursor: 'generic-page-2' }),
+    rpc(3, { tools: [genericTool('vibecart.get_product', true)] }),
+    replies[3],
+    rpc(2, { tools: [ucpTool('search_catalog')], nextCursor: 'ucp-page-2' }),
+    rpc(4, { tools: [ucpTool('lookup_catalog', 'ids'), ucpTool('get_product', 'id')] }),
+  ])
+  const result = await probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl: s.fetchImpl })
+  assert.equal(result.requestCount, 7)
+  assert.equal(result.genericTools.length, 2)
+  assert.equal(result.ucpTools.length, 3)
+  assert.deepEqual(s.requests.filter(r => r.options.body && JSON.parse(r.options.body).params?.cursor)
+    .map(r => JSON.parse(r.options.body).params.cursor), ['generic-page-2', 'ucp-page-2'])
+  assert.ok(s.requests.every(r => !r.options.body ||
+    ['initialize', 'tools/list'].includes(JSON.parse(r.options.body).method)))
+})
+
+test('probe fails closed on invalid, repeated or empty paginated tool pages', async () => {
+  for (const { first, second, count } of [
+    { first: { tools: [genericTool('vibecart.list_products')], nextCursor: '' }, count: 3 },
+    { first: { tools: [genericTool('vibecart.list_products')], nextCursor: 'repeat' },
+      second: { tools: [genericTool('vibecart.get_product', true)], nextCursor: 'repeat' }, count: 4 },
+    { first: { tools: [genericTool('vibecart.list_products')], nextCursor: 'empty' },
+      second: { tools: [], nextCursor: 'more' }, count: 4 },
+  ]) {
+    const s = pagedStub([replies[0], replies[1], rpc(2, first), ...(second ? [rpc(3, second)] : [])])
+    await assert.rejects(
+      probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl: s.fetchImpl }),
+      /invalid pagination cursor/,
+    )
+    assert.equal(s.requests.length, count)
+  }
+})
+
+test('probe rejects duplicate tool identities across pagination boundaries', async () => {
+  const s = pagedStub([
+    replies[0], replies[1],
+    rpc(2, { tools: [genericTool('vibecart.list_products')], nextCursor: 'next' }),
+    rpc(3, { tools: [genericTool('vibecart.list_products'), genericTool('vibecart.get_product', true)] }),
+    replies[3], replies[4],
+  ])
+  await assert.rejects(
+    probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl: s.fetchImpl }),
+    /duplicate names/,
+  )
+  assert.equal(s.requests.length, 6)
+})
