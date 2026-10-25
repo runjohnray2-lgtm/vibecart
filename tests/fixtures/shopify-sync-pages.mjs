@@ -9,6 +9,7 @@ export function gqlProduct(num, title, variants, extra = {}) {
     publishedAt: '2026-10-01T00:00:00Z',
     updatedAt: '2026-10-10T00:00:00Z',
     featuredImage: { url: 'https://cdn.shopify.com/s/files/1/0003/p' + num + '.jpg' },
+    variantsCount: { count: variants.length, precision: 'EXACT' },
     variants: {
       pageInfo: { hasNextPage: false },
       nodes: variants.map(([variantNum, variantTitle, sku, price]) => ({
