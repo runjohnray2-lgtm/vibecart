@@ -27,6 +27,7 @@ const product = () => ({
   status: 'ACTIVE',
   publishedAt: '2026-10-18T00:00:00Z',
   featuredMedia: { preview: { image: { url: 'https://cdn.shopify.com/synthetic.jpg' } } },
+  variantsCount: { count: 225, precision: 'EXACT' },
   variants: {
     nodes: Array.from({ length: 100 }, (_, i) => variant(i + 1)),
     pageInfo: { hasNextPage: true, endCursor: 'after100' },
