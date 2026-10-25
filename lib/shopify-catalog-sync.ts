@@ -462,6 +462,11 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
     if (!page || !Array.isArray(page.products) || !page.pageInfo || typeof page.pageInfo.hasNextPage !== 'boolean') {
       throw new Error('fetchPage returned an invalid page')
     }
+    // Direct injected fetchers may bypass the Admin adapter's pagination guards.
+    // An empty nonterminal page cannot prove a complete catalog traversal.
+    if (page.products.length === 0 && page.pageInfo.hasNextPage) {
+      throw new Error('empty Shopify product page with continuation; traversal completeness unknown')
+    }
     // Product pages must never repeat an identity: later pages could overwrite a variant family.
     for (const raw of page.products) {
       const key = productKey(raw)
