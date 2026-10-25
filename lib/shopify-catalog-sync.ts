@@ -209,10 +209,21 @@ export function applyProducts(
   const warnings: string[] = []
   let upserted = 0
   let removed = 0
+  const seenProductKeys = new Set<string>()
 
   for (const raw of rawProducts) {
     // Fail atomically rather than trusting a mismatched REST/GID identity.
     assertMatchingRecordIds(raw)
+    // Direct applyProducts callers can bypass syncShopifyCatalog's page-level
+    // duplicate guard. REST numeric IDs and Admin GIDs are the same product:
+    // accepting both in one batch would silently let the later price win.
+    const identity = productKey(raw)
+    if (identity) {
+      if (seenProductKeys.has(identity)) {
+        throw new Error('duplicate Shopify product id in applyProducts batch: ' + identity)
+      }
+      seenProductKeys.add(identity)
+    }
     if (!options.includeUnpublished && publicationUnknown(raw)) {
       const id = rawProductId(raw)
       skipped.push({
