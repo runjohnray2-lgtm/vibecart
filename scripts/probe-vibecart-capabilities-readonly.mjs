@@ -13,6 +13,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const UCP_VERSION = '2026-04-08'
+const MCP_PROTOCOL_VERSION = '2025-06-18'
 const REQUIRED_CATALOG_TOOLS = ['search_catalog', 'lookup_catalog', 'get_product']
 
 export function validatePublicTarget(raw) {
@@ -42,7 +43,7 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
       headers: { accept: 'application/json', ...(rpcMethod ? { 'content-type': 'application/json' } : {}) },
       ...(rpcMethod ? { body: JSON.stringify({
         jsonrpc: '2.0', id: rpcMethod === 'initialize' ? 1 : 2, method: rpcMethod,
-        ...(rpcMethod === 'initialize' ? { params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'vibecart-readonly-probe', version: '1.0.0' } } } : {}),
+        ...(rpcMethod === 'initialize' ? { params: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: 'vibecart-readonly-probe', version: '1.0.0' } } } : {}),
       }) } : {}),
     })
     if (!response?.ok) throw new Error(relative + ' ' + (rpcMethod || 'GET') + ' returned HTTP ' + (response?.status ?? 'unavailable'))
@@ -86,13 +87,23 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
       throw new Error('UCP discovery missing compatible ' + name)
     }
   }
+  // An RPC response and matching server name alone do not establish a
+  // compatible MCP handshake; verify negotiated protocol and tools support.
+  const requireInitialize = (result, expectedName) => {
+    if (result?.serverInfo?.name !== expectedName ||
+        result?.protocolVersion !== MCP_PROTOCOL_VERSION ||
+        !result?.capabilities || typeof result.capabilities !== 'object' ||
+        !result.capabilities.tools || typeof result.capabilities.tools !== 'object' ||
+        Array.isArray(result.capabilities.tools)) {
+      throw new Error('MCP initialize returned incompatible protocol or tools capability for ' + expectedName)
+    }
+  }
   const genericInit = await readJson('/mcp', 'POST', 'initialize')
+  requireInitialize(genericInit, 'vibecart')
   const genericList = await readJson('/mcp', 'POST', 'tools/list')
   const ucpInit = await readJson('/ucp/mcp', 'POST', 'initialize')
+  requireInitialize(ucpInit, 'vibecart-ucp')
   const ucpList = await readJson('/ucp/mcp', 'POST', 'tools/list')
-  if (genericInit?.serverInfo?.name !== 'vibecart' || ucpInit?.serverInfo?.name !== 'vibecart-ucp') {
-    throw new Error('MCP initialize returned unexpected server identity')
-  }
   const toolsOf = result => {
     if (!Array.isArray(result?.tools)) throw new Error('MCP tools/list missing tools')
     const names = result.tools.map(tool => tool?.name)
