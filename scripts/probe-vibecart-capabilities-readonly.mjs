@@ -61,13 +61,29 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
   const discovery = await readJson('/.well-known/ucp')
   const capabilities = discovery?.ucp?.capabilities
   const services = discovery?.ucp?.services?.['dev.ucp.shopping']
+  // A non-empty capability is not sufficient evidence: require the current
+  // UCP version and official HTTPS spec/schema metadata before claiming success.
+  const officialEntry = entry => {
+    if (!entry || typeof entry !== 'object' || entry.version !== UCP_VERSION) return false
+    return ['spec', 'schema'].every(field => {
+      if (typeof entry[field] !== 'string') return false
+      try {
+        const url = new URL(entry[field])
+        return url.protocol === 'https:' && url.hostname === 'ucp.dev' &&
+          !url.username && !url.password && !url.port &&
+          url.pathname.startsWith('/' + UCP_VERSION + '/') &&
+          !url.search && !url.hash
+      } catch { return false }
+    })
+  }
   if (discovery?.ucp?.version !== UCP_VERSION || !capabilities ||
-      !Array.isArray(services) || !services.some(s => s?.transport === 'mcp' && s?.endpoint === origin + '/ucp/mcp')) {
+      !Array.isArray(services) || !services.some(s =>
+        s?.transport === 'mcp' && s?.endpoint === origin + '/ucp/mcp' && officialEntry(s))) {
     throw new Error('UCP discovery version/service endpoint mismatch')
   }
   for (const name of ['dev.ucp.shopping.catalog.search', 'dev.ucp.shopping.catalog.lookup']) {
-    if (!Array.isArray(capabilities[name]) || capabilities[name].length === 0) {
-      throw new Error('UCP discovery missing ' + name)
+    if (!Array.isArray(capabilities[name]) || !capabilities[name].some(officialEntry)) {
+      throw new Error('UCP discovery missing compatible ' + name)
     }
   }
   const genericInit = await readJson('/mcp', 'POST', 'initialize')
