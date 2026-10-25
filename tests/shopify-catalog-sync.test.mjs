@@ -332,6 +332,68 @@ test('sync refuses cross-resource or malformed product identities without replac
   assert.deepEqual(toCatalogFeed(base), before, 'failed sync leaves the last good snapshot untouched')
 })
 
+test('direct sync omits a whole family with cross-resource or malformed Shopify variant ids', async () => {
+  const original = gqlProduct(931, 'SYNTHETIC trusted', [[9311, 'One', 'GOOD', '10.00']])
+  const base = applyProducts(createSnapshot('USD'), [original]).snapshot
+  const before = toCatalogFeed(base)
+  const valid = gqlProduct(931, 'SYNTHETIC updated', [
+    [9311, 'One', 'GOOD', '10.00'],
+    [9312, 'Two', 'SECOND', '12.00'],
+  ])
+  const invalidIds = [
+    P(9312), 'gid://shopify/Collection/9312',
+    'gid://shopify/ProductVariant/9312?inventory_item_id=2',
+    'gid://shopify/ProductVariant/09312',
+    '/ProductVariant/9312', '9312.0', '09312', '0',
+  ]
+
+  for (const id of invalidIds) {
+    const variants = valid.variants.nodes.map((variant, index) =>
+      index === 1 ? { ...variant, id } : variant)
+    const poisoned = { ...valid, variants: { ...valid.variants, nodes: variants } }
+    const applied = applyProducts(base, [poisoned])
+    assert.equal(applied.upserted, 0, 'invalid variant must not enter snapshot: ' + id)
+    assert.equal(applied.removed, 1, 'stale family must be removed: ' + id)
+    assert.deepEqual(toCatalogFeed(applied.snapshot).products, [])
+    assert.ok(applied.skipped.some(item =>
+      item.variantId === id && /invalid Shopify ProductVariant id; entire family omitted/.test(item.reason)))
+
+    const synced = await syncShopifyCatalog({
+      ...OPTS, base,
+      fetchPage: async () => ({
+        products: [poisoned], pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    })
+    assert.equal(synced.upserted, 0)
+    assert.deepEqual(toCatalogFeed(synced.snapshot).products, [])
+    assert.deepEqual(toCatalogFeed(base), before, 'last known-good snapshot stays unchanged')
+  }
+
+  const wrongPreferredId = {
+    ...valid,
+    variants: {
+      ...valid.variants,
+      nodes: valid.variants.nodes.map((variant, index) =>
+        index === 1 ? { ...variant, admin_graphql_api_id: P(9312) } : variant),
+    },
+  }
+  assert.equal(applyProducts(base, [wrongPreferredId]).upserted, 0,
+    'invalid preferred Admin GID must not fall back to a numeric id')
+
+  const restVariant = {
+    ...valid,
+    variants: {
+      ...valid.variants,
+      nodes: valid.variants.nodes.map((variant, index) =>
+        index === 1 ? { ...variant, id: '9312' } : variant),
+    },
+  }
+  assert.equal(applyProducts(base, [restVariant]).upserted, 1,
+    'positive REST numeric variant ids remain supported')
+  assert.equal(applyProducts(base, [valid]).upserted, 1,
+    'valid ProductVariant GIDs remain supported')
+})
+
 test('currency must be verified, never assumed', async () => {
   const fetchPage = async () => page2
   await assert.rejects(() => syncShopifyCatalog({ shopCurrencyCode: 'EUR', expectedCurrencyCode: 'USD', fetchPage }), /does not match/)
