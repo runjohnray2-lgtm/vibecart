@@ -244,6 +244,33 @@ export function applyProducts(
       if (unknownKey && next.delete(unknownKey)) removed += 1
       continue
     }
+    // Direct sync callers may provide variantsCount without using the Admin
+    // GraphQL adapter. When present, it must independently prove that the
+    // supplied family is complete; a false terminal pageInfo is not proof.
+    // Legacy REST arrays without variantsCount remain supported.
+    if (raw && typeof raw === 'object' && !Array.isArray(raw) && 'variantsCount' in raw) {
+      const entry = raw as Record<string, unknown>
+      const reported = entry.variantsCount
+      const connection = entry.variants
+      const entries = Array.isArray(connection) ? connection
+        : connection && typeof connection === 'object' && !Array.isArray(connection)
+          ? (connection as Record<string, unknown>).nodes ?? (connection as Record<string, unknown>).edges
+          : undefined
+      const count = reported && typeof reported === 'object' && !Array.isArray(reported)
+        ? reported as Record<string, unknown> : null
+      if (!count || count.precision !== 'EXACT' ||
+          typeof count.count !== 'number' || !Number.isSafeInteger(count.count) ||
+          count.count < 0 || !Array.isArray(entries) || entries.length !== count.count) {
+        const id = rawProductId(raw)
+        skipped.push({
+          ...(id ? { productId: id } : {}),
+          reason: 'Shopify exact variantsCount missing, approximate or mismatched; entire family omitted',
+        })
+        const key = productKey(raw)
+        if (key && next.delete(key)) removed += 1
+        continue
+      }
+    }
     const mapped = mapShopifyProducts([raw], {
       currencyCode: snapshot.currencyCode,
       includeUnpublished: options.includeUnpublished,
