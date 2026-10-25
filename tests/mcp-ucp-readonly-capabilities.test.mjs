@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { probeVibeCartCapabilitiesReadOnly, validatePublicTarget } from '../scripts/probe-vibecart-capabilities-readonly.mjs'
+import { probeVibeCartCapabilitiesReadOnly, validatePublicTarget, readBoundedProbeBody } from '../scripts/probe-vibecart-capabilities-readonly.mjs'
 
 const origin = 'https://vibecart.vercel.app'
 const rpc = (id, result) => ({ jsonrpc: '2.0', id, result })
@@ -277,4 +277,59 @@ test('probe rejects duplicate tool identities across pagination boundaries', asy
     /duplicate names/,
   )
   assert.equal(s.requests.length, 6)
+})
+
+test('probe rejects declared oversized JSON before reading the response body', async () => {
+  let read = false
+  const response = {
+    headers: { get: name => name === 'content-length' ? String(256 * 1024 + 1) : null },
+    text: async () => { read = true; return '{}' },
+  }
+  await assert.rejects(readBoundedProbeBody(response, '/.well-known/ucp'), /exceeded probe limit/)
+  assert.equal(read, false)
+})
+
+test('probe caps actual UTF-8 response bytes, not just JavaScript string length', async () => {
+  const response = {
+    headers: { get: () => null },
+    text: async () => '€'.repeat(90_000),
+  }
+  await assert.rejects(readBoundedProbeBody(response, '/mcp'), /exceeded probe limit/)
+})
+
+test('probe accepts a small streamed JSON body and cancels oversized streams before MCP calls', async () => {
+  const encoder = new TextEncoder()
+  const small = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('{"ok":true}'))
+      controller.close()
+    },
+  })
+  assert.equal(await readBoundedProbeBody({
+    headers: { get: () => null }, body: small,
+  }, '/mcp'), '{"ok":true}')
+
+  let cancelled = false
+  const large = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(180_000))
+      controller.enqueue(new Uint8Array(90_000))
+    },
+    cancel() { cancelled = true },
+  })
+  const requests = []
+  const fetchImpl = async (url, options) => {
+    requests.push({ url, method: options.method })
+    return {
+      ok: true, status: 200,
+      headers: { get: name => name === 'content-type' ? 'application/json' : null },
+      body: large,
+    }
+  }
+  await assert.rejects(
+    probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl }),
+    /exceeded probe limit/,
+  )
+  assert.equal(cancelled, true)
+  assert.deepEqual(requests.map(request => request.method), ['GET'])
 })
