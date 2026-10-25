@@ -43,10 +43,17 @@ export function createReadOnlyShopifyTransport({
   if (!Number.isSafeInteger(maxRequests) || maxRequests < 1 || maxRequests > 120) {
     throw new Error('Shopify audit request limit must be between 1 and 120')
   }
+  // Keep the approved operations immutable for this transport. A caller may
+  // otherwise add a mutation to the original Set after construction and have
+  // its Admin token sent with a write-capable GraphQL document.
+  const approvedDocuments = new Set(allowedDocuments)
+  if ([...approvedDocuments].some(doc => /\\b(?:mutation|subscription)\\b/i.test(doc))) {
+    throw new Error('Shopify audit accepts read-only GraphQL queries only')
+  }
   const endpoint = 'https://' + shopDomain + '/admin/api/' + apiVersion + '/graphql.json'
   let requests = 0
   return async (document, variables) => {
-    if (!allowedDocuments.has(document)) {
+    if (!approvedDocuments.has(document)) {
       throw new Error('Shopify audit refused an unapproved GraphQL operation')
     }
     if (++requests > maxRequests) throw new Error('Shopify audit request limit reached')
