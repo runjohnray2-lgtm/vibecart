@@ -139,6 +139,27 @@ test('duplicate product identities within or across pages fail closed without ch
   }
 })
 
+test('direct applyProducts rejects duplicate Product REST/GID aliases without mutating the trusted snapshot', () => {
+  const base = applyProducts(createSnapshot('USD'), [
+    gqlProduct(600, 'SYNTHETIC trusted', [[6001, 'One', 'OLD', '12.34']]),
+  ]).snapshot
+  const before = toCatalogFeed(base)
+  const first = gqlProduct(601, 'SYNTHETIC first', [[6101, 'Red', 'FIRST', '65.99']])
+  const alias = gqlProduct(601, 'SYNTHETIC second', [[6102, 'Amber', 'SECOND', '70.00']], { id: 601 })
+
+  assert.throws(() => applyProducts(base, [first, alias]),
+    /duplicate Shopify product id in applyProducts batch/,
+    'a later REST alias must not silently overwrite the Admin GID family')
+  assert.throws(() => applyProducts(base, [alias, first]),
+    /duplicate Shopify product id in applyProducts batch/,
+    'duplicate detection must work in either order')
+  assert.deepEqual(toCatalogFeed(base), before, 'the previous trusted snapshot is immutable')
+
+  const distinct = applyProducts(base, [first, gqlProduct(602, 'SYNTHETIC other', [[6201, 'One', 'OK', '9.99']])])
+  assert.equal(distinct.upserted, 2, 'distinct products still upsert normally')
+  assert.equal(toCatalogFeed(distinct.snapshot).products.length, before.products.length + 2)
+})
+
 test('incremental sync upserts a changed product and drops its removed variants', async () => {
   const { result: first } = await fullSync()
   const updated = gqlProduct(1, 'Alpha', [[11, 'Small', 'A-S', '11.00']])
