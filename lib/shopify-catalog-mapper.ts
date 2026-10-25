@@ -157,7 +157,10 @@ function variantPriceCents(variant: Json, expectedCurrency: string): number {
   const raw = variant.price ?? variant.priceV2
   if (isObject(raw)) {
     const currency = text(raw.currencyCode)
-    if (currency && currency.toUpperCase() !== expectedCurrency) {
+    // MoneyV2 prices must carry their own currency. Assuming the shop currency
+    // for an unlabelled Money object can silently misprice a merchant catalog.
+    if (!currency) throw new Error('price currencyCode is missing')
+    if (currency.toUpperCase() !== expectedCurrency) {
       throw new Error('price currency ' + currency + ' does not match expected ' + expectedCurrency)
     }
     return priceToCents(raw.amount)
