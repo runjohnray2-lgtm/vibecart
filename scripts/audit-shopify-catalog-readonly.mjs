@@ -47,7 +47,7 @@ export function createReadOnlyShopifyTransport({
   // otherwise add a mutation to the original Set after construction and have
   // its Admin token sent with a write-capable GraphQL document.
   const approvedDocuments = new Set(allowedDocuments)
-  if ([...approvedDocuments].some(doc => /\\b(?:mutation|subscription)\\b/i.test(doc))) {
+  if ([...approvedDocuments].some(doc => /\b(?:mutation|subscription)\b/i.test(doc))) {
     throw new Error('Shopify audit accepts read-only GraphQL queries only')
   }
   const endpoint = 'https://' + shopDomain + '/admin/api/' + apiVersion + '/graphql.json'
