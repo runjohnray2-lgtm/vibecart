@@ -123,14 +123,28 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
     } else {
       const meta = schema.properties.meta
       const catalog = schema.properties.catalog
-      if (meta?.type !== 'object' || !meta.required?.includes('ucp-agent') ||
-          catalog?.type !== 'object') {
+      // A matching tool name is not enough for an independent agent to
+      // negotiate its profile or construct a valid catalog request.
+      const agent = meta?.properties?.['ucp-agent']
+      if (meta?.type !== 'object' || !Array.isArray(meta.required) ||
+          !meta.required.includes('ucp-agent') || agent?.type !== 'object' ||
+          !Array.isArray(agent.required) || !agent.required.includes('profile') ||
+          agent.properties?.profile?.type !== 'string' || catalog?.type !== 'object') {
         throw new Error('UCP MCP incompatible meta/catalog schema for ' + name)
       }
+      if (name === 'search_catalog' && catalog.properties?.query?.type !== 'string') {
+        throw new Error('UCP MCP incompatible catalog search schema for ' + name)
+      }
       const key = name === 'lookup_catalog' ? 'ids' : name === 'get_product' ? 'id' : null
-      if (key && (!catalog.required?.includes(key) ||
-          catalog.properties?.[key]?.type !== (key === 'ids' ? 'array' : 'string'))) {
-        throw new Error('UCP MCP incompatible catalog lookup schema for ' + name)
+      if (key) {
+        const field = catalog.properties?.[key]
+        if (!Array.isArray(catalog.required) || !catalog.required.includes(key) ||
+            field?.type !== (key === 'ids' ? 'array' : 'string') ||
+            (key === 'ids' && (field.items?.type !== 'string' ||
+              !Number.isSafeInteger(field.minItems) || field.minItems < 1)) ||
+            (key === 'id' && (!Number.isSafeInteger(field.minLength) || field.minLength < 1))) {
+          throw new Error('UCP MCP incompatible catalog lookup schema for ' + name)
+        }
       }
     }
   }
