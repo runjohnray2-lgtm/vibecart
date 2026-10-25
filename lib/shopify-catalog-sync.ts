@@ -268,14 +268,25 @@ export function applyProductDeleted(
   return { snapshot: { currencyCode: snapshot.currencyCode, products: next }, removed }
 }
 
+/** A REST numeric id and its Admin ProductVariant GID are the same Shopify identity. */
+function canonicalVariantKey(id: string): string {
+  const match = /^(?:([1-9]\\d*)|gid:\/\/shopify\/ProductVariant\/([1-9]\\d*))$/.exec(id)
+  if (!match) throw new Error('invalid Shopify variant id in snapshot: ' + id)
+  return match[1] ?? match[2]!
+}
+
 /** Deterministic feed for VIBECART_CATALOG_URL: only fields the catalog parser accepts, sorted by id. */
 export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED_PRODUCTS): { products: VibeProduct[] } {
   const seen = new Set<string>()
+  const seenVariantKeys = new Set<string>()
   const products: VibeProduct[] = []
   for (const variants of snapshot.products.values()) {
     for (const p of variants) {
       if (seen.has(p.id)) throw new Error('duplicate catalog id in snapshot: ' + p.id)
       seen.add(p.id)
+      const key = canonicalVariantKey(p.shopify.variantId)
+      if (seenVariantKeys.has(key)) throw new Error('duplicate Shopify variant id in snapshot: ' + key)
+      seenVariantKeys.add(key)
       products.push({
         id: p.id,
         name: p.name,
@@ -294,9 +305,13 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
 /** Server-only lookup keyed by Shopify variant id. Retains identity, SKU and policy lost in the public feed.\n * A cached policy is NOT checkout authorization: Codex must independently recheck live sellability. */
 export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string, ShopifyVariantRef> {
   const index = new Map<string, ShopifyVariantRef>()
+  const seenVariantKeys = new Set<string>()
   for (const variants of snapshot.products.values()) {
     for (const p of variants) {
       if (index.has(p.id)) throw new Error('duplicate Shopify variant id in snapshot: ' + p.id)
+      const key = canonicalVariantKey(p.shopify.variantId)
+      if (seenVariantKeys.has(key)) throw new Error('duplicate Shopify variant id in snapshot: ' + key)
+      seenVariantKeys.add(key)
       if (p.shopify.inventoryPolicy !== 'DENY' && p.shopify.inventoryPolicy !== 'CONTINUE') {
         throw new Error('Shopify variant index missing or invalid inventoryPolicy for ' + p.id)
       }
