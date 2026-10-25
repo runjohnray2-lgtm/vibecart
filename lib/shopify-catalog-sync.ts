@@ -244,14 +244,16 @@ export function applyProducts(
       if (unknownKey && next.delete(unknownKey)) removed += 1
       continue
     }
-    // Direct sync callers may provide variantsCount without using the Admin
-    // GraphQL adapter. When present, it must independently prove that the
-    // supplied family is complete; a false terminal pageInfo is not proof.
-    // Legacy REST arrays without variantsCount remain supported.
-    if (raw && typeof raw === 'object' && !Array.isArray(raw) && 'variantsCount' in raw) {
+    // Direct sync callers may bypass the Admin GraphQL adapter. A GraphQL
+    // variant connection MUST carry an independent EXACT variantsCount:
+    // hasNextPage: false alone cannot prove the last page wasn't truncated.
+    // Keep legacy REST variant arrays without variantsCount supported.
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
       const entry = raw as Record<string, unknown>
-      const reported = entry.variantsCount
       const connection = entry.variants
+      const graphqlConnection = connection !== null && typeof connection === 'object' && !Array.isArray(connection)
+      if (graphqlConnection || 'variantsCount' in entry) {
+      const reported = entry.variantsCount
       const entries = Array.isArray(connection) ? connection
         : connection && typeof connection === 'object' && !Array.isArray(connection)
           ? (connection as Record<string, unknown>).nodes ?? (connection as Record<string, unknown>).edges
@@ -269,6 +271,7 @@ export function applyProducts(
         const key = productKey(raw)
         if (key && next.delete(key)) removed += 1
         continue
+      }
       }
     }
     const mapped = mapShopifyProducts([raw], {
