@@ -389,6 +389,12 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
       }
       if (seenVariantKeys.has(key)) throw new Error('duplicate Shopify variant id in snapshot: ' + key)
       seenVariantKeys.add(key)
+      // Reconstructed snapshots are not necessarily mapper-validated. Never
+      // expose a fractional, negative, non-finite or unsafe-integer merchant
+      // price to AI agents, even if the variant identity itself is valid.
+      if (!Number.isSafeInteger(p.priceCents) || p.priceCents < 0) {
+        throw new Error('invalid Shopify snapshot priceCents for catalog variant: ' + p.id)
+      }
       products.push({
         id: p.id,
         name: p.name,
