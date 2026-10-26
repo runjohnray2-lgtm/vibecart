@@ -38,10 +38,12 @@ const nextPage = async (id, cursor) => {
   assert.equal(id, PRODUCT_ID)
   if (cursor === 'after100') return {
     productId: id,
+    variantsCount: { count: 225, precision: 'EXACT' },
     variants: { nodes: Array.from({ length: 100 }, (_, i) => variant(i + 101)), pageInfo: { hasNextPage: true, endCursor: 'after200' } },
   }
   if (cursor === 'after200') return {
     productId: id,
+    variantsCount: { count: 225, precision: 'EXACT' },
     variants: { nodes: Array.from({ length: 25 }, (_, i) => variant(i + 201)), pageInfo: { hasNextPage: false, endCursor: 'after225' } },
   }
   throw new Error('unexpected cursor')
