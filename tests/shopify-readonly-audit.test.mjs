@@ -233,7 +233,7 @@ test('read-only audit suppresses variant IDs and unexpected transport details in
   }
   const assertPrivateError = error => {
     assert.match(error.message, /Shopify audit incomplete or invalid; private merchant details suppressed/)
-    assert.doesNotMatch(error.message, /ProductVariant|99009|SENSITIVE-|123\\.45|PRIVATE SYNTHETIC|secret/)
+    assert.doesNotMatch(error.message, /ProductVariant|99009|SENSITIVE-|123\.45|PRIVATE SYNTHETIC|secret/)
     return true
   }
   await assert.rejects(auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' }), assertPrivateError)
