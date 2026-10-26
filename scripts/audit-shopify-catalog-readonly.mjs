@@ -271,7 +271,7 @@ export async function auditShopifyCatalogReadOnly(options = {}) {
     return await auditShopifyCatalogReadOnlyInternal(options)
   } catch (error) {
     if (error instanceof Error &&
-        /^Shopify audit rejected (?:a variant|\\d+ variants?) with missing or invalid inventory policy$/.test(error.message)) {
+        /^Shopify audit rejected (?:a variant|\d+ variants?) with missing or invalid inventory policy$/.test(error.message)) {
       throw error
     }
     if (error instanceof Error &&
