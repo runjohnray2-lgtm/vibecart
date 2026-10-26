@@ -154,7 +154,7 @@ export function createReadOnlyShopifyTransport({
   }
 }
 
-export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode, modules } = {}) {
+async function auditShopifyCatalogReadOnlyInternal({ execute, expectedCurrencyCode, modules } = {}) {
   if (typeof execute !== 'function') throw new Error('Shopify audit needs a read-only transport')
   if (typeof expectedCurrencyCode !== 'string' || !expectedCurrencyCode.trim()) {
     throw new Error('Shopify audit requires the merchant expected currency')
@@ -256,6 +256,29 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
     note: catalogReady
       ? 'Shopify Admin exact traversal and published VibeCart catalog contract verified; draft/archived/unpublished exclusions counted separately. MCP/UCP, freshness after audit and checkout NOT verified.'
       : 'Shopify Admin exact traversal completed, but no usable products, unexpected omissions, warnings or missing images prevent complete VibeCart catalog verification. MCP/UCP and checkout NOT verified.',
+  }
+}
+
+
+/**
+ * Public operator-audit boundary: lower-level adapters deliberately include
+ * real Shopify IDs in diagnostic exceptions. Never let those identifiers,
+ * raw transport messages or private shop data escape to callers/loggers.
+ * Keep only two explicitly controlled categories useful to the operator.
+ */
+export async function auditShopifyCatalogReadOnly(options = {}) {
+  try {
+    return await auditShopifyCatalogReadOnlyInternal(options)
+  } catch (error) {
+    if (error instanceof Error &&
+        /^Shopify audit rejected (?:a variant|\\d+ variants?) with missing or invalid inventory policy$/.test(error.message)) {
+      throw error
+    }
+    if (error instanceof Error &&
+        /^shop currency [A-Z]{3} does not match the merchant catalog currency [A-Z]{3}$/.test(error.message)) {
+      throw error
+    }
+    throw new Error('Shopify audit incomplete or invalid; private merchant details suppressed')
   }
 }
 
