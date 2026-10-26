@@ -203,8 +203,8 @@ test('read-only audit rejects missing or invalid inventory policy without leakin
     await assert.rejects(
       auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' }),
       error => {
-        assert.match(error.message, /Shopify audit rejected 1 variants with missing or invalid inventory policy/)
-        assert.doesNotMatch(error.message, /ProductVariant|PRIVATE-|777|10\\.99/)
+        assert.match(error.message, /Shopify audit rejected 1 variant with missing or invalid inventory policy/)
+        assert.doesNotMatch(error.message, /ProductVariant|PRIVATE-|777|10\.99/)
         return true
       },
       'a missing/unknown policy must block the whole merchant audit, not just one variant',
