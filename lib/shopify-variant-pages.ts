@@ -31,6 +31,8 @@ export type VariantPageOptions = {
   fetchVariantPage: (productId: string, cursor: string) => Promise<ShopifyVariantPage>
   maxVariantPages?: number
   maxVariantsPerProduct?: number
+  /** Admin snapshots must provide a version marker before a multi-page variant walk. */
+  requireVersionForContinuation?: boolean
 }
 function isRecord(value: unknown): value is RecordValue {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -69,6 +71,13 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
   // This is additional drift evidence, not a transactional snapshot.
   const originalUpdatedAt = typeof raw.updatedAt === 'string' && raw.updatedAt.trim()
     ? raw.updatedAt : null
+  // A multi-page Admin walk without an initial version marker can mix
+  // variants from different revisions even when the EXACT count is unchanged.
+  // Keep the generic offline helper backwards compatible unless the trusted
+  // Admin adapter explicitly requires this snapshot-consistency evidence.
+  if (options.requireVersionForContinuation && initial.hasNextPage && originalUpdatedAt === null) {
+    throw new Error('Shopify variant pagination requires product updatedAt')
+  }
   // Standalone hydration must reject an explicitly supplied approximate or
   // malformed count, even without the Admin source's independent guard.
   if (raw.variantsCount !== undefined &&
