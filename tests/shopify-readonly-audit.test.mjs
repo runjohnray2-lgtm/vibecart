@@ -349,7 +349,7 @@ test('read-only audit follows later media pages and verifies images without leak
         nodes: [{
           id: 'gid://shopify/Product/300', title: 'PRIVATE MULTIMEDIA PRODUCT',
           status: 'ACTIVE', publishedAt: '2026-10-18T00:00:00Z',
-          featuredMedia: null,
+          updatedAt: '2026-10-18T00:00:00Z', featuredMedia: null,
           media: { nodes: [{ id: 'gid://shopify/Video/999', preview: { image: null } }],
             pageInfo: { hasNextPage: true, endCursor: 'next-media' } },
           variantsCount: { count: 1, precision: 'EXACT' },
@@ -363,7 +363,7 @@ test('read-only audit follows later media pages and verifies images without leak
     }
     if (document.includes('VibeCartProductMedia(')) {
       return { data: { product: {
-        id: 'gid://shopify/Product/300',
+        id: 'gid://shopify/Product/300', updatedAt: '2026-10-18T00:00:00Z',
         media: { nodes: [{ id: 'gid://shopify/MediaImage/1000',
           preview: { image: { url: 'https://cdn.shopify.com/synthetic-later.jpg' } } }],
           pageInfo: { hasNextPage: false, endCursor: 'done' } },
