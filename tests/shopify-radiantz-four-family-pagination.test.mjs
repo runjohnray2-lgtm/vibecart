@@ -76,6 +76,7 @@ test('four large Radiantz-like families hydrate across product and variant curso
       assert.equal(variables.productId, productGid(p))
       return { data: { product: {
         id: productGid(p),
+        variantsCount: { count: sizes.get(p), precision: 'EXACT' },
         variants: variantConnection(p, start, Math.min(start + 99, sizes.get(p))),
       } } }
     }
