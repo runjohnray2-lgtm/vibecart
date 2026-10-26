@@ -170,6 +170,48 @@ test('read-only audit distinguishes zero-stock DENY from made-to-order CONTINUE 
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE-DENY|PRIVATE-CONTINUE|SYNTHETIC POLICY FIXTURE|ProductVariant/)
 })
 
+test('read-only audit rejects missing or invalid inventory policy without leaking variant identities', async () => {
+  for (const inventoryPolicy of [undefined, 'UNKNOWN']) {
+    const privateVariantId = 'gid://shopify/ProductVariant/777'
+    const execute = async document => {
+      if (document.includes('shop { currencyCode }')) {
+        return { data: { shop: { currencyCode: 'USD' } } }
+      }
+      if (document.includes('VibeCartProductsCount')) {
+        return { data: { productsCount: { count: 1, precision: 'EXACT' } } }
+      }
+      if (document.includes('VibeCartProducts(')) {
+        return { data: { products: {
+          nodes: [{
+            id: 'gid://shopify/Product/700', title: 'PRIVATE SYNTHETIC POLICY',
+            status: 'ACTIVE', publishedAt: '2026-10-18T00:00:00Z',
+            featuredMedia: { preview: { image: { url: 'https://cdn.shopify.com/synthetic.jpg' } } },
+            variantsCount: { count: 2, precision: 'EXACT' },
+            variants: { nodes: [
+              { id: 'gid://shopify/ProductVariant/701', title: 'Valid',
+                price: '9.99', inventoryPolicy: 'CONTINUE', inventoryQuantity: 0 },
+              { id: privateVariantId, title: 'Unknown',
+                sku: 'PRIVATE-UNKNOWN-POLICY', price: '10.99',
+                ...(inventoryPolicy ? { inventoryPolicy } : {}), inventoryQuantity: 0 },
+            ], pageInfo: { hasNextPage: false, endCursor: null } },
+          }],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        } } }
+      }
+      throw new Error('unexpected query')
+    }
+    await assert.rejects(
+      auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' }),
+      error => {
+        assert.match(error.message, /Shopify audit rejected 1 variants with missing or invalid inventory policy/)
+        assert.doesNotMatch(error.message, /ProductVariant|PRIVATE-|777|10\\.99/)
+        return true
+      },
+      'a missing/unknown policy must block the whole merchant audit, not just one variant',
+    )
+  }
+})
+
 test('read-only audit fails on currency mismatch or independently incomplete Shopify product count', async () => {
   const currency = async document => {
     if (document.includes('shop { currencyCode }')) return { data: { shop: { currencyCode: 'USD' } } }
