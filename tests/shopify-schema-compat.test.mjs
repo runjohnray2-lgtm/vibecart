@@ -9,7 +9,7 @@ const { SHOPIFY_PRODUCTS_QUERY } = modules['shopify-catalog-sync']
 test('Admin query uses schema-verified featuredMedia and returns continuation cursor', () => {
   assert.match(SHOPIFY_PRODUCTS_QUERY, /featuredMedia\s*\{\s*preview\s*\{\s*image\s*\{\s*url\s*\}/)
   assert.doesNotMatch(SHOPIFY_PRODUCTS_QUERY, /featuredImage/)
-  assert.match(SHOPIFY_PRODUCTS_QUERY, /media\(first: 5\)\s*\{\s*pageInfo\s*\{\s*hasNextPage\s*\}\s*nodes\s*\{\s*id\s+preview\s*\{\s*image\s*\{\s*url\s*\}/)
+  assert.match(SHOPIFY_PRODUCTS_QUERY, /media\(first: 5\)\s*\{\s*pageInfo\s*\{\s*hasNextPage\s+endCursor\s*\}\s*nodes\s*\{\s*id\s+preview\s*\{\s*image\s*\{\s*url\s*\}/)
   assert.doesNotMatch(SHOPIFY_PRODUCTS_QUERY, /\bimages\s*\(/)
   assert.doesNotMatch(SHOPIFY_PRODUCTS_QUERY, /inventoryQuantity\s+image\s*\{/)
   assert.match(SHOPIFY_PRODUCTS_QUERY, /variants\(first: 100\)\s*\{\s*pageInfo\s*\{\s*hasNextPage\s+endCursor\s*\}/)
