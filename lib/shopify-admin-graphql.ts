@@ -135,6 +135,15 @@ export function createShopifyAdminCatalogSource(
           if (traversal.ids.size !== traversal.expected) {
             throw new Error('Shopify product pagination incomplete: independent exact count mismatch')
           }
+          // A merchant may add or delete products while a multi-page audit is
+          // running. The opening count alone cannot detect that drift. Recheck
+          // the independent unfiltered count before certifying a complete walk.
+          // This is not a transactional snapshot: same-count replacements still
+          // require a later sync/freshness check.
+          const finalCount = await fetchExactProductCount()
+          if (finalCount !== traversal.expected) {
+            throw new Error('Shopify product count changed during traversal; restart catalog audit')
+          }
           traversal = null
         }
         return page
