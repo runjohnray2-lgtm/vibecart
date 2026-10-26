@@ -194,7 +194,18 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
   // A tool can advertise the expected fields yet still require additional
   // inputs (including credentials) that an independent catalog client cannot
   // supply. Verify the minimal read-only request is actually constructible.
+  // JSON Schema can impose hidden mandatory inputs outside `required`
+  // (for example allOf/if-then/dependentSchemas or minProperties). A
+  // name-matching tool is not independently invokable if its advertised
+  // schema adds such constraints. Fail closed rather than certify it.
+  const hiddenConstraints = [
+    '$ref', '$dynamicRef', 'allOf', 'anyOf', 'oneOf', 'not',
+    'if', 'then', 'else', 'dependentRequired', 'dependentSchemas',
+    'dependencies', 'minProperties', 'maxProperties', 'propertyNames',
+  ]
   const onlyRequires = (schema, allowed) =>
+    schema && typeof schema === 'object' && !Array.isArray(schema) &&
+    !hiddenConstraints.some(key => Object.hasOwn(schema, key)) &&
     (schema.required === undefined || Array.isArray(schema.required)) &&
     (schema.required ?? []).every(field => allowed.includes(field))
   function requireCatalogSchema(listed, name, required, protocol) {
