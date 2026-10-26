@@ -251,6 +251,16 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
       .map(item => isObject(item) && isObject(item.preview) ? imageUrl(item.preview.image) : undefined)
       .find(url => url !== undefined)
     const fallbackImage = mediaPreviewImage ?? mediaFallback ?? imageUrl(entry.featuredImage) ?? imageUrl(entry.image) ?? imageUrl(images[0])
+    // The first Admin media page can contain only video/external-media items
+    // while an image exists on a later page. Without a usable image and with
+    // more media pages outstanding, do not claim the product is imageless or
+    // certify a complete merchant catalog from a partial media inspection.
+    // This is a whole-family rejection; a future media paginator can resolve it.
+    if (!fallbackImage && isObject(entry.media) &&
+        isObject(entry.media.pageInfo) && entry.media.pageInfo.hasNextPage === true) {
+      skip(productId, undefined, 'image coverage unverified: additional Shopify media pages not inspected')
+      continue
+    }
 
     for (const variant of variants) {
       if (!isObject(variant)) {
