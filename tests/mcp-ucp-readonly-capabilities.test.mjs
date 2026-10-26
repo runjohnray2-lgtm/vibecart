@@ -295,6 +295,42 @@ test('probe rejects catalog ID or profile schemas narrowed to specific values', 
   }
 })
 
+test('probe rejects catalog schemas that cannot accept a short ID or single lookup', async () => {
+  const cases = [
+    { index: 2, name: 'vibecart.get_product',
+      target: tool => tool.inputSchema.properties.productId,
+      key: 'minLength', value: 500, error: /Generic MCP unsafe or incompatible/ },
+    { index: 4, name: 'search_catalog',
+      target: tool => tool.inputSchema.properties.catalog.properties.query,
+      key: 'minLength', value: 2, error: /catalog search schema/ },
+    { index: 4, name: 'get_product',
+      target: tool => tool.inputSchema.properties.meta.properties['ucp-agent'].properties.profile,
+      key: 'minLength', value: 999, error: /meta\\/catalog schema/ },
+    { index: 4, name: 'lookup_catalog',
+      target: tool => tool.inputSchema.properties.catalog.properties.ids.items,
+      key: 'minLength', value: 2, error: /catalog lookup schema/ },
+    { index: 4, name: 'lookup_catalog',
+      target: tool => tool.inputSchema.properties.catalog.properties.ids,
+      key: 'maxItems', value: 0, error: /catalog lookup schema/ },
+    { index: 4, name: 'lookup_catalog',
+      target: tool => tool.inputSchema.properties.catalog.properties.ids,
+      key: 'contains', value: { const: 'only-one-allowed-id' }, error: /catalog lookup schema/ },
+  ]
+  for (const { index, name, target, key, value, error } of cases) {
+    const payload = structuredClone(replies[index])
+    target(payload.result.tools.find(tool => tool.name === name))[key] = value
+    const s = stub({ [index]: payload })
+    await assert.rejects(
+      probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl: s.fetchImpl }),
+      error,
+      name + ' with ' + key + ' must not be certified for arbitrary catalog IDs',
+    )
+    assert.equal(s.requests.length, 5)
+    assert.ok(s.requests.every(request => !request.options.body ||
+      ['initialize', 'tools/list'].includes(JSON.parse(request.options.body).method)))
+  }
+})
+
 test('probe rejects UCP lookup tools with incompatible input schemas', async () => {
   const s = stub({ 4: rpc(2, { tools: [
     ucpTool('search_catalog'),
