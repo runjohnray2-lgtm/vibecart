@@ -89,7 +89,7 @@ test('Admin continuation rejects missing, approximate or drifted Shopify variant
     const source = createShopifyAdminCatalogSource(withCount(async document => {
       if (document.includes('VibeCartProducts(')) return productEnvelope(product())
       if (document.includes('VibeCartProductVariants(')) {
-        assert.match(document, /variantsCount\\s*\\{\\s*count\\s+precision\\s*\\}/)
+        assert.match(document, /variantsCount\s*\{\s*count\s+precision\s*\}/)
         continuationCalls++
         return { data: { product: {
           id: PRODUCT, variantsCount: freshCount,
