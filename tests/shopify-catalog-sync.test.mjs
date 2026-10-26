@@ -272,7 +272,7 @@ test('sync aborts on invalid product identity or incomplete pages without changi
   const { fetchPage } = pager([
     { products: [gqlProduct(1, 'Alpha', [[11, 'One', 'OK', '10.00']])],
       pageInfo: { hasNextPage: true, endCursor: 'next' } },
-    { products: [], pageInfo: { hasNextPage: true, endCursor: 'next' } },
+    { products: [gqlProduct(2, 'Beta', [[22, 'One', 'OK-2', '10.00']])], pageInfo: { hasNextPage: true, endCursor: 'next' } },
   ])
   await assert.rejects(() => syncShopifyCatalog({
     ...OPTS, base: initial.snapshot, fetchPage,
@@ -610,12 +610,24 @@ test('product pagination limits reject invalid overrides before Shopify requests
 
 test('pagination guards: repeated cursor, page limit, invalid page, failed fetch', async () => {
   const loop = pager([
-    { products: [], pageInfo: { hasNextPage: true, endCursor: 'x' } },
-    { products: [], pageInfo: { hasNextPage: true, endCursor: 'x' } },
+    { products: [gqlProduct(1, 'Alpha', [[11, 'One', 'LOOP-1', '1.00']])], pageInfo: { hasNextPage: true, endCursor: 'x' } },
+    { products: [gqlProduct(2, 'Beta', [[21, 'One', 'LOOP-2', '1.00']])], pageInfo: { hasNextPage: true, endCursor: 'x' } },
   ])
   await assert.rejects(() => syncShopifyCatalog({ ...OPTS, fetchPage: loop.fetchPage }), /cursor did not advance/)
 
-  const endless = async cursor => ({ products: [], pageInfo: { hasNextPage: true, endCursor: String(cursor) + 'n' } })
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS,
+    fetchPage: async () => ({ products: [], pageInfo: { hasNextPage: true, endCursor: 'x' } }),
+  }), /empty Shopify product page with continuation/)
+
+  let nextId = 0
+  const endless = async cursor => {
+    nextId += 1
+    return {
+      products: [gqlProduct(nextId, 'Synthetic page', [[1000 + nextId, 'One', 'PAGE', '1.00']])],
+      pageInfo: { hasNextPage: true, endCursor: String(cursor) + 'n' },
+    }
+  }
   await assert.rejects(() => syncShopifyCatalog({ ...OPTS, fetchPage: endless, maxPages: 3 }), /exceeded maxPages/)
 
   await assert.rejects(() => syncShopifyCatalog({ ...OPTS, fetchPage: async () => ({ products: 'nope' }) }), /invalid page/)
