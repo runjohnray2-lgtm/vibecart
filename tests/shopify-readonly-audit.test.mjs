@@ -122,7 +122,8 @@ test('read-only audit traverses a real adapter contract and returns aggregates, 
     productPages: 1, publishedProductFamilies: 1, catalogVariants: 1, skippedRecords: 0,
   })
   assert.equal(result.missingImages, 0)
-  assert.equal(calls.length, 3)
+  assert.equal(calls.length, 4, 'shop currency, opening count, product page and final count')
+  assert.equal(calls.filter(c => c.document.includes('VibeCartProductsCount')).length, 2)
   assert.ok(calls.every(c => c.document.trim().startsWith('query ')))
   assert.doesNotMatch(JSON.stringify(result), /SYN-101|SYNTHETIC test light|65\.99|ProductVariant/)
   assert.match(result.note, /MCP\/UCP.*NOT verified/)
