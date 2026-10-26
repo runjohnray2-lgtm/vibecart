@@ -5,7 +5,7 @@
  */
 export const SHOPIFY_VARIANTS_QUERY =
   'query VibeCartProductVariants($productId: ID!, $cursor: String) { ' +
-  'product(id: $productId) { id variants(first: 100, after: $cursor) { ' +
+  'product(id: $productId) { id variantsCount { count precision } variants(first: 100, after: $cursor) { ' +
   'pageInfo { hasNextPage endCursor } nodes { id title sku price inventoryPolicy inventoryQuantity } ' +
   '} } }'
 
@@ -18,6 +18,8 @@ export type ShopifyVariantConnection = {
 export type ShopifyVariantPage = {
   productId: string
   variants: ShopifyVariantConnection
+  /** Fresh exact count returned by Admin on every continuation request. */
+  variantsCount?: { count: number; precision: string }
 }
 export type ShopifyRawProductsPage = {
   products: unknown[]
@@ -60,6 +62,9 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
   }
   const productId = raw.id
   const initial = unpackConnection(raw.variants)
+  const originalCount = isRecord(raw.variantsCount) && raw.variantsCount.precision === 'EXACT' &&
+    typeof raw.variantsCount.count === 'number' && Number.isSafeInteger(raw.variantsCount.count)
+    ? raw.variantsCount.count : null
   // Admin GraphQL requests at most 100 variants per page. A zero-item
   // nonterminal page or an oversized page cannot prove complete traversal.
   if (initial.nodes.length > 100 || (initial.nodes.length === 0 && initial.hasNextPage)) {
@@ -100,6 +105,17 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
     cursors.add(cursor)
     const next = await options.fetchVariantPage(productId, cursor)
     if (!next || next.productId !== productId) throw new Error('Shopify variant page product id mismatch for ' + productId)
+    // A product's variants can change while the >100-variant family is being
+    // fetched. Comparing only the original count with the accumulated rows
+    // can silently accept a stale or mixed catalog. Require fresh EXACT count
+    // evidence from each continuation whenever the original count is known.
+    if (originalCount !== null) {
+      const fresh = next.variantsCount
+      if (!fresh || fresh.precision !== 'EXACT' || !Number.isSafeInteger(fresh.count) ||
+          fresh.count !== originalCount) {
+        throw new Error('Shopify variant count changed or became unverifiable during pagination for ' + productId)
+      }
+    }
     page = unpackConnection(next.variants)
     if (page.nodes.length > 100) throw new Error('Shopify continuation variant page exceeds first: 100 for ' + productId)
     if (page.nodes.length === 0) throw new Error('empty Shopify continuation variant page for ' + productId)
