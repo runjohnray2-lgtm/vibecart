@@ -360,6 +360,40 @@ test('Admin media discovery stops at the first verified image without claiming c
   assert.equal(mapped.image, 'https://cdn.shopify.com/synthetic-early.jpg')
 })
 
+test('Admin media pagination rejects absent version markers before certifying later images', async () => {
+  const initial = {
+    ...product(variants(1, 1, false, null), 1),
+    updatedAt: '2026-10-18T00:00:00Z',
+    featuredMedia: null,
+    media: { nodes: [{ id: 'gid://shopify/Video/501', preview: { image: null } }],
+      pageInfo: { hasNextPage: true, endCursor: 'media-next' } },
+  }
+  for (const scenario of ['initial-version-missing', 'continuation-version-missing']) {
+    let mediaCalls = 0
+    const source = createShopifyAdminCatalogSource(withCount(async document => {
+      if (document.includes('VibeCartProducts(')) {
+        return productEnvelope(scenario === 'initial-version-missing'
+          ? { ...initial, updatedAt: undefined } : initial)
+      }
+      if (document.includes('VibeCartProductMedia(')) {
+        mediaCalls++
+        return { data: { product: {
+          id: PRODUCT,
+          ...(scenario === 'continuation-version-missing' ? {} : { updatedAt: initial.updatedAt }),
+          media: { nodes: [{ id: 'gid://shopify/MediaImage/502',
+            preview: { image: { url: 'https://cdn.shopify.com/synthetic.jpg' } } }],
+            pageInfo: { hasNextPage: false, endCursor: null } },
+        } } }
+      }
+      throw new Error('unexpected GraphQL operation')
+    }))
+    await assert.rejects(source.fetchPage(null),
+      /media pagination requires product updatedAt|product updated during media pagination/)
+    assert.equal(mediaCalls, scenario === 'initial-version-missing' ? 0 : 1,
+      'do not request media when the initial version marker is absent')
+  }
+})
+
 test('Admin media continuation rejects missing cursor, cross-product response and product drift', async () => {
   const initial = {
     ...product(variants(1, 1, false, null), 1),
