@@ -103,6 +103,52 @@ test('Admin continuation rejects missing, approximate or drifted Shopify variant
   }
 })
 
+test('Admin continuation rejects same-count variant edits detected by Shopify product updatedAt', async () => {
+  const first = { ...product(), updatedAt: '2026-10-25T00:00:00Z' }
+  for (const continuedUpdatedAt of ['2026-10-25T00:00:01Z', undefined]) {
+    let continuationCalls = 0
+    const source = createShopifyAdminCatalogSource(withCount(async (document, variables) => {
+      if (document.includes('VibeCartProducts(')) return productEnvelope(first)
+      if (document.includes('VibeCartProductVariants(')) {
+        assert.match(document, /product\(id: \$productId\)\s*\{\s*id\s+updatedAt\s+variantsCount/)
+        assert.equal(variables.cursor, 'v100')
+        continuationCalls++
+        return { data: { product: {
+          id: PRODUCT, updatedAt: continuedUpdatedAt,
+          variantsCount: { count: 225, precision: 'EXACT' },
+          variants: variants(101, 100, true, 'v200'),
+        } } }
+      }
+      throw new Error('unexpected GraphQL operation')
+    }))
+    await assert.rejects(source.fetchPage(null), /product updatedAt changed or became unverifiable/)
+    assert.equal(continuationCalls, 1, 'abort before a second continuation or publishing a mixed snapshot')
+  }
+})
+
+test('Admin continuation accepts a stable product updatedAt across all 225 variants', async () => {
+  const timestamp = '2026-10-25T00:00:00Z'
+  const source = createShopifyAdminCatalogSource(withCount(async (document, variables) => {
+    if (document.includes('VibeCartProducts(')) {
+      return productEnvelope({ ...product(), updatedAt: timestamp })
+    }
+    if (document.includes('VibeCartProductVariants(')) {
+      const first = variables.cursor === 'v100'
+      assert.ok(first || variables.cursor === 'v200')
+      return { data: { product: {
+        id: PRODUCT, updatedAt: timestamp,
+        variantsCount: { count: 225, precision: 'EXACT' },
+        variants: first ? variants(101, 100, true, 'v200') : variants(201, 25, false, 'v225'),
+      } } }
+    }
+    throw new Error('unexpected GraphQL operation')
+  }))
+  const page = await source.fetchPage(null)
+  assert.equal(page.products.length, 1)
+  assert.equal(page.products[0].variants.nodes.length, 225)
+  assert.equal(page.products[0].variants.nodes[224].id, 'gid://shopify/ProductVariant/225')
+})
+
 test('Shopify HTTP-200 GraphQL errors reject partial product data and preserve last good snapshot', async () => {
   const base = createSnapshot('USD')
   const source = createShopifyAdminCatalogSource(withCount(async () => ({
