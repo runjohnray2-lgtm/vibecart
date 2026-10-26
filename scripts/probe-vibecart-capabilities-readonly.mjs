@@ -137,26 +137,26 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
   const services = discovery?.ucp?.services?.['dev.ucp.shopping']
   // A non-empty capability is not sufficient evidence: require the current
   // UCP version and official HTTPS spec/schema metadata before claiming success.
-  const officialEntry = entry => {
-    if (!entry || typeof entry !== 'object' || entry.version !== UCP_VERSION) return false
-    return ['spec', 'schema'].every(field => {
-      if (typeof entry[field] !== 'string') return false
-      try {
-        const url = new URL(entry[field])
-        return url.protocol === 'https:' && url.hostname === 'ucp.dev' &&
-          !url.username && !url.password && !url.port &&
-          url.pathname.startsWith('/' + UCP_VERSION + '/') &&
-          !url.search && !url.hash
-      } catch { return false }
-    })
-  }
+  // Merely pointing at any URL under the released UCP version is not
+  // compatibility evidence. Verify each advertised capability references its
+  // actual released specification and schema, not a different operation.
+  const officialEntry = (entry, specPath, schemaPath) =>
+    entry && typeof entry === 'object' && entry.version === UCP_VERSION &&
+    entry.spec === 'https://ucp.dev/' + UCP_VERSION + '/' + specPath &&
+    entry.schema === 'https://ucp.dev/' + UCP_VERSION + '/' + schemaPath
   if (discovery?.ucp?.version !== UCP_VERSION || !capabilities ||
       !Array.isArray(services) || !services.some(s =>
-        s?.transport === 'mcp' && s?.endpoint === origin + '/ucp/mcp' && officialEntry(s))) {
+        s?.transport === 'mcp' && s?.endpoint === origin + '/ucp/mcp' &&
+        officialEntry(s, 'specification/overview', 'services/shopping/mcp.openrpc.json'))) {
     throw new Error('UCP discovery version/service endpoint mismatch')
   }
-  for (const name of ['dev.ucp.shopping.catalog.search', 'dev.ucp.shopping.catalog.lookup']) {
-    if (!Array.isArray(capabilities[name]) || !capabilities[name].some(officialEntry)) {
+  const catalogMetadata = {
+    'dev.ucp.shopping.catalog.search': ['specification/catalog/search', 'schemas/shopping/catalog_search.json'],
+    'dev.ucp.shopping.catalog.lookup': ['specification/catalog/lookup', 'schemas/shopping/catalog_lookup.json'],
+  }
+  for (const [name, [specPath, schemaPath]] of Object.entries(catalogMetadata)) {
+    if (!Array.isArray(capabilities[name]) ||
+        !capabilities[name].some(entry => officialEntry(entry, specPath, schemaPath))) {
       throw new Error('UCP discovery missing compatible ' + name)
     }
   }
