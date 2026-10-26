@@ -181,7 +181,8 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
   }
   if (unknownPolicyVariants > 0) {
     throw new Error('Shopify audit rejected ' + unknownPolicyVariants +
-      ' variants with missing or invalid inventory policy')
+      (unknownPolicyVariants === 1 ? ' variant' : ' variants') +
+      ' with missing or invalid inventory policy')
   }
   const index = buildVariantIndex(result.snapshot)
   if (index.size !== feed.products.length) {
