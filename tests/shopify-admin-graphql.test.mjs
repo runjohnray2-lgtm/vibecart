@@ -317,6 +317,49 @@ test('Admin media pagination hydrates later image pages and preserves exact vari
   assert.equal(mapped.image, 'https://cdn.shopify.com/synthetic-later.jpg')
 })
 
+test('Admin media discovery stops at the first verified image without claiming complete media pagination', async () => {
+  const initial = {
+    ...product(variants(1, 1, false, null), 1),
+    updatedAt: '2026-10-18T00:00:00Z',
+    featuredMedia: null,
+    media: { nodes: [{ id: 'gid://shopify/Video/501', preview: { image: null } }],
+      pageInfo: { hasNextPage: true, endCursor: 'media-next' } },
+  }
+  let mediaCalls = 0
+  let inspectedPage
+  const source = createShopifyAdminCatalogSource(withCount(async (document, variables) => {
+    if (document.includes('VibeCartProducts(')) return productEnvelope(initial)
+    if (document.includes('VibeCartProductMedia(')) {
+      mediaCalls++
+      assert.equal(mediaCalls, 1, 'never request unrelated later media pages after finding an image')
+      assert.equal(variables.cursor, 'media-next')
+      return { data: { product: {
+        id: PRODUCT, updatedAt: initial.updatedAt,
+        media: { nodes: [{ id: 'gid://shopify/MediaImage/502',
+          preview: { image: { url: 'https://cdn.shopify.com/synthetic-early.jpg' } } }],
+          pageInfo: { hasNextPage: true, endCursor: 'more-videos' } },
+      } } }
+    }
+    throw new Error('unexpected read-only GraphQL operation')
+  }), { maxMediaPages: 2 })
+  const result = await syncShopifyCatalog({
+    shopCurrencyCode: 'USD', expectedCurrencyCode: 'USD',
+    fetchPage: async cursor => {
+      inspectedPage = await source.fetchPage(cursor)
+      return inspectedPage
+    },
+  })
+  assert.equal(mediaCalls, 1)
+  assert.equal(inspectedPage.products[0].media.pageInfo.hasNextPage, true,
+    'do not misrepresent partial media discovery as a complete media export')
+  assert.equal(inspectedPage.products[0].media.nodes.length, 2)
+  assert.equal(result.skipped.length, 0)
+  const [mapped] = toCatalogFeed(result.snapshot).products
+  assert.equal(mapped.id, 'gid://shopify/ProductVariant/1')
+  assert.equal(mapped.priceCents, 6599)
+  assert.equal(mapped.image, 'https://cdn.shopify.com/synthetic-early.jpg')
+})
+
 test('Admin media continuation rejects missing cursor, cross-product response and product drift', async () => {
   const initial = {
     ...product(variants(1, 1, false, null), 1),
