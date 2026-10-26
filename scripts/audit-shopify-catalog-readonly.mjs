@@ -178,9 +178,11 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
   // manufactured to order. This audit has no fresh stock/checkout authority.
   let denyPolicyVariants = 0
   let continuePolicyVariants = 0
+  let unknownPolicyVariants = 0
   for (const ref of index.values()) {
     if (ref.inventoryPolicy === 'DENY') denyPolicyVariants++
     else if (ref.inventoryPolicy === 'CONTINUE') continuePolicyVariants++
+    else unknownPolicyVariants++
   }
   // A successful Shopify traversal proves transport and exact pagination, NOT
   // that every record mapped into a usable VibeCart catalog. In particular,
@@ -207,7 +209,7 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
   const excludedUnpublished = result.skipped.filter(isIntentionalExclusion).length
   const invalidSkippedRecords = result.skipped.length - excludedUnpublished
   const catalogReady = hasUsableCatalog && invalidSkippedRecords === 0 &&
-    result.warnings.length === 0 && missingImages === 0
+    result.warnings.length === 0 && missingImages === 0 && unknownPolicyVariants === 0
   // Aggregate-only output: no product IDs, SKUs, names, prices or credentials.
   return {
     verified: catalogReady,
@@ -220,6 +222,7 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
     catalogVariants: feed.products.length,
     denyPolicyVariants,
     continuePolicyVariants,
+    unknownPolicyVariants,
     sellabilityVerified: false,
     missingImages,
     productFamiliesWithMissingImages,
@@ -229,7 +232,7 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
     warnings: result.warnings.length,
     note: catalogReady
       ? 'Shopify Admin exact traversal and published VibeCart catalog contract verified; draft/archived/unpublished exclusions counted separately. MCP/UCP, freshness after audit and checkout NOT verified.'
-      : 'Shopify Admin exact traversal completed, but no usable products, unexpected omissions, warnings or missing images prevent complete VibeCart catalog verification. MCP/UCP and checkout NOT verified.',
+      : 'Shopify Admin exact traversal completed, but no usable products, unexpected omissions, warnings, missing images or unknown inventory policies prevent complete VibeCart catalog verification. MCP/UCP and checkout NOT verified.',
   }
 }
 
