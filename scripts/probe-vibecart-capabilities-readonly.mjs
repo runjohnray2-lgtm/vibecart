@@ -191,6 +191,12 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
   const ucpTools = ucpListed.map(tool => tool.name)
   // A tool name alone is not proof that a compatible agent can invoke it.
   // Fail closed when a deployed endpoint advertises stale or unsafe catalog schemas.
+  // A tool can advertise the expected fields yet still require additional
+  // inputs (including credentials) that an independent catalog client cannot
+  // supply. Verify the minimal read-only request is actually constructible.
+  const onlyRequires = (schema, allowed) =>
+    (schema.required === undefined || Array.isArray(schema.required)) &&
+    (schema.required ?? []).every(field => allowed.includes(field))
   function requireCatalogSchema(listed, name, required, protocol) {
     const tool = listed.find(entry => entry.name === name)
     if (!tool) throw new Error(protocol + ' MCP missing ' + name)
@@ -200,8 +206,13 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
       throw new Error(protocol + ' MCP incompatible input schema for ' + name)
     }
     if (protocol === 'Generic') {
-      if (tool.annotations?.readOnlyHint !== true || tool.annotations?.destructiveHint !== false ||
-          (name === 'vibecart.get_product' && schema.properties.productId?.type !== 'string')) {
+      const allowed = name === 'vibecart.get_product' ? ['productId'] : []
+      if (!onlyRequires(schema, allowed) ||
+          tool.annotations?.readOnlyHint !== true || tool.annotations?.destructiveHint !== false ||
+          (name === 'vibecart.get_product' &&
+            (schema.properties.productId?.type !== 'string' ||
+              !Number.isSafeInteger(schema.properties.productId?.minLength) ||
+              schema.properties.productId.minLength < 1))) {
         throw new Error('Generic MCP unsafe or incompatible catalog tool ' + name)
       }
     } else {
@@ -210,10 +221,15 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
       // A matching tool name is not enough for an independent agent to
       // negotiate its profile or construct a valid catalog request.
       const agent = meta?.properties?.['ucp-agent']
-      if (meta?.type !== 'object' || !Array.isArray(meta.required) ||
-          !meta.required.includes('ucp-agent') || agent?.type !== 'object' ||
-          !Array.isArray(agent.required) || !agent.required.includes('profile') ||
-          agent.properties?.profile?.type !== 'string' || catalog?.type !== 'object') {
+      const catalogRequired = name === 'search_catalog' ? ['query'] :
+        name === 'lookup_catalog' ? ['ids'] : ['id']
+      if (!onlyRequires(schema, ['meta', 'catalog']) ||
+          meta?.type !== 'object' || !Array.isArray(meta.required) ||
+          !meta.required.includes('ucp-agent') || !onlyRequires(meta, ['ucp-agent']) ||
+          agent?.type !== 'object' || !Array.isArray(agent.required) ||
+          !agent.required.includes('profile') || !onlyRequires(agent, ['profile']) ||
+          agent.properties?.profile?.type !== 'string' || catalog?.type !== 'object' ||
+          !onlyRequires(catalog, catalogRequired)) {
         throw new Error('UCP MCP incompatible meta/catalog schema for ' + name)
       }
       if (name === 'search_catalog' && catalog.properties?.query?.type !== 'string') {
