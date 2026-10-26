@@ -165,6 +165,30 @@ test('independent exact Shopify productsCount rejects missing, approximate and s
   await assert.rejects(source.fetchPage(null), /productsCount missing or approximate/)
 })
 
+test('independent product count drift aborts a complete-looking traversal without publishing a snapshot', async () => {
+  const single = product(variants(1, 1, false, null), 1)
+  for (const changedCount of [0, 2]) {
+    let countCalls = 0
+    const source = createShopifyAdminCatalogSource(async document => {
+      if (document.includes('VibeCartProductsCount')) {
+        countCalls++
+        return { data: { productsCount: {
+          count: countCalls === 1 ? 1 : changedCount, precision: 'EXACT',
+        } } }
+      }
+      if (document.includes('VibeCartProducts(')) return productEnvelope(single)
+      throw new Error('unexpected GraphQL query')
+    })
+    const base = createSnapshot('USD')
+    await assert.rejects(syncShopifyCatalog({
+      shopCurrencyCode: 'USD', expectedCurrencyCode: 'USD',
+      base, fetchPage: source.fetchPage,
+    }), /product count changed during traversal/)
+    assert.equal(countCalls, 2, 'exact unfiltered count is checked before and after traversal')
+    assert.equal(toCatalogFeed(base).products.length, 0, 'the original snapshot is unchanged')
+  }
+})
+
 test('unfiltered two-page product traversal proves exact count and preserves both products', async () => {
   const first = product(variants(1, 1, false, null), 1)
   const second = { ...product(variants(2, 1, false, null), 1), id: 'gid://shopify/Product/10002' }
