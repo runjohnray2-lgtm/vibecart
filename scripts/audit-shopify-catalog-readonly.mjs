@@ -173,6 +173,15 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
   if (index.size !== feed.products.length) {
     throw new Error('Shopify audit variant index and catalog disagree')
   }
+  // Report the merchant's actual Shopify inventory policies separately from
+  // sellability. DENY with zero stock is not purchasable; CONTINUE may be
+  // manufactured to order. This audit has no fresh stock/checkout authority.
+  let denyPolicyVariants = 0
+  let continuePolicyVariants = 0
+  for (const ref of index.values()) {
+    if (ref.inventoryPolicy === 'DENY') denyPolicyVariants++
+    else if (ref.inventoryPolicy === 'CONTINUE') continuePolicyVariants++
+  }
   // A successful Shopify traversal proves transport and exact pagination, NOT
   // that every record mapped into a usable VibeCart catalog. In particular,
   // unpublished, invalid or partially rejected product families are skipped.
@@ -204,6 +213,9 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
     productPages: result.pages,
     publishedProductFamilies: result.snapshot.products.size,
     catalogVariants: feed.products.length,
+    denyPolicyVariants,
+    continuePolicyVariants,
+    sellabilityVerified: false,
     missingImages,
     skippedRecords: result.skipped.length,
     excludedUnpublished,
