@@ -79,7 +79,13 @@ export function createShopifyAdminCatalogSource(
     if (!record(data.product) || data.product.id !== productId) {
       throw new Error('Shopify variant page product id mismatch')
     }
-    return { productId, variants: connectionOf(data.product.variants, 'variants') }
+    const count = data.product.variantsCount
+    if (!record(count) || count.precision !== 'EXACT' || typeof count.count !== 'number' ||
+        !Number.isSafeInteger(count.count) || count.count < 0) {
+      throw new Error('Shopify continuation exact variantsCount missing or approximate')
+    }
+    return { productId, variants: connectionOf(data.product.variants, 'variants'),
+      variantsCount: { count: count.count, precision: 'EXACT' } }
   }
   const fetchHydratedPage = withHydratedShopifyVariants(fetchProducts, { fetchVariantPage, ...options })
   // A cursor-only walk can report a terminal page while silently omitting
