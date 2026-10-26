@@ -198,3 +198,29 @@ test('rejects an empty nonterminal Shopify product page before exposing partial 
   }), options(async () => { throw new Error('unexpected variant fetch') }))
   assert.deepEqual((await emptyStore(null)).products, [])
 })
+
+
+test('fail closed if a >100-variant family count changes or becomes unverifiable during pagination', async () => {
+  const initial = { ...product(100), variantsCount: { count: 225, precision: 'EXACT' } }
+  for (const count of [224, 226, undefined, 225]) {
+    const fresh = count === undefined ? undefined : { count, precision: count === 225 ? 'AT_LEAST' : 'EXACT' }
+    let fetched = 0
+    await assert.rejects(hydrate(initial, options(async productId => {
+      fetched++
+      return {
+        productId,
+        variantsCount: fresh,
+        variants: { nodes: Array.from({ length: 100 }, (_, i) => V(i + 101)),
+          pageInfo: { hasNextPage: true, endCursor: 'c200' } },
+      }
+    })), /variant count changed or became unverifiable/)
+    assert.equal(fetched, 1, 'count drift must stop before requesting another page')
+  }
+  const complete = await hydrate(initial, options(async (productId, cursor) => ({
+    productId, variantsCount: { count: 225, precision: 'EXACT' },
+    variants: cursor === 'c100'
+      ? { nodes: Array.from({ length: 100 }, (_, i) => V(i + 101)), pageInfo: { hasNextPage: true, endCursor: 'c200' } }
+      : { nodes: Array.from({ length: 25 }, (_, i) => V(i + 201)), pageInfo: { hasNextPage: false, endCursor: null } },
+  })))
+  assert.equal(complete.variants.nodes.length, 225)
+})
