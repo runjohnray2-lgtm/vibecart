@@ -82,6 +82,27 @@ test('Admin GraphQL envelope hydrates 225 variants with exact IDs, prices, polic
   assert.ok(calls.every(c => !/mutation|orderCreate|checkoutCreate/i.test(c.document)))
 })
 
+
+test('Admin continuation rejects missing, approximate or drifted Shopify variant counts', async () => {
+  for (const freshCount of [undefined, { count: 226, precision: 'EXACT' }, { count: 225, precision: 'AT_LEAST' }]) {
+    let continuationCalls = 0
+    const source = createShopifyAdminCatalogSource(withCount(async document => {
+      if (document.includes('VibeCartProducts(')) return productEnvelope(product())
+      if (document.includes('VibeCartProductVariants(')) {
+        assert.match(document, /variantsCount\\s*\\{\\s*count\\s+precision\\s*\\}/)
+        continuationCalls++
+        return { data: { product: {
+          id: PRODUCT, variantsCount: freshCount,
+          variants: variants(101, 100, true, 'v200'),
+        } } }
+      }
+      throw new Error('unexpected GraphQL query')
+    }))
+    await assert.rejects(source.fetchPage(null), /continuation exact variantsCount missing or approximate|variant count changed or became unverifiable/)
+    assert.equal(continuationCalls, 1, 'abort before another variant page or catalog publication')
+  }
+})
+
 test('Shopify HTTP-200 GraphQL errors reject partial product data and preserve last good snapshot', async () => {
   const base = createSnapshot('USD')
   const source = createShopifyAdminCatalogSource(withCount(async () => ({
