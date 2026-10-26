@@ -129,6 +129,24 @@ test('probe rejects stale or untrusted UCP discovery metadata without contacting
     { ucp: { ...validUcp.ucp, services: { 'dev.ucp.shopping': [{
       ...service, version: '2025-01-01',
     }] } } },
+    // A same-version official domain with the WRONG operation's schema/spec
+    // is not evidence that this capability conforms to the released contract.
+    { ucp: { ...validUcp.ucp, services: { 'dev.ucp.shopping': [{
+      ...service, schema: 'https://ucp.dev/2026-04-08/services/shopping/unrelated.openrpc.json',
+    }] } } },
+    { ucp: { ...validUcp.ucp, capabilities: {
+      ...validUcp.ucp.capabilities,
+      'dev.ucp.shopping.catalog.search': [{
+        ...search, spec: 'https://ucp.dev/2026-04-08/specification/catalog/lookup',
+      }],
+    } } },
+    { ucp: { ...validUcp.ucp, capabilities: {
+      ...validUcp.ucp.capabilities,
+      'dev.ucp.shopping.catalog.lookup': [{
+        ...validUcp.ucp.capabilities['dev.ucp.shopping.catalog.lookup'][0],
+        schema: 'https://ucp.dev/2026-04-08/schemas/shopping/catalog_search.json',
+      }],
+    } } },
   ]
   for (const discovery of invalid) {
     const s = stub({ 0: discovery })
