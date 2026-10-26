@@ -5,7 +5,7 @@
  */
 export const SHOPIFY_VARIANTS_QUERY =
   'query VibeCartProductVariants($productId: ID!, $cursor: String) { ' +
-  'product(id: $productId) { id variantsCount { count precision } variants(first: 100, after: $cursor) { ' +
+  'product(id: $productId) { id updatedAt variantsCount { count precision } variants(first: 100, after: $cursor) { ' +
   'pageInfo { hasNextPage endCursor } nodes { id title sku price inventoryPolicy inventoryQuantity } ' +
   '} } }'
 
@@ -20,6 +20,8 @@ export type ShopifyVariantPage = {
   variants: ShopifyVariantConnection
   /** Fresh exact count returned by Admin on every continuation request. */
   variantsCount?: { count: number; precision: string }
+  /** Product update timestamp reported alongside this continuation page. */
+  productUpdatedAt?: string | null
 }
 export type ShopifyRawProductsPage = {
   products: unknown[]
@@ -62,6 +64,11 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
   }
   const productId = raw.id
   const initial = unpackConnection(raw.variants)
+  // Shopify includes updatedAt on the initial product query. When available,
+  // it detects same-count edits to the product while variant pages are read.
+  // This is additional drift evidence, not a transactional snapshot.
+  const originalUpdatedAt = typeof raw.updatedAt === 'string' && raw.updatedAt.trim()
+    ? raw.updatedAt : null
   const originalCount = isRecord(raw.variantsCount) && raw.variantsCount.precision === 'EXACT' &&
     typeof raw.variantsCount.count === 'number' && Number.isSafeInteger(raw.variantsCount.count)
     ? raw.variantsCount.count : null
@@ -115,6 +122,9 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
           fresh.count !== originalCount) {
         throw new Error('Shopify variant count changed or became unverifiable during pagination for ' + productId)
       }
+    }
+    if (originalUpdatedAt !== null && next.productUpdatedAt !== originalUpdatedAt) {
+      throw new Error('Shopify product updatedAt changed or became unverifiable during variant pagination for ' + productId)
     }
     page = unpackConnection(next.variants)
     if (page.nodes.length > 100) throw new Error('Shopify continuation variant page exceeds first: 100 for ' + productId)
