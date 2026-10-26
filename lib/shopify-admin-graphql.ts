@@ -141,6 +141,13 @@ export function createShopifyAdminCatalogSource(
       }
       nodes.push(...page.nodes)
       pages++
+      // Image discovery is the only reason to continue media pagination.
+      // A usable preview on this page is enough; do not exhaust a merchant's
+      // remaining videos or fail at the page cap after finding an image.
+      // Preserve hasNextPage truthfully: this is not a full media export.
+      if (page.nodes.some(hasUsablePreview)) {
+        return { ...raw, media: { nodes, pageInfo: page.pageInfo } }
+      }
     }
     return { ...raw, media: { nodes, pageInfo: { hasNextPage: false, endCursor: page.pageInfo.endCursor } } }
   }
