@@ -208,6 +208,16 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
     !hiddenConstraints.some(key => Object.hasOwn(schema, key)) &&
     (schema.required === undefined || Array.isArray(schema.required)) &&
     (schema.required ?? []).every(field => allowed.includes(field))
+  // Catalog discovery must support arbitrary merchant IDs and agent profile
+  // URLs. An enum/const/pattern/format or composed constraint on an input
+  // string can make a named tool unusable for otherwise valid products.
+  // This is input-schema compatibility evidence, NOT a real tool invocation.
+  const acceptsCatalogString = (field, expectedFormat = null) =>
+    field?.type === 'string' &&
+    (expectedFormat === null ? field.format === undefined : field.format === expectedFormat) &&
+    !['const', 'enum', 'pattern', 'maxLength', '$ref', '$dynamicRef',
+      'allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else'].some(key =>
+      Object.hasOwn(field, key))
   function requireCatalogSchema(listed, name, required, protocol) {
     const tool = listed.find(entry => entry.name === name)
     if (!tool) throw new Error(protocol + ' MCP missing ' + name)
@@ -221,7 +231,7 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
       if (!onlyRequires(schema, allowed) ||
           tool.annotations?.readOnlyHint !== true || tool.annotations?.destructiveHint !== false ||
           (name === 'vibecart.get_product' &&
-            (schema.properties.productId?.type !== 'string' ||
+            (!acceptsCatalogString(schema.properties.productId) ||
               !Number.isSafeInteger(schema.properties.productId?.minLength) ||
               schema.properties.productId.minLength < 1))) {
         throw new Error('Generic MCP unsafe or incompatible catalog tool ' + name)
@@ -237,11 +247,11 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
           !meta.required.includes('ucp-agent') || !onlyRequires(meta, ['ucp-agent']) ||
           agent?.type !== 'object' || !Array.isArray(agent.required) ||
           !agent.required.includes('profile') || !onlyRequires(agent, ['profile']) ||
-          agent.properties?.profile?.type !== 'string' || catalog?.type !== 'object') {
+          !acceptsCatalogString(agent.properties?.profile, 'uri') || catalog?.type !== 'object') {
         throw new Error('UCP MCP incompatible meta/catalog schema for ' + name)
       }
       if (name === 'search_catalog' &&
-          (catalog.properties?.query?.type !== 'string' || !onlyRequires(catalog, ['query']))) {
+          (!acceptsCatalogString(catalog.properties?.query) || !onlyRequires(catalog, ['query']))) {
         throw new Error('UCP MCP incompatible catalog search schema for ' + name)
       }
       const key = name === 'lookup_catalog' ? 'ids' : name === 'get_product' ? 'id' : null
@@ -250,9 +260,9 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
         if (!onlyRequires(catalog, [key]) ||
             !Array.isArray(catalog.required) || !catalog.required.includes(key) ||
             field?.type !== (key === 'ids' ? 'array' : 'string') ||
-            (key === 'ids' && (field.items?.type !== 'string' ||
+            (key === 'ids' && (!acceptsCatalogString(field.items) ||
               !Number.isSafeInteger(field.minItems) || field.minItems < 1)) ||
-            (key === 'id' && (!Number.isSafeInteger(field.minLength) || field.minLength < 1))) {
+            (key === 'id' && (!acceptsCatalogString(field) || !Number.isSafeInteger(field.minLength) || field.minLength < 1))) {
           throw new Error('UCP MCP incompatible catalog lookup schema for ' + name)
         }
       }
