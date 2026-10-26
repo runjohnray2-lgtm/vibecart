@@ -43,3 +43,33 @@ test('public feed continues to accept exact nonnegative integer cents including 
     assert.equal(toCatalogFeed(snapshot).products[0].priceCents, priceCents)
   }
 })
+
+
+test('public feed rejects malformed or credential-bearing images in reconstructed snapshots', () => {
+  const base = applyProducts(createSnapshot('USD'), [raw]).snapshot
+  const trusted = toCatalogFeed(base)
+  for (const image of [
+    null, undefined, 7, 'http://cdn.shopify.com/product.jpg',
+    'javascript:alert(1)', 'data:image/png;base64,AAAA', 'https://',
+    'https://operator:private@cdn.shopify.com/product.jpg',
+    'https://cdn.shopify.com/' + 'x'.repeat(2001),
+  ]) {
+    const malformed = {
+      ...base,
+      products: new Map([['123', [{ ...base.products.get('123')[0], image }]]]),
+    }
+    assert.throws(() => toCatalogFeed(malformed), /invalid Shopify snapshot image/, String(image))
+    assert.deepEqual(toCatalogFeed(base), trusted, 'bad restored snapshot must not alter the last-good feed')
+  }
+})
+
+test('public feed permits missing images for diagnostics and normal HTTPS product images', () => {
+  const base = applyProducts(createSnapshot('USD'), [raw]).snapshot
+  for (const image of ['', 'https://cdn.shopify.com/synthetic-product.jpg']) {
+    const restored = {
+      ...base,
+      products: new Map([['123', [{ ...base.products.get('123')[0], image }]]]),
+    }
+    assert.equal(toCatalogFeed(restored).products[0].image, image)
+  }
+})
