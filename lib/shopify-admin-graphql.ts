@@ -119,6 +119,12 @@ export function createShopifyAdminCatalogSource(
     const productId = raw.id
     const originalUpdatedAt = typeof raw.updatedAt === 'string' && raw.updatedAt.trim()
       ? raw.updatedAt : null
+    // Without the initial version marker, continuation pages can silently mix
+    // images from different product revisions. Admin GraphQL selects updatedAt;
+    // a missing value must fail closed before requesting further media.
+    if (originalUpdatedAt === null) {
+      throw new Error('Shopify media pagination requires product updatedAt')
+    }
     const cursors = new Set<string>()
     const nodes = [...first.nodes]
     let page = first
