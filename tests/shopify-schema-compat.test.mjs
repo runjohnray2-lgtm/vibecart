@@ -9,7 +9,7 @@ const { SHOPIFY_PRODUCTS_QUERY } = modules['shopify-catalog-sync']
 test('Admin query uses schema-verified featuredMedia and returns continuation cursor', () => {
   assert.match(SHOPIFY_PRODUCTS_QUERY, /featuredMedia\s*\{\s*preview\s*\{\s*image\s*\{\s*url\s*\}/)
   assert.doesNotMatch(SHOPIFY_PRODUCTS_QUERY, /featuredImage/)
-  assert.match(SHOPIFY_PRODUCTS_QUERY, /media\(first: 5\)\s*\{\s*nodes\s*\{\s*id\s+preview\s*\{\s*image\s*\{\s*url\s*\}/)
+  assert.match(SHOPIFY_PRODUCTS_QUERY, /media\(first: 5\)\s*\{\s*pageInfo\s*\{\s*hasNextPage\s*\}\s*nodes\s*\{\s*id\s+preview\s*\{\s*image\s*\{\s*url\s*\}/)
   assert.doesNotMatch(SHOPIFY_PRODUCTS_QUERY, /\bimages\s*\(/)
   assert.doesNotMatch(SHOPIFY_PRODUCTS_QUERY, /inventoryQuantity\s+image\s*\{/)
   assert.match(SHOPIFY_PRODUCTS_QUERY, /variants\(first: 100\)\s*\{\s*pageInfo\s*\{\s*hasNextPage\s+endCursor\s*\}/)
@@ -65,6 +65,33 @@ test('null featuredMedia uses Admin media preview fallback without inventing var
   assert.equal(result.products[0].priceCents, 1250)
   assert.equal(result.products[0].shopify.inventoryPolicy, 'CONTINUE')
   assert.equal(result.products[0].image, 'https://cdn.shopify.com/media-fallback.jpg')
+})
+
+test('imageless first media page with continuation is not certified as a complete image audit', () => {
+  const raw = {
+    id: 'gid://shopify/Product/123', title: 'SYNTHETIC MULTIMEDIA LED',
+    status: 'ACTIVE', publishedAt: '2026-10-18T00:00:00Z', featuredMedia: null,
+    media: { nodes: [{ id: 'gid://shopify/Video/999', preview: { image: null } }],
+      pageInfo: { hasNextPage: true } },
+    variants: { nodes: [
+      { id: 'gid://shopify/ProductVariant/456', price: '12.50', inventoryPolicy: 'CONTINUE', inventoryQuantity: 0 },
+    ], pageInfo: { hasNextPage: false } },
+  }
+  const incomplete = mapShopifyProducts([raw], { currencyCode: 'USD' })
+  assert.equal(incomplete.products.length, 0, 'do not publish a family with uninspected image media')
+  assert.equal(incomplete.skipped.length, 1)
+  assert.match(incomplete.skipped[0].reason, /image coverage unverified/)
+  const terminal = mapShopifyProducts([{ ...raw, media: {
+    ...raw.media, pageInfo: { hasNextPage: false },
+  } }], { currencyCode: 'USD' })
+  assert.equal(terminal.products.length, 1, 'a fully inspected imageless family remains diagnosable')
+  assert.equal(terminal.products[0].image, '')
+  const imageFound = mapShopifyProducts([{ ...raw, media: {
+    nodes: [{ id: 'gid://shopify/MediaImage/999', preview: { image: { url: 'https://cdn.shopify.com/valid.jpg' } } }],
+    pageInfo: { hasNextPage: true },
+  } }], { currencyCode: 'USD' })
+  assert.equal(imageFound.products.length, 1, 'first-page image makes additional media irrelevant for fallback')
+  assert.equal(imageFound.products[0].image, 'https://cdn.shopify.com/valid.jpg')
 })
 
 test('nested Admin query uses bounded first-page connections to avoid Shopify requested-cost blowups', () => {
