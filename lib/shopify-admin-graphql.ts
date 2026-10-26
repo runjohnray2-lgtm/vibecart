@@ -91,7 +91,9 @@ export function createShopifyAdminCatalogSource(
       variantsCount: { count: count.count, precision: 'EXACT' },
       productUpdatedAt: typeof data.product.updatedAt === 'string' ? data.product.updatedAt : null }
   }
-  const fetchHydratedPage = withHydratedShopifyVariants(fetchProducts, { fetchVariantPage, ...options })
+  const fetchHydratedPage = withHydratedShopifyVariants(fetchProducts, {
+    fetchVariantPage, ...options, requireVersionForContinuation: true,
+  })
   const maxMediaPages = options.maxMediaPages ?? 20
   if (!Number.isSafeInteger(maxMediaPages) || maxMediaPages < 1 || maxMediaPages > 20) {
     throw new Error('invalid Shopify media pagination limit')
