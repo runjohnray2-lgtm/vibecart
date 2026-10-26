@@ -85,7 +85,8 @@ export function createShopifyAdminCatalogSource(
       throw new Error('Shopify continuation exact variantsCount missing or approximate')
     }
     return { productId, variants: connectionOf(data.product.variants, 'variants'),
-      variantsCount: { count: count.count, precision: 'EXACT' } }
+      variantsCount: { count: count.count, precision: 'EXACT' },
+      productUpdatedAt: typeof data.product.updatedAt === 'string' ? data.product.updatedAt : null }
   }
   const fetchHydratedPage = withHydratedShopifyVariants(fetchProducts, { fetchVariantPage, ...options })
   // A cursor-only walk can report a terminal page while silently omitting
