@@ -164,10 +164,21 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
   const { syncShopifyCatalog, toCatalogFeed, buildVariantIndex } = loaded['shopify-catalog-sync']
   const source = createShopifyAdminCatalogSource(execute)
   const currency = await source.fetchShopCurrency()
-  const result = await syncShopifyCatalog({
-    shopCurrencyCode: currency, expectedCurrencyCode,
-    fetchPage: source.fetchPage,
-  })
+  let result
+  try {
+    result = await syncShopifyCatalog({
+      shopCurrencyCode: currency, expectedCurrencyCode,
+      fetchPage: source.fetchPage,
+    })
+  } catch (error) {
+    // The lower-level Shopify adapter includes raw variant IDs in this
+    // validation error. An operator audit must fail closed without returning
+    // merchant identities to its caller or logs.
+    if (error instanceof Error && /missing or invalid inventoryPolicy/.test(error.message)) {
+      throw new Error('Shopify audit rejected a variant with missing or invalid inventory policy')
+    }
+    throw error
+  }
   const feed = toCatalogFeed(result.snapshot)
   // The trusted variant index already rejects unknown inventory policies, but
   // its error includes the real Shopify variant ID. Fail earlier with only an
