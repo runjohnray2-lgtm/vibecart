@@ -278,7 +278,7 @@ test('probe rejects catalog ID or profile schemas narrowed to specific values', 
     { index: 4, name: 'get_product',
       target: tool => tool.inputSchema.properties.meta.properties['ucp-agent'].properties.profile,
       key: 'enum', value: ['https://only-one-agent.example/profile'],
-      error: /meta\\/catalog schema/ },
+      error: /meta\/catalog schema/ },
   ]
   for (const { index, name, target, key, value, error } of cases) {
     const payload = structuredClone(replies[index])
