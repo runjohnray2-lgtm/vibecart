@@ -28,7 +28,7 @@ const MAX_SHOPIFY_AUDIT_RESPONSE_BYTES = 1024 * 1024
 /** Bound actual response bytes before buffering/decoding private Admin data. */
 async function readBoundedShopifyJsonBody(response) {
   const declared = response.headers.get('content-length')
-  if (declared !== null && /^\\d+$/.test(declared.trim()) &&
+  if (declared !== null && /^\d+$/.test(declared.trim()) &&
       BigInt(declared.trim()) > BigInt(MAX_SHOPIFY_AUDIT_RESPONSE_BYTES)) {
     await response.body?.cancel().catch(() => {})
     throw new Error('Shopify audit response too large')
