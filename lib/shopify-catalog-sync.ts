@@ -370,6 +370,18 @@ function assertSnapshotProductOwnership(familyKey: string, product: ShopifyCatal
   }
 }
 
+/** Rehydrated snapshots bypass the mapper: never publish a malformed image URL. */
+function validSnapshotImage(image: unknown): image is string {
+  if (typeof image !== 'string' || image.length > 2000) return false
+  if (image === '') return true // Missing images are reported by the readiness audit.
+  try {
+    const url = new URL(image)
+    return url.protocol === 'https:' && !url.username && !url.password
+  } catch {
+    return false
+  }
+}
+
 /** Deterministic feed for VIBECART_CATALOG_URL: only fields the catalog parser accepts, sorted by id. */
 export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED_PRODUCTS): { products: VibeProduct[] } {
   const seen = new Set<string>()
@@ -394,6 +406,11 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
       // price to AI agents, even if the variant identity itself is valid.
       if (!Number.isSafeInteger(p.priceCents) || p.priceCents < 0) {
         throw new Error('invalid Shopify snapshot priceCents for catalog variant: ' + p.id)
+      }
+      // A restored snapshot can bypass the Shopify mapper. Never expose a
+      // non-HTTPS, oversized, credential-bearing or malformed image URL.
+      if (!validSnapshotImage(p.image)) {
+        throw new Error('invalid Shopify snapshot image for catalog variant: ' + p.id)
       }
       products.push({
         id: p.id,
