@@ -205,7 +205,7 @@ test('probe rejects catalog discovery that demands additional required credentia
       const catalog = tool.inputSchema.properties.catalog
       catalog.required.push('apiKey')
       catalog.properties.apiKey = { type: 'string' }
-    }, error: /UCP MCP incompatible meta\/catalog schema/ },
+    }, error: /UCP MCP incompatible catalog lookup schema/ },
     { index: 4, name: 'get_product', mutate: tool => {
       const agent = tool.inputSchema.properties.meta.properties['ucp-agent']
       agent.required.push('password')
