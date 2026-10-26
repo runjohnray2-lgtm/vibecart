@@ -22,6 +22,45 @@ const MODULE_PATHS = [
   'lib/shopify-admin-graphql.ts',
 ]
 
+
+const MAX_SHOPIFY_AUDIT_RESPONSE_BYTES = 1024 * 1024
+
+/** Bound actual response bytes before buffering/decoding private Admin data. */
+async function readBoundedShopifyJsonBody(response) {
+  const declared = response.headers.get('content-length')
+  if (declared !== null && /^\\d+$/.test(declared.trim()) &&
+      BigInt(declared.trim()) > BigInt(MAX_SHOPIFY_AUDIT_RESPONSE_BYTES)) {
+    await response.body?.cancel().catch(() => {})
+    throw new Error('Shopify audit response too large')
+  }
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    throw new Error('Shopify audit expected a streamable JSON response')
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  let bytes = 0
+  let body = ''
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      bytes += value.byteLength
+      if (bytes > MAX_SHOPIFY_AUDIT_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => {})
+        throw new Error('Shopify audit response too large')
+      }
+      body += decoder.decode(value, { stream: true })
+    }
+    body += decoder.decode()
+    return body
+  } catch (error) {
+    if (error instanceof TypeError) throw new Error('Shopify audit invalid UTF-8 JSON response')
+    throw error
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 export function createReadOnlyShopifyTransport({
   shopDomain, token, apiVersion = '2026-10', allowedDocuments,
   fetchImpl = fetch, maxRequests = 120,
@@ -97,8 +136,7 @@ export function createReadOnlyShopifyTransport({
       if (!(response.headers.get('content-type') || '').toLowerCase().includes('application/json')) {
         throw new Error('Shopify audit expected JSON')
       }
-      const body = await response.text()
-      if (body.length > 1024 * 1024) throw new Error('Shopify audit response too large')
+      const body = await readBoundedShopifyJsonBody(response)
       let parsed
       try {
         parsed = JSON.parse(body)
