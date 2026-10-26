@@ -336,6 +336,43 @@ test('read-only audit flags missing Shopify images without exposing private cata
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE-IMAGELESS-SKU|SYNTHETIC IMAGELESS LIGHT|44\.99|45\.99|ProductVariant/)
 })
 
+test('read-only audit does not mislabel an uninspected later media page as confirmed missing images', async () => {
+  const execute = async document => {
+    if (document.includes('shop { currencyCode }')) {
+      return { data: { shop: { currencyCode: 'USD' } } }
+    }
+    if (document.includes('VibeCartProductsCount')) {
+      return { data: { productsCount: { count: 1, precision: 'EXACT' } } }
+    }
+    if (document.includes('VibeCartProducts(')) {
+      return { data: { products: {
+        nodes: [{
+          id: 'gid://shopify/Product/300', title: 'PRIVATE MULTIMEDIA PRODUCT',
+          status: 'ACTIVE', publishedAt: '2026-10-18T00:00:00Z',
+          featuredMedia: null,
+          media: { nodes: [{ id: 'gid://shopify/Video/999', preview: { image: null } }],
+            pageInfo: { hasNextPage: true } },
+          variantsCount: { count: 1, precision: 'EXACT' },
+          variants: { nodes: [{
+            id: 'gid://shopify/ProductVariant/301', price: '44.99',
+            sku: 'PRIVATE-MEDIA-SKU', inventoryPolicy: 'CONTINUE', inventoryQuantity: 0,
+          }], pageInfo: { hasNextPage: false, endCursor: null } },
+        }],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      } } }
+    }
+    throw new Error('unexpected query')
+  }
+  const result = await auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' })
+  assert.equal(result.traversalVerified, true, 'the Admin product traversal was exact')
+  assert.equal(result.catalogReady, false, 'image coverage is incomplete')
+  assert.equal(result.publishedProductFamilies, 0, 'incomplete family must not be published')
+  assert.equal(result.catalogVariants, 0)
+  assert.equal(result.invalidSkippedRecords, 1)
+  assert.equal(result.missingImages, 0, 'no missing-image claim without inspecting later media pages')
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE-MULTIMEDIA|PRIVATE-MEDIA-SKU|44\\.99|ProductVariant/)
+})
+
 test('empty but EXACT Shopify traversal is not certified as a merchant-ready catalog', async () => {
   const execute = async document => {
     if (document.includes('shop { currencyCode }')) {
