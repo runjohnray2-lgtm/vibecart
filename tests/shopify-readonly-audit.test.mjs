@@ -362,3 +362,70 @@ test('read-only transport retries only bounded Shopify throttling without exceed
   assert.deepEqual(await noRetry(READ, {}), { errors: [{ message: 'bad query', extensions: { code: 'GRAPHQL_VALIDATION_FAILED' } }] })
   assert.equal(errorCalls, 1, 'non-throttle GraphQL errors must not be retried')
 })
+
+
+test('read-only transport rejects oversized declared Content-Length without buffering', async () => {
+  let canceled = false
+  const stream = new ReadableStream({
+    cancel() { canceled = true },
+  })
+  const execute = createReadOnlyShopifyTransport({
+    ...opts,
+    fetchImpl: async () => new Response(stream, {
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-length': String(1024 * 1024 + 1) },
+    }),
+  })
+  await assert.rejects(execute(READ, {}), /Shopify audit response too large/)
+  assert.equal(canceled, true, 'oversized declared response must be canceled')
+})
+
+test('read-only transport bounds Admin response by UTF-8 bytes, not JavaScript characters', async () => {
+  // 530,000 non-ASCII characters exceed 1 MiB in UTF-8 even though
+  // their JavaScript string length is below the former character cap.
+  const execute = createReadOnlyShopifyTransport({
+    ...opts,
+    fetchImpl: async () => json({ data: { synthetic: 'é'.repeat(530000) } }),
+  })
+  await assert.rejects(execute(READ, {}), /Shopify audit response too large/)
+})
+
+test('read-only transport cancels streaming responses immediately after crossing the byte cap', async () => {
+  let canceled = false
+  let chunks = 0
+  const stream = new ReadableStream({
+    pull(controller) {
+      chunks++
+      controller.enqueue(new Uint8Array(600000).fill(65))
+    },
+    cancel() { canceled = true },
+  }, { highWaterMark: 0 })
+  const execute = createReadOnlyShopifyTransport({
+    ...opts,
+    fetchImpl: async () => new Response(stream, {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }),
+  })
+  await assert.rejects(execute(READ, {}), /Shopify audit response too large/)
+  assert.equal(canceled, true)
+  assert.ok(chunks <= 3, 'reader must stop rather than download the full response')
+})
+
+test('read-only transport accepts valid JSON split across UTF-8 stream chunks', async () => {
+  const expected = { data: { synthetic: 'valid' } }
+  const bytes = new TextEncoder().encode(JSON.stringify(expected))
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes.subarray(0, 9))
+      controller.enqueue(bytes.subarray(9))
+      controller.close()
+    },
+  })
+  const execute = createReadOnlyShopifyTransport({
+    ...opts,
+    fetchImpl: async () => new Response(stream, {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }),
+  })
+  assert.deepEqual(await execute(READ, {}), expected)
+})
