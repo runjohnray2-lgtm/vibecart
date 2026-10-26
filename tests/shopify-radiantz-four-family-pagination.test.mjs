@@ -37,6 +37,7 @@ const product = p => ({
   description: 'Synthetic fixture only',
   status: 'ACTIVE',
   publishedAt: '2026-10-18T00:00:00Z',
+  updatedAt: '2026-10-25T00:00:00Z',
   featuredMedia: { preview: { image: { url: 'https://cdn.shopify.com/synthetic.jpg' } } },
   variantsCount: { count: sizes.get(p), precision: 'EXACT' },
   variants: variantConnection(p, 1, 100),
@@ -75,7 +76,7 @@ test('four large Radiantz-like families hydrate across product and variant curso
       const start = Number(match[2]) + 1
       assert.equal(variables.productId, productGid(p))
       return { data: { product: {
-        id: productGid(p),
+        id: productGid(p), updatedAt: '2026-10-25T00:00:00Z',
         variantsCount: { count: sizes.get(p), precision: 'EXACT' },
         variants: variantConnection(p, start, Math.min(start + 99, sizes.get(p))),
       } } }
