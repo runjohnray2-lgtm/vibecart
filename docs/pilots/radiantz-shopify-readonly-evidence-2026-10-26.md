@@ -9,7 +9,7 @@
 - **39 ACTIVE products / 921 reported variants**; all 39 had `publishedAt` populated.
 - **5 DRAFT products / 49 reported variants**; all 5 had `publishedAt: null`.
 - **970 reported variants total** across both statuses. These are live observations, not immutable expectations or proof of a fully hydrated/merchant-ready catalog.
-- Among ACTIVE products, **3 lacked a featured image and no image appeared in the first five media nodes**. This does not prove later media pages are empty; image completeness remains unverified.
+- A follow-up read-only `VibeCartImageCoverage` GraphQL operation checked `featuredMedia.preview.image.url` and up to 10 `media` nodes for **all 44 products**. All 44 were returned on one terminal product page, and **none of the 44 media connections reported `hasNextPage: true`**. Exactly **3 of 39 ACTIVE product families have no featured preview image and zero media nodes**. This establishes three actual missing-image product families in the connected shop at inspection time, rather than a first-five-media sampling ambiguity. It does **not** establish image quality, publication in every sales channel, or variant-specific image coverage.
 
 ## Actual Admin GraphQL compatibility and >100-variant traversal
 
@@ -33,7 +33,7 @@ On worker draft PR #119 at `b42dff503360ce4fe9529ef772d485dc7d8e0045`, [GitHub A
 
 ## Remaining gates and coordination
 
-- No full 44-product hydrated Admin audit or independently verified final VibeCart feed was run. Exact IDs, SKU mapping, prices, all image pages, fitment and fresh checkout sellability still require end-to-end verification.
+- No full 44-product hydrated Admin audit or independently verified final VibeCart feed was run. Exact IDs, SKU mapping, prices, fitment and fresh checkout sellability still require end-to-end verification. Image presence was checked across all reported product media pages, but image quality and per-variant mapping remain unverified.
 - No external agent read, MCP/UCP product fetch, cart, Stripe TEST transaction, Neon order, staging deployment, database write, or merchant mutation occurred.
 - #108's distinct zero-incremental-cost staging database, Preview-only Stripe TEST credentials, and tenant isolation/security proof remain unverified. Do not run write-capable staging tests until all gates pass.
 - Keep #119 draft and stacked on #104 -> #103; #106 closed unmerged and #107 is based on #104. Work-owned #121 must selectively reconcile the Shopify-owned changes and rerun integrated CI. No automatic merges or deployments.
