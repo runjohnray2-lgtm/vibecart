@@ -226,6 +226,41 @@ test('probe rejects catalog discovery that demands additional required credentia
   }
 })
 
+test('probe rejects composed or conditional schemas that conceal mandatory catalog inputs', async () => {
+  const cases = [
+    { index: 2, name: 'vibecart.list_products', target: tool => tool.inputSchema,
+      key: 'allOf', value: [{ required: ['secret'] }], error: /Generic MCP unsafe or incompatible/ },
+    { index: 2, name: 'vibecart.get_product', target: tool => tool.inputSchema,
+      key: 'minProperties', value: 2, error: /Generic MCP unsafe or incompatible/ },
+    { index: 4, name: 'search_catalog', target: tool => tool.inputSchema,
+      key: 'dependentSchemas', value: { meta: { required: ['token'] } }, error: /meta\\/catalog schema/ },
+    { index: 4, name: 'search_catalog', target: tool => tool.inputSchema.properties.meta,
+      key: 'if', value: { required: ['ucp-agent'] }, error: /meta\\/catalog schema/ },
+    { index: 4, name: 'lookup_catalog', target: tool => tool.inputSchema.properties.meta.properties['ucp-agent'],
+      key: '$ref', value: '#/$defs/agentWithSecret', error: /meta\\/catalog schema/ },
+    { index: 4, name: 'search_catalog', target: tool => tool.inputSchema.properties.catalog,
+      key: 'allOf', value: [{ required: ['apiKey'] }], error: /catalog search schema/ },
+    { index: 4, name: 'lookup_catalog', target: tool => tool.inputSchema.properties.catalog,
+      key: 'minProperties', value: 2, error: /catalog lookup schema/ },
+    { index: 4, name: 'get_product', target: tool => tool.inputSchema.properties.catalog,
+      key: 'dependentRequired', value: { id: ['token'] }, error: /catalog lookup schema/ },
+  ]
+  for (const { index, name, target, key, value, error } of cases) {
+    const payload = structuredClone(replies[index])
+    const tool = payload.result.tools.find(entry => entry.name === name)
+    target(tool)[key] = value
+    const s = stub({ [index]: payload })
+    await assert.rejects(
+      probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl: s.fetchImpl }),
+      error,
+      name + ' with ' + key + ' must not be certified as invokable',
+    )
+    assert.equal(s.requests.length, 5)
+    assert.ok(s.requests.every(request => !request.options.body ||
+      ['initialize', 'tools/list'].includes(JSON.parse(request.options.body).method)))
+  }
+})
+
 test('probe rejects UCP lookup tools with incompatible input schemas', async () => {
   const s = stub({ 4: rpc(2, { tools: [
     ucpTool('search_catalog'),
