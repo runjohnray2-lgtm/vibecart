@@ -69,9 +69,14 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
   // This is additional drift evidence, not a transactional snapshot.
   const originalUpdatedAt = typeof raw.updatedAt === 'string' && raw.updatedAt.trim()
     ? raw.updatedAt : null
-  const originalCount = isRecord(raw.variantsCount) && raw.variantsCount.precision === 'EXACT' &&
-    typeof raw.variantsCount.count === 'number' && Number.isSafeInteger(raw.variantsCount.count)
-    ? raw.variantsCount.count : null
+  // Standalone hydration must reject an explicitly supplied approximate or
+  // malformed count, even without the Admin source's independent guard.
+  if (raw.variantsCount !== undefined &&
+      (!isRecord(raw.variantsCount) || raw.variantsCount.precision !== 'EXACT' ||
+       !Number.isSafeInteger(raw.variantsCount.count) || raw.variantsCount.count < 0)) {
+    throw new Error('Shopify initial exact variantsCount missing or approximate')
+  }
+  const originalCount = isRecord(raw.variantsCount) ? raw.variantsCount.count as number : null
   // Admin GraphQL requests at most 100 variants per page. A zero-item
   // nonterminal page or an oversized page cannot prove complete traversal.
   if (initial.nodes.length > 100 || (initial.nodes.length === 0 && initial.hasNextPage)) {
@@ -99,6 +104,9 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
       seen.add(id)
       all.push(node)
       if (all.length > maxVariants) throw new Error('Shopify variant count exceeds limit for ' + productId)
+      if (originalCount !== null && all.length > originalCount) {
+        throw new Error('Shopify hydrated variants exceed independent exact count')
+      }
     }
   }
   append(initial.nodes)
@@ -131,6 +139,10 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
     if (page.nodes.length === 0) throw new Error('empty Shopify continuation variant page for ' + productId)
     append(page.nodes)
     pages++
+  }
+  // A terminal cursor alone cannot prove a complete family.
+  if (originalCount !== null && all.length !== originalCount) {
+    throw new Error('Shopify hydrated variants incomplete: independent exact count mismatch')
   }
   return { ...raw, variants: { nodes: all, pageInfo: { hasNextPage: false, endCursor: page.endCursor } } }
 }

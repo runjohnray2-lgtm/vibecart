@@ -224,3 +224,39 @@ test('fail closed if a >100-variant family count changes or becomes unverifiable
   })))
   assert.equal(complete.variants.nodes.length, 225)
 })
+
+test('standalone hydration fails closed on approximate, truncated and overflowing exact counts', async () => {
+  const noFetch = options(async () => { throw new Error('unexpected continuation') })
+  for (const variantsCount of [
+    { count: 2, precision: 'AT_LEAST' },
+    { count: -1, precision: 'EXACT' },
+    { count: 2.5, precision: 'EXACT' },
+    null,
+  ]) {
+    await assert.rejects(
+      hydrate({ ...product(2, false), variantsCount }, noFetch),
+      /initial exact variantsCount missing or approximate/,
+    )
+  }
+  await assert.rejects(
+    hydrate({ ...product(2, false), variantsCount: { count: 3, precision: 'EXACT' } }, noFetch),
+    /hydrated variants incomplete: independent exact count mismatch/,
+  )
+  await assert.rejects(
+    hydrate({ ...product(2, false), variantsCount: { count: 1, precision: 'EXACT' } }, noFetch),
+    /hydrated variants exceed independent exact count/,
+  )
+  const initial = { ...product(100), variantsCount: { count: 150, precision: 'EXACT' } }
+  const continuation = count => options(async productId => ({
+    productId,
+    variantsCount: { count: 150, precision: 'EXACT' },
+    variants: {
+      nodes: Array.from({ length: count }, (_, i) => V(i + 101)),
+      pageInfo: { hasNextPage: false, endCursor: null },
+    },
+  }))
+  await assert.rejects(hydrate(initial, continuation(49)), /hydrated variants incomplete/)
+  await assert.rejects(hydrate(initial, continuation(51)), /hydrated variants exceed/)
+  const complete = await hydrate(initial, continuation(50))
+  assert.equal(complete.variants.nodes.length, 150)
+})
