@@ -212,6 +212,37 @@ test('read-only audit rejects missing or invalid inventory policy without leakin
   }
 })
 
+
+test('read-only audit suppresses variant IDs and unexpected transport details in every failure path', async () => {
+  const privateId = 'gid://shopify/ProductVariant/99009'
+  const privateSku = 'SENSITIVE-SYNTHETIC-SKU'
+  const execute = async document => {
+    if (document.includes('shop { currencyCode }')) return { data: { shop: { currencyCode: 'USD' } } }
+    if (document.includes('VibeCartProductsCount')) return { data: { productsCount: { count: 1, precision: 'EXACT' } } }
+    if (document.includes('VibeCartProducts(')) {
+      const variant = { id: privateId, sku: privateSku, title: 'Synthetic',
+        price: '123.45', inventoryPolicy: 'CONTINUE', inventoryQuantity: 0 }
+      return { data: { products: { nodes: [{
+        id: 'gid://shopify/Product/99001', title: 'PRIVATE SYNTHETIC PRODUCT',
+        status: 'ACTIVE', publishedAt: '2026-10-18T00:00:00Z',
+        variantsCount: { count: 2, precision: 'EXACT' },
+        variants: { nodes: [variant, { ...variant }], pageInfo: { hasNextPage: false, endCursor: null } },
+      }], pageInfo: { hasNextPage: false, endCursor: null } } } }
+    }
+    throw new Error('unexpected query')
+  }
+  const assertPrivateError = error => {
+    assert.match(error.message, /Shopify audit incomplete or invalid; private merchant details suppressed/)
+    assert.doesNotMatch(error.message, /ProductVariant|99009|SENSITIVE-|123\\.45|PRIVATE SYNTHETIC|secret/)
+    return true
+  }
+  await assert.rejects(auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' }), assertPrivateError)
+  await assert.rejects(auditShopifyCatalogReadOnly({
+    execute: async () => { throw new Error('private secret: sk_test_NEVER_PRINT') },
+    expectedCurrencyCode: 'USD',
+  }), assertPrivateError)
+})
+
 test('read-only audit fails on currency mismatch or independently incomplete Shopify product count', async () => {
   const currency = async document => {
     if (document.includes('shop { currencyCode }')) return { data: { shop: { currencyCode: 'USD' } } }
