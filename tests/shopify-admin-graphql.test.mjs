@@ -24,6 +24,7 @@ const variants = (start, count, hasNextPage, endCursor) => ({
 const product = (variantConnection = variants(1, 100, true, 'v100'), expectedCount = 225, precision = 'EXACT') => ({
   id: PRODUCT, title: 'SYNTHETIC light', description: 'Synthetic fixture',
   status: 'ACTIVE', publishedAt: '2026-10-18T00:00:00Z',
+  updatedAt: '2026-10-25T00:00:00Z',
   variants: variantConnection,
   variantsCount: { count: expectedCount, precision },
 })
@@ -52,10 +53,12 @@ test('Admin GraphQL envelope hydrates 225 variants with exact IDs, prices, polic
     if (document.includes('VibeCartProductVariants(')) {
       assert.equal(variables.productId, PRODUCT)
       if (variables.cursor === 'v100') return { data: { product: {
-        id: PRODUCT, variantsCount: { count: 225, precision: 'EXACT' }, variants: variants(101, 100, true, 'v200'),
+        id: PRODUCT, updatedAt: '2026-10-25T00:00:00Z',
+        variantsCount: { count: 225, precision: 'EXACT' }, variants: variants(101, 100, true, 'v200'),
       } } }
       if (variables.cursor === 'v200') return { data: { product: {
-        id: PRODUCT, variantsCount: { count: 225, precision: 'EXACT' }, variants: variants(201, 25, false, 'v225'),
+        id: PRODUCT, updatedAt: '2026-10-25T00:00:00Z',
+        variantsCount: { count: 225, precision: 'EXACT' }, variants: variants(201, 25, false, 'v225'),
       } } }
     }
     if (document.includes('shop { currencyCode }')) return { data: { shop: { currencyCode: 'USD' } } }
@@ -101,6 +104,22 @@ test('Admin continuation rejects missing, approximate or drifted Shopify variant
     await assert.rejects(source.fetchPage(null), /continuation exact variantsCount missing or approximate|variant count changed or became unverifiable/)
     assert.equal(continuationCalls, 1, 'abort before another variant page or catalog publication')
   }
+})
+
+test('Admin rejects missing initial version before requesting >100-variant continuation', async () => {
+  let continuationCalls = 0
+  const source = createShopifyAdminCatalogSource(withCount(async document => {
+    if (document.includes('VibeCartProducts(')) {
+      return productEnvelope({ ...product(), updatedAt: undefined })
+    }
+    if (document.includes('VibeCartProductVariants(')) {
+      continuationCalls++
+      throw new Error('unexpected continuation request')
+    }
+    throw new Error('unexpected GraphQL query')
+  }))
+  await assert.rejects(source.fetchPage(null), /variant pagination requires product updatedAt/)
+  assert.equal(continuationCalls, 0, 'reject mixed-snapshot risk before additional Admin requests')
 })
 
 test('Admin continuation rejects same-count variant edits detected by Shopify product updatedAt', async () => {
