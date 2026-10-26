@@ -305,7 +305,7 @@ test('probe rejects catalog schemas that cannot accept a short ID or single look
       key: 'minLength', value: 2, error: /catalog search schema/ },
     { index: 4, name: 'get_product',
       target: tool => tool.inputSchema.properties.meta.properties['ucp-agent'].properties.profile,
-      key: 'minLength', value: 999, error: /meta\\/catalog schema/ },
+      key: 'minLength', value: 999, error: /meta\/catalog schema/ },
     { index: 4, name: 'lookup_catalog',
       target: tool => tool.inputSchema.properties.catalog.properties.ids.items,
       key: 'minLength', value: 2, error: /catalog lookup schema/ },
