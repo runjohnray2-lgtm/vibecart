@@ -297,7 +297,7 @@ test('Admin media pagination hydrates later image pages and preserves exact vari
       mediaCalls++
       assert.equal(variables.productId, PRODUCT)
       assert.equal(variables.cursor, 'media-next')
-      assert.match(document, /media\\(first: 20, after: \\$cursor\\)/)
+      assert.match(document, /media\(first: 20, after: \$cursor\)/)
       return { data: { product: {
         id: PRODUCT, updatedAt: initial.updatedAt,
         media: { nodes: [{ id: 'gid://shopify/MediaImage/502',
