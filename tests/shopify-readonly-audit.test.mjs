@@ -323,7 +323,7 @@ test('read-only transport retries only bounded Shopify throttling without exceed
     const execute = createReadOnlyShopifyTransport({
       ...opts,
       sleepImpl: async () => {},
-      fetchImpl: async () => responses[calls++],
+      fetchImpl: async () => responses[calls++](),
     })
     await assert.rejects(execute(READ, {}), /bounded retries exhausted/)
     assert.equal(calls, 3, 'retry count is bounded')
