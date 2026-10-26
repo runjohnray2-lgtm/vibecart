@@ -122,6 +122,7 @@ test('read-only audit traverses a real adapter contract and returns aggregates, 
     productPages: 1, publishedProductFamilies: 1, catalogVariants: 1, skippedRecords: 0,
   })
   assert.equal(result.missingImages, 0)
+  assert.equal(result.productFamiliesWithMissingImages, 0)
   assert.equal(result.denyPolicyVariants, 0)
   assert.equal(result.continuePolicyVariants, 1)
   assert.equal(result.sellabilityVerified, false, 'a read-only audit cannot authorize checkout')
@@ -232,11 +233,15 @@ test('read-only audit flags missing Shopify images without exposing private cata
           id: 'gid://shopify/Product/300', title: 'SYNTHETIC IMAGELESS LIGHT',
           description: 'Synthetic only', status: 'ACTIVE', publishedAt: '2026-10-18T00:00:00Z',
           featuredMedia: null, media: { nodes: [] },
-          variantsCount: { count: 1, precision: 'EXACT' },
+          variantsCount: { count: 2, precision: 'EXACT' },
           variants: { nodes: [{
             id: 'gid://shopify/ProductVariant/301', title: 'Red',
             sku: 'PRIVATE-IMAGELESS-SKU', price: '44.99',
             inventoryPolicy: 'CONTINUE', inventoryQuantity: 0,
+          }, {
+            id: 'gid://shopify/ProductVariant/302', title: 'Amber',
+            sku: 'PRIVATE-IMAGELESS-SKU-2', price: '45.99',
+            inventoryPolicy: 'DENY', inventoryQuantity: 0,
           }], pageInfo: { hasNextPage: false, endCursor: null } },
         }],
         pageInfo: { hasNextPage: false, endCursor: null },
@@ -247,14 +252,15 @@ test('read-only audit flags missing Shopify images without exposing private cata
   const result = await auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' })
   assert.equal(result.traversalVerified, true)
   assert.equal(result.publishedProductFamilies, 1)
-  assert.equal(result.catalogVariants, 1)
+  assert.equal(result.catalogVariants, 2)
   assert.equal(result.skippedRecords, 0)
   assert.equal(result.warnings, 0)
-  assert.equal(result.missingImages, 1)
+  assert.equal(result.missingImages, 2, 'two variants lack images')
+  assert.equal(result.productFamiliesWithMissingImages, 1, 'one product family needs image remediation')
   assert.equal(result.catalogReady, false)
   assert.equal(result.verified, false)
   assert.match(result.note, /missing images/)
-  assert.doesNotMatch(JSON.stringify(result), /PRIVATE-IMAGELESS-SKU|SYNTHETIC IMAGELESS LIGHT|44\.99|ProductVariant/)
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE-IMAGELESS-SKU|SYNTHETIC IMAGELESS LIGHT|44\.99|45\.99|ProductVariant/)
 })
 
 test('empty but EXACT Shopify traversal is not certified as a merchant-ready catalog', async () => {
