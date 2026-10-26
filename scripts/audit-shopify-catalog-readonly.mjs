@@ -190,6 +190,11 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
   // valid Shopify media. That is safe for parsing but not a verified merchant
   // beta catalog: report missing images instead of silently certifying them.
   const missingImages = feed.products.filter(product => !product.image).length
+  // Variant counts and product-family counts answer different merchant questions.
+  // One imageless product with hundreds of variants must not be reported as
+  // hundreds of distinct products needing image remediation.
+  const productFamiliesWithMissingImages = [...result.snapshot.products.values()]
+    .filter(variants => variants.some(product => !product.image)).length
   // A valid empty Shopify traversal is not evidence of a usable merchant pilot.
   // Require at least one published family and mapped variant before certifying readiness.
   const hasUsableCatalog = result.snapshot.products.size > 0 && feed.products.length > 0
@@ -217,6 +222,7 @@ export async function auditShopifyCatalogReadOnly({ execute, expectedCurrencyCod
     continuePolicyVariants,
     sellabilityVerified: false,
     missingImages,
+    productFamiliesWithMissingImages,
     skippedRecords: result.skipped.length,
     excludedUnpublished,
     invalidSkippedRecords,
