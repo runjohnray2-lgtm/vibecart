@@ -122,11 +122,51 @@ test('read-only audit traverses a real adapter contract and returns aggregates, 
     productPages: 1, publishedProductFamilies: 1, catalogVariants: 1, skippedRecords: 0,
   })
   assert.equal(result.missingImages, 0)
+  assert.equal(result.denyPolicyVariants, 0)
+  assert.equal(result.continuePolicyVariants, 1)
+  assert.equal(result.sellabilityVerified, false, 'a read-only audit cannot authorize checkout')
   assert.equal(calls.length, 4, 'shop currency, opening count, product page and final count')
   assert.equal(calls.filter(c => c.document.includes('VibeCartProductsCount')).length, 2)
   assert.ok(calls.every(c => c.document.trim().startsWith('query ')))
   assert.doesNotMatch(JSON.stringify(result), /SYN-101|SYNTHETIC test light|65\.99|ProductVariant/)
   assert.match(result.note, /MCP\/UCP.*NOT verified/)
+})
+
+test('read-only audit distinguishes zero-stock DENY from made-to-order CONTINUE without claiming sellability', async () => {
+  const execute = async document => {
+    if (document.includes('shop { currencyCode }')) {
+      return { data: { shop: { currencyCode: 'USD' } } }
+    }
+    if (document.includes('VibeCartProductsCount')) {
+      return { data: { productsCount: { count: 1, precision: 'EXACT' } } }
+    }
+    if (document.includes('VibeCartProducts(')) {
+      return { data: { products: {
+        nodes: [{
+          id: 'gid://shopify/Product/500', title: 'SYNTHETIC POLICY FIXTURE',
+          description: 'Synthetic only', status: 'ACTIVE', publishedAt: '2026-10-18T00:00:00Z',
+          featuredMedia: { preview: { image: { url: 'https://cdn.shopify.com/synthetic.jpg' } } },
+          variantsCount: { count: 2, precision: 'EXACT' },
+          variants: { nodes: [
+            { id: 'gid://shopify/ProductVariant/501', title: 'DENY zero', sku: 'PRIVATE-DENY',
+              price: '11.00', inventoryPolicy: 'DENY', inventoryQuantity: 0 },
+            { id: 'gid://shopify/ProductVariant/502', title: 'CONTINUE zero', sku: 'PRIVATE-CONTINUE',
+              price: '12.00', inventoryPolicy: 'CONTINUE', inventoryQuantity: 0 },
+          ], pageInfo: { hasNextPage: false, endCursor: null } },
+        }],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      } } }
+    }
+    throw new Error('unexpected read-only query')
+  }
+  const result = await auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' })
+  assert.equal(result.traversalVerified, true)
+  assert.equal(result.catalogVariants, 2, 'the read-only catalog preserves both variant identities')
+  assert.equal(result.denyPolicyVariants, 1)
+  assert.equal(result.continuePolicyVariants, 1)
+  assert.equal(result.sellabilityVerified, false, 'DENY with zero stock must never be checkout authorization')
+  assert.equal(result.catalogReady, true, 'catalog mapping does not substitute for fresh sellability')
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE-DENY|PRIVATE-CONTINUE|SYNTHETIC POLICY FIXTURE|ProductVariant/)
 })
 
 test('read-only audit fails on currency mismatch or independently incomplete Shopify product count', async () => {
