@@ -10,11 +10,14 @@ import { SHOPIFY_VARIANTS_QUERY, withHydratedShopifyVariants, type ShopifyVarian
  */
 /** An unfiltered count is required to catch missing whole product pages. */
 export const SHOPIFY_PRODUCTS_COUNT_QUERY = 'query VibeCartProductsCount { productsCount(limit: null) { count precision } }'
+/** Only read additional media when the first page has no usable image. */
+export const SHOPIFY_PRODUCT_MEDIA_QUERY = 'query VibeCartProductMedia($productId: ID!, $cursor: String) { product(id: $productId) { id updatedAt media(first: 20, after: $cursor) { pageInfo { hasNextPage endCursor } nodes { id preview { image { url } } } } } }'
 
 export type ShopifyGraphqlTransport = (document: string, variables: Record<string, unknown>) => Promise<unknown>
 export type ShopifyAdminSourceOptions = {
   maxVariantPages?: number
   maxVariantsPerProduct?: number
+  maxMediaPages?: number
 }
 
 type Json = Record<string, unknown>
@@ -89,6 +92,59 @@ export function createShopifyAdminCatalogSource(
       productUpdatedAt: typeof data.product.updatedAt === 'string' ? data.product.updatedAt : null }
   }
   const fetchHydratedPage = withHydratedShopifyVariants(fetchProducts, { fetchVariantPage, ...options })
+  const maxMediaPages = options.maxMediaPages ?? 20
+  if (!Number.isSafeInteger(maxMediaPages) || maxMediaPages < 1 || maxMediaPages > 20) {
+    throw new Error('invalid Shopify media pagination limit')
+  }
+  const hasUsablePreview = (node: unknown): boolean => {
+    if (!record(node) || !record(node.preview) || !record(node.preview.image)) return false
+    const url = node.preview.image.url
+    if (typeof url !== 'string' || url.length > 2000) return false
+    try { return new URL(url).protocol === 'https:' } catch { return false }
+  }
+  const hydrateMedia = async (raw: unknown): Promise<unknown> => {
+    if (!record(raw) || !record(raw.media) || !record(raw.media.pageInfo) ||
+        raw.media.pageInfo.hasNextPage !== true) return raw
+    // An image in featuredMedia or the first media page is sufficient for
+    // image availability. Otherwise inspect every remaining page before
+    // claiming that a product has no usable image.
+    const first = connectionOf(raw.media, 'media')
+    if (first.nodes.length > 5 || first.nodes.length === 0) {
+      throw new Error('Shopify initial media page size invalid')
+    }
+    if (hasUsablePreview(raw.featuredMedia) || first.nodes.some(hasUsablePreview)) return raw
+    if (typeof raw.id !== 'string' || !/^gid:\/\/shopify\/Product\/[1-9]\d*$/.test(raw.id)) {
+      throw new Error('Shopify media pagination requires Product gid')
+    }
+    const productId = raw.id
+    const originalUpdatedAt = typeof raw.updatedAt === 'string' && raw.updatedAt.trim()
+      ? raw.updatedAt : null
+    const cursors = new Set<string>()
+    const nodes = [...first.nodes]
+    let page = first
+    let pages = 1
+    while (page.pageInfo.hasNextPage) {
+      if (pages >= maxMediaPages) throw new Error('Shopify media page limit exceeded')
+      const cursor = page.pageInfo.endCursor
+      if (!cursor || cursors.has(cursor)) throw new Error('Shopify media cursor did not advance')
+      cursors.add(cursor)
+      const data = dataOf(await execute(SHOPIFY_PRODUCT_MEDIA_QUERY, { productId, cursor }), 'media')
+      if (!record(data.product) || data.product.id !== productId) {
+        throw new Error('Shopify media page product id mismatch')
+      }
+      if (originalUpdatedAt !== null && data.product.updatedAt !== originalUpdatedAt) {
+        throw new Error('Shopify product updated during media pagination')
+      }
+      page = connectionOf(data.product.media, 'media')
+      if (page.nodes.length === 0 || page.nodes.length > 20) {
+        throw new Error('Shopify continuation media page size invalid')
+      }
+      nodes.push(...page.nodes)
+      pages++
+    }
+    return { ...raw, media: { nodes, pageInfo: { hasNextPage: false, endCursor: page.pageInfo.endCursor } } }
+  }
+
   // A cursor-only walk can report a terminal page while silently omitting
   // entire products. Verify every unfiltered traversal against Shopify's
   // independent EXACT total; never infer the total from returned pages.
@@ -107,7 +163,10 @@ export function createShopifyAdminCatalogSource(
         } else if (!traversal || traversal.next !== cursor) {
           throw new Error('Shopify product continuation cursor is not the expected cursor')
         }
-        const page = await fetchHydratedPage(cursor)
+        const variantPage = await fetchHydratedPage(cursor)
+        const products: unknown[] = []
+        for (const product of variantPage.products) products.push(await hydrateMedia(product))
+        const page = { ...variantPage, products }
         // Pagination flags alone cannot prove completeness if an upstream
         // adapter silently drops a variant page. Require Shopify's independently
         // reported exact count for every hydrated product.

@@ -280,3 +280,65 @@ test('unfiltered two-page product traversal proves exact count and preserves bot
   assert.equal(toCatalogFeed(result.snapshot).products.length, 2)
   assert.deepEqual(calls, [null, 'page-two'])
 })
+
+
+test('Admin media pagination hydrates later image pages and preserves exact variant identity', async () => {
+  const initial = {
+    ...product(variants(1, 1, false, null), 1),
+    updatedAt: '2026-10-18T00:00:00Z',
+    featuredMedia: null,
+    media: { nodes: [{ id: 'gid://shopify/Video/501', preview: { image: null } }],
+      pageInfo: { hasNextPage: true, endCursor: 'media-next' } },
+  }
+  let mediaCalls = 0
+  const source = createShopifyAdminCatalogSource(withCount(async (document, variables) => {
+    if (document.includes('VibeCartProducts(')) return productEnvelope(initial)
+    if (document.includes('VibeCartProductMedia(')) {
+      mediaCalls++
+      assert.equal(variables.productId, PRODUCT)
+      assert.equal(variables.cursor, 'media-next')
+      assert.match(document, /media\\(first: 20, after: \\$cursor\\)/)
+      return { data: { product: {
+        id: PRODUCT, updatedAt: initial.updatedAt,
+        media: { nodes: [{ id: 'gid://shopify/MediaImage/502',
+          preview: { image: { url: 'https://cdn.shopify.com/synthetic-later.jpg' } } }],
+          pageInfo: { hasNextPage: false, endCursor: 'media-done' } },
+      } } }
+    }
+    throw new Error('unexpected read-only GraphQL operation')
+  }))
+  const result = await syncShopifyCatalog({
+    shopCurrencyCode: 'USD', expectedCurrencyCode: 'USD', fetchPage: source.fetchPage,
+  })
+  assert.equal(mediaCalls, 1)
+  assert.equal(result.skipped.length, 0)
+  const [mapped] = toCatalogFeed(result.snapshot).products
+  assert.equal(mapped.id, 'gid://shopify/ProductVariant/1')
+  assert.equal(mapped.image, 'https://cdn.shopify.com/synthetic-later.jpg')
+})
+
+test('Admin media continuation rejects missing cursor, cross-product response and product drift', async () => {
+  const initial = {
+    ...product(variants(1, 1, false, null), 1),
+    updatedAt: '2026-10-18T00:00:00Z', featuredMedia: null,
+    media: { nodes: [{ id: 'gid://shopify/Video/501', preview: { image: null } }],
+      pageInfo: { hasNextPage: true, endCursor: 'next-media' } },
+  }
+  for (const scenario of ['missing-cursor', 'wrong-product', 'changed-product']) {
+    const input = scenario === 'missing-cursor'
+      ? { ...initial, media: { ...initial.media, pageInfo: { hasNextPage: true } } }
+      : initial
+    const source = createShopifyAdminCatalogSource(withCount(async document => {
+      if (document.includes('VibeCartProducts(')) return productEnvelope(input)
+      if (document.includes('VibeCartProductMedia(')) return { data: { product: {
+        id: scenario === 'wrong-product' ? 'gid://shopify/Product/99999' : PRODUCT,
+        updatedAt: scenario === 'changed-product' ? '2026-10-19T00:00:00Z' : initial.updatedAt,
+        media: { nodes: [{ id: 'gid://shopify/Video/502', preview: { image: null } }],
+          pageInfo: { hasNextPage: false, endCursor: null } },
+      } } }
+      throw new Error('unexpected GraphQL operation')
+    }))
+    await assert.rejects(source.fetchPage(null),
+      /media continuation cursor missing|media page product id mismatch|updated during media pagination/)
+  }
+})

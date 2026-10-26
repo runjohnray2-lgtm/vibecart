@@ -7,7 +7,7 @@ import {
 
 const READ = 'query VibeCartProducts { shop { currencyCode } }'
 const COUNT = 'query VibeCartProductsCount { productsCount(limit: null) { count precision } }'
-const DOCS = new Set([READ, COUNT, 'query VibeCartProductVariants { shop { id } }', 'query VibeCartShopCurrency { shop { currencyCode } }'])
+const DOCS = new Set([READ, COUNT, 'query VibeCartProductVariants { shop { id } }', 'query VibeCartShopCurrency { shop { currencyCode } }', 'query VibeCartProductMedia { shop { id } }'])
 const opts = { shopDomain: 'synthetic-shop.myshopify.com', token: 'synthetic-private-token', allowedDocuments: DOCS }
 const json = value => new Response(JSON.stringify(value), {
   status: 200, headers: { 'content-type': 'application/json' },
@@ -52,7 +52,7 @@ test('read-only transport freezes its allowlist and refuses mixed query/mutation
     'query Safe { shop { id } } mutation DeleteProduct { productDelete(id: "test") { deletedProductId } }',
     'query Safe { shop { id } } subscription Watch { shop { id } }',
   ]) {
-    const documents = new Set([...DOCS].slice(0, 3).concat(unsafe))
+    const documents = new Set([...DOCS].slice(0, 4).concat(unsafe))
     assert.throws(() => createReadOnlyShopifyTransport({
       ...opts, allowedDocuments: documents,
     }), /read-only GraphQL queries only/)
@@ -336,7 +336,7 @@ test('read-only audit flags missing Shopify images without exposing private cata
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE-IMAGELESS-SKU|SYNTHETIC IMAGELESS LIGHT|44\.99|45\.99|ProductVariant/)
 })
 
-test('read-only audit does not mislabel an uninspected later media page as confirmed missing images', async () => {
+test('read-only audit follows later media pages and verifies images without leaking merchant data', async () => {
   const execute = async document => {
     if (document.includes('shop { currencyCode }')) {
       return { data: { shop: { currencyCode: 'USD' } } }
@@ -351,7 +351,7 @@ test('read-only audit does not mislabel an uninspected later media page as confi
           status: 'ACTIVE', publishedAt: '2026-10-18T00:00:00Z',
           featuredMedia: null,
           media: { nodes: [{ id: 'gid://shopify/Video/999', preview: { image: null } }],
-            pageInfo: { hasNextPage: true } },
+            pageInfo: { hasNextPage: true, endCursor: 'next-media' } },
           variantsCount: { count: 1, precision: 'EXACT' },
           variants: { nodes: [{
             id: 'gid://shopify/ProductVariant/301', price: '44.99',
@@ -361,15 +361,23 @@ test('read-only audit does not mislabel an uninspected later media page as confi
         pageInfo: { hasNextPage: false, endCursor: null },
       } } }
     }
+    if (document.includes('VibeCartProductMedia(')) {
+      return { data: { product: {
+        id: 'gid://shopify/Product/300',
+        media: { nodes: [{ id: 'gid://shopify/MediaImage/1000',
+          preview: { image: { url: 'https://cdn.shopify.com/synthetic-later.jpg' } } }],
+          pageInfo: { hasNextPage: false, endCursor: 'done' } },
+      } } }
+    }
     throw new Error('unexpected query')
   }
   const result = await auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' })
   assert.equal(result.traversalVerified, true, 'the Admin product traversal was exact')
-  assert.equal(result.catalogReady, false, 'image coverage is incomplete')
-  assert.equal(result.publishedProductFamilies, 0, 'incomplete family must not be published')
-  assert.equal(result.catalogVariants, 0)
-  assert.equal(result.invalidSkippedRecords, 1)
-  assert.equal(result.missingImages, 0, 'no missing-image claim without inspecting later media pages')
+  assert.equal(result.catalogReady, true, 'later image page is verified')
+  assert.equal(result.publishedProductFamilies, 1)
+  assert.equal(result.catalogVariants, 1)
+  assert.equal(result.invalidSkippedRecords, 0)
+  assert.equal(result.missingImages, 0, 'later image prevents false missing-image report')
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE-MULTIMEDIA|PRIVATE-MEDIA-SKU|44\\.99|ProductVariant/)
 })
 

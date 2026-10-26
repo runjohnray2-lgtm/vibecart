@@ -76,9 +76,9 @@ export function createReadOnlyShopifyTransport({
   if (typeof apiVersion !== 'string' || !/^\d{4}-(01|04|07|10)$/.test(apiVersion)) {
     throw new Error('Shopify audit requires a pinned quarterly Admin API version')
   }
-  if (!(allowedDocuments instanceof Set) || allowedDocuments.size !== 4 ||
+  if (!(allowedDocuments instanceof Set) || allowedDocuments.size !== 5 ||
       [...allowedDocuments].some(doc => typeof doc !== 'string' || !doc.trim().startsWith('query '))) {
-    throw new Error('Shopify audit requires four approved read-only GraphQL documents')
+    throw new Error('Shopify audit requires five approved read-only GraphQL documents')
   }
   if (!Number.isSafeInteger(maxRequests) || maxRequests < 1 || maxRequests > 120) {
     throw new Error('Shopify audit request limit must be between 1 and 120')
@@ -293,6 +293,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       sync.SHOPIFY_PRODUCTS_QUERY,
       variant.SHOPIFY_VARIANTS_QUERY,
       admin.SHOPIFY_PRODUCTS_COUNT_QUERY,
+      admin.SHOPIFY_PRODUCT_MEDIA_QUERY,
     ])
     const execute = createReadOnlyShopifyTransport({
       shopDomain: process.env.SHOPIFY_AUDIT_SHOP,
