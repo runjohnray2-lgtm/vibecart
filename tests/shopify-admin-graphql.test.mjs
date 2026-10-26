@@ -211,7 +211,9 @@ test('Admin catalog source requires independently exact Shopify variant counts b
       assert.match(document, /variantsCount\s*\{\s*count\s+precision\s*\}/)
       return productEnvelope(item)
     }))
-    await assert.rejects(source.fetchPage(null), /exact variantsCount missing, approximate or mismatched/)
+    // Standalone hydration now rejects bad counts before the Admin source's
+    // redundant page-level guard, so accept either fail-closed boundary.
+    await assert.rejects(source.fetchPage(null), /exact variantsCount missing, approximate or mismatched|hydrated variants incomplete|initial exact variantsCount missing or approximate/)
   }
   const source = createShopifyAdminCatalogSource(withCount(async () => productEnvelope(product(one, 1))))
   const page = await source.fetchPage(null)
