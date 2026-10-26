@@ -221,24 +221,23 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
       // A matching tool name is not enough for an independent agent to
       // negotiate its profile or construct a valid catalog request.
       const agent = meta?.properties?.['ucp-agent']
-      const catalogRequired = name === 'search_catalog' ? ['query'] :
-        name === 'lookup_catalog' ? ['ids'] : ['id']
       if (!onlyRequires(schema, ['meta', 'catalog']) ||
           meta?.type !== 'object' || !Array.isArray(meta.required) ||
           !meta.required.includes('ucp-agent') || !onlyRequires(meta, ['ucp-agent']) ||
           agent?.type !== 'object' || !Array.isArray(agent.required) ||
           !agent.required.includes('profile') || !onlyRequires(agent, ['profile']) ||
-          agent.properties?.profile?.type !== 'string' || catalog?.type !== 'object' ||
-          !onlyRequires(catalog, catalogRequired)) {
+          agent.properties?.profile?.type !== 'string' || catalog?.type !== 'object') {
         throw new Error('UCP MCP incompatible meta/catalog schema for ' + name)
       }
-      if (name === 'search_catalog' && catalog.properties?.query?.type !== 'string') {
+      if (name === 'search_catalog' &&
+          (catalog.properties?.query?.type !== 'string' || !onlyRequires(catalog, ['query']))) {
         throw new Error('UCP MCP incompatible catalog search schema for ' + name)
       }
       const key = name === 'lookup_catalog' ? 'ids' : name === 'get_product' ? 'id' : null
       if (key) {
         const field = catalog.properties?.[key]
-        if (!Array.isArray(catalog.required) || !catalog.required.includes(key) ||
+        if (!onlyRequires(catalog, [key]) ||
+            !Array.isArray(catalog.required) || !catalog.required.includes(key) ||
             field?.type !== (key === 'ids' ? 'array' : 'string') ||
             (key === 'ids' && (field.items?.type !== 'string' ||
               !Number.isSafeInteger(field.minItems) || field.minItems < 1)) ||
