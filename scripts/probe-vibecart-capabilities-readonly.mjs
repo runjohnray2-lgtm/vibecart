@@ -215,6 +215,10 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
   const acceptsCatalogString = (field, expectedFormat = null) =>
     field?.type === 'string' &&
     (expectedFormat === null ? field.format === undefined : field.format === expectedFormat) &&
+    // A minimum longer than one character can reject otherwise valid
+    // merchant IDs or queries even without enum/pattern restrictions.
+    (field.minLength === undefined ||
+      (Number.isSafeInteger(field.minLength) && field.minLength >= 0 && field.minLength <= 1)) &&
     !['const', 'enum', 'pattern', 'maxLength', '$ref', '$dynamicRef',
       'allOf', 'anyOf', 'oneOf', 'not', 'if', 'then', 'else'].some(key =>
       Object.hasOwn(field, key))
@@ -261,7 +265,13 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
             !Array.isArray(catalog.required) || !catalog.required.includes(key) ||
             field?.type !== (key === 'ids' ? 'array' : 'string') ||
             (key === 'ids' && (!acceptsCatalogString(field.items) ||
-              !Number.isSafeInteger(field.minItems) || field.minItems < 1)) ||
+              !Number.isSafeInteger(field.minItems) || field.minItems < 1 ||
+              (field.maxItems !== undefined &&
+                (!Number.isSafeInteger(field.maxItems) || field.maxItems < 1)) ||
+              ['$ref', '$dynamicRef', 'allOf', 'anyOf', 'oneOf', 'not',
+                'if', 'then', 'else', 'contains', 'minContains', 'maxContains',
+                'prefixItems', 'unevaluatedItems'].some(constraint =>
+                Object.hasOwn(field, constraint)))) ||
             (key === 'id' && (!acceptsCatalogString(field) || !Number.isSafeInteger(field.minLength) || field.minLength < 1))) {
           throw new Error('UCP MCP incompatible catalog lookup schema for ' + name)
         }
