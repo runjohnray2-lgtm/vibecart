@@ -73,6 +73,7 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
   // malformed count, even without the Admin source's independent guard.
   if (raw.variantsCount !== undefined &&
       (!isRecord(raw.variantsCount) || raw.variantsCount.precision !== 'EXACT' ||
+       typeof raw.variantsCount.count !== 'number' ||
        !Number.isSafeInteger(raw.variantsCount.count) || raw.variantsCount.count < 0)) {
     throw new Error('Shopify initial exact variantsCount missing or approximate')
   }
