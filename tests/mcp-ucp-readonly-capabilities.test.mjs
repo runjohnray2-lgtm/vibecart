@@ -24,7 +24,7 @@ const validUcp = {
 const genericTool = (name, lookup = false) => ({
   name,
   inputSchema: lookup
-    ? { type: 'object', required: ['productId'], properties: { productId: { type: 'string' } } }
+    ? { type: 'object', required: ['productId'], properties: { productId: { type: 'string', minLength: 1 } } }
     : { type: 'object', properties: {} },
   annotations: { readOnlyHint: true, destructiveHint: false },
 })
@@ -177,6 +177,53 @@ test('probe rejects generic catalog tools that are not explicitly read-only', as
   const s = stub({ 2: rpc(2, { tools: [genericTool('vibecart.list_products'), unsafe] }) })
   await assert.rejects(probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl: s.fetchImpl }), /unsafe or incompatible/)
   assert.equal(s.requests.length, 5)
+})
+
+test('probe rejects catalog discovery that demands additional required credentials or inputs', async () => {
+  const invalid = [
+    { index: 2, name: 'vibecart.list_products', mutate: tool => {
+      tool.inputSchema.required = ['merchantSecret']
+      tool.inputSchema.properties.merchantSecret = { type: 'string' }
+    }, error: /Generic MCP unsafe or incompatible/ },
+    { index: 2, name: 'vibecart.get_product', mutate: tool => {
+      tool.inputSchema.required.push('token')
+      tool.inputSchema.properties.token = { type: 'string' }
+    }, error: /Generic MCP unsafe or incompatible/ },
+    { index: 2, name: 'vibecart.get_product', mutate: tool => {
+      tool.inputSchema.properties.productId.minLength = 0
+    }, error: /Generic MCP unsafe or incompatible/ },
+    { index: 4, name: 'search_catalog', mutate: tool => {
+      tool.inputSchema.required.push('secret')
+      tool.inputSchema.properties.secret = { type: 'string' }
+    }, error: /UCP MCP incompatible meta\/catalog schema/ },
+    { index: 4, name: 'search_catalog', mutate: tool => {
+      const meta = tool.inputSchema.properties.meta
+      meta.required.push('token')
+      meta.properties.token = { type: 'string' }
+    }, error: /UCP MCP incompatible meta\/catalog schema/ },
+    { index: 4, name: 'lookup_catalog', mutate: tool => {
+      const catalog = tool.inputSchema.properties.catalog
+      catalog.required.push('apiKey')
+      catalog.properties.apiKey = { type: 'string' }
+    }, error: /UCP MCP incompatible meta\/catalog schema/ },
+    { index: 4, name: 'get_product', mutate: tool => {
+      const agent = tool.inputSchema.properties.meta.properties['ucp-agent']
+      agent.required.push('password')
+      agent.properties.password = { type: 'string' }
+    }, error: /UCP MCP incompatible meta\/catalog schema/ },
+  ]
+  for (const { index, name, mutate, error } of invalid) {
+    const payload = structuredClone(replies[index])
+    mutate(payload.result.tools.find(tool => tool.name === name))
+    const s = stub({ [index]: payload })
+    await assert.rejects(
+      probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl: s.fetchImpl }),
+      error,
+    )
+    assert.equal(s.requests.length, 5)
+    assert.ok(s.requests.every(request => !request.options.body ||
+      ['initialize', 'tools/list'].includes(JSON.parse(request.options.body).method)))
+  }
 })
 
 test('probe rejects UCP lookup tools with incompatible input schemas', async () => {
