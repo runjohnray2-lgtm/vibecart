@@ -52,10 +52,10 @@ test('Admin GraphQL envelope hydrates 225 variants with exact IDs, prices, polic
     if (document.includes('VibeCartProductVariants(')) {
       assert.equal(variables.productId, PRODUCT)
       if (variables.cursor === 'v100') return { data: { product: {
-        id: PRODUCT, variants: variants(101, 100, true, 'v200'),
+        id: PRODUCT, variantsCount: { count: 225, precision: 'EXACT' }, variants: variants(101, 100, true, 'v200'),
       } } }
       if (variables.cursor === 'v200') return { data: { product: {
-        id: PRODUCT, variants: variants(201, 25, false, 'v225'),
+        id: PRODUCT, variantsCount: { count: 225, precision: 'EXACT' }, variants: variants(201, 25, false, 'v225'),
       } } }
     }
     if (document.includes('shop { currencyCode }')) return { data: { shop: { currencyCode: 'USD' } } }
