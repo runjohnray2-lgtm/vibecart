@@ -124,6 +124,18 @@ export function createShopifyAdminCatalogSource(
     // Older offline fixtures without a media field remain supported.
     const first = connectionOf(raw.media, 'media')
     validateMediaNodes(first.nodes)
+    // Cursor pagination must not repeat media identities. Repeated nodes can
+    // hide a missing image on an omitted page, producing a false readiness
+    // diagnosis even when Shopify reports a terminal connection.
+    const seenMediaIds = new Set<string>()
+    const rememberMediaIds = (mediaNodes: unknown[]) => {
+      for (const node of mediaNodes) {
+        const id = (node as { id: string }).id
+        if (seenMediaIds.has(id)) throw new Error('Shopify media pagination contains duplicate node id')
+        seenMediaIds.add(id)
+      }
+    }
+    rememberMediaIds(first.nodes)
     if (first.nodes.length > 5 || (first.pageInfo.hasNextPage && first.nodes.length === 0)) {
       throw new Error('Shopify initial media page size invalid')
     }
@@ -162,6 +174,7 @@ export function createShopifyAdminCatalogSource(
       }
       page = connectionOf(data.product.media, 'media')
       validateMediaNodes(page.nodes)
+      rememberMediaIds(page.nodes)
       if (page.nodes.length === 0 || page.nodes.length > 20) {
         throw new Error('Shopify continuation media page size invalid')
       }
