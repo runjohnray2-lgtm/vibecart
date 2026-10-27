@@ -86,3 +86,17 @@ test('server-side index rejects snapshots missing a verified Shopify inventory p
   }
   assert.throws(() => buildVariantIndex(malformed), /missing or invalid inventoryPolicy/)
 })
+
+test('whitespace-only merchant SKU rejects an entire Shopify family and preserves last-good snapshot', () => {
+  const base = applyProducts(createSnapshot('USD'), [family(706, ['CONTINUE', 'DENY'])]).snapshot
+  const before = structuredClone(toCatalogFeed(base))
+  const corrupted = family(706, ['CONTINUE', 'DENY'])
+  corrupted.variants.nodes[1].sku = ' \t '
+  const result = applyProducts(base, [corrupted])
+  assert.equal(result.upserted, 0)
+  assert.equal(result.removed, 1)
+  assert.equal(result.snapshot.products.has('706'), false)
+  assert.match(result.skipped.map(s => s.reason).join('; '), /sku is whitespace-only/)
+  assert.match(result.skipped.map(s => s.reason).join('; '), /entire family omitted/)
+  assert.deepEqual(toCatalogFeed(base), before)
+})
