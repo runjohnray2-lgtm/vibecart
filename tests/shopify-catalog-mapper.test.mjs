@@ -374,3 +374,28 @@ test('nonempty whitespace-only SKU is rejected instead of silently losing mercha
   assert.deepEqual(result.skipped.map(s => s.variantId), ['882'])
   assert.match(result.skipped[0].reason, /sku is whitespace-only/)
 })
+
+test('REST image fallback skips unsafe earlier images without overriding a valid variant-specific image', () => {
+  const raw = {
+    ...fixtures.restMultiVariant,
+    images: [
+      { id: 1, src: 'http://cdn.shopify.com/unsafe-http.jpg' },
+      { id: 2, src: 'https://operator:secret@cdn.shopify.com/unsafe-credentials.jpg' },
+      { id: 4, src: 'https://cdn.shopify.com/safe-fallback.jpg' },
+      { id: 3, src: 'https://cdn.shopify.com/safe-variant.jpg' },
+    ],
+  }
+  const result = mapShopifyProducts([raw], USD)
+  assert.equal(result.skipped.length, 0)
+  assert.equal(result.products.length, 3)
+  assert.equal(byId(result, '41000000000001').image, 'https://cdn.shopify.com/safe-variant.jpg',
+    'a variant-specific valid image must take precedence over the product fallback')
+  assert.equal(byId(result, '41000000000002').image, 'https://cdn.shopify.com/safe-fallback.jpg',
+    'a safe later REST image must be used when the first images are unsafe')
+  assert.equal(byId(result, '41000000000003').image, 'https://cdn.shopify.com/safe-fallback.jpg')
+
+  const unsafeOnly = mapShopifyProducts([{ ...raw, images: raw.images.slice(0, 2) }], USD)
+  assert.equal(unsafeOnly.products.length, 3)
+  assert.ok(unsafeOnly.products.every(p => p.image === ''),
+    'unsafe-only REST images must not be exposed as trusted URLs')
+})
