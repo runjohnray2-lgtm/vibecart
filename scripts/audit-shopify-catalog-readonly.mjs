@@ -163,12 +163,35 @@ async function auditShopifyCatalogReadOnlyInternal({ execute, expectedCurrencyCo
   const { createShopifyAdminCatalogSource } = loaded['shopify-admin-graphql']
   const { syncShopifyCatalog, toCatalogFeed, buildVariantIndex } = loaded['shopify-catalog-sync']
   const source = createShopifyAdminCatalogSource(execute)
+  // Inventory observations cover ALL hydrated Shopify variants, including
+  // DRAFT/unpublished families excluded from the public VibeCart feed. Do not
+  // confuse these read-only counts with live checkout authorization.
+  const observedInventory = { variants: 0, denyZero: 0, continueZero: 0, unknown: 0 }
+  const fetchPage = async cursor => {
+    const page = await source.fetchPage(cursor)
+    for (const product of page.products) {
+      const nodes = product?.variants?.nodes
+      if (!Array.isArray(nodes)) throw new Error('Shopify audit expected hydrated variant nodes')
+      for (const variant of nodes) {
+        observedInventory.variants++
+        const quantity = variant?.inventoryQuantity
+        if (!Number.isSafeInteger(quantity)) {
+          observedInventory.unknown++
+        } else if (quantity === 0 && variant?.inventoryPolicy === 'DENY') {
+          observedInventory.denyZero++
+        } else if (quantity === 0 && variant?.inventoryPolicy === 'CONTINUE') {
+          observedInventory.continueZero++
+        }
+      }
+    }
+    return page
+  }
   const currency = await source.fetchShopCurrency()
   let result
   try {
     result = await syncShopifyCatalog({
       shopCurrencyCode: currency, expectedCurrencyCode,
-      fetchPage: source.fetchPage,
+      fetchPage,
     })
   } catch (error) {
     // The lower-level Shopify adapter includes raw variant IDs in this
@@ -244,6 +267,12 @@ async function auditShopifyCatalogReadOnlyInternal({ execute, expectedCurrencyCo
     productPages: result.pages,
     publishedProductFamilies: result.snapshot.products.size,
     catalogVariants: feed.products.length,
+    // All-status Shopify observations, NOT just published/mapped catalog rows.
+    observedShopifyVariants: observedInventory.variants,
+    inventoryObservationsIncludeUnpublished: true,
+    zeroStockDenyVariants: observedInventory.denyZero,
+    zeroStockContinueVariants: observedInventory.continueZero,
+    unknownInventoryQuantityVariants: observedInventory.unknown,
     denyPolicyVariants,
     continuePolicyVariants,
     sellabilityVerified: false,
