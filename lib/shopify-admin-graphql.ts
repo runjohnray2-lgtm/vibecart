@@ -75,6 +75,12 @@ export function createShopifyAdminCatalogSource(
   const fetchProducts = async (cursor: string | null): Promise<ShopifyProductsPage> => {
     const data = dataOf(await execute(SHOPIFY_PRODUCTS_QUERY, { cursor, query: null }), 'products')
     const connection = connectionOf(data.products, 'products')
+    // SHOPIFY_PRODUCTS_QUERY requests first: 5. Reject an oversized response
+    // before hydrating nested variants or certifying the independent count.
+    // Otherwise a malformed upstream page bypasses the bounded read contract.
+    if (connection.nodes.length > 5) {
+      throw new Error('Shopify product page exceeds first: 5')
+    }
     return { products: connection.nodes, pageInfo: connection.pageInfo }
   }
   const fetchVariantPage = async (productId: string, cursor: string): Promise<ShopifyVariantPage> => {
