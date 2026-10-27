@@ -298,3 +298,28 @@ test('mapper stays isolated from payments, database, env and routes', () => {
   const imports = source.match(/^import .*$/gm) ?? []
   assert.deepEqual(imports, ["import type { VibeProduct } from '@/lib/products'"])
 })
+
+
+test('credential-bearing Shopify media URLs are never exposed or mistaken for verified images', () => {
+  const raw = {
+    id: 'gid://shopify/Product/301', title: 'SYNTHETIC safe media',
+    status: 'ACTIVE', publishedAt: '2026-10-26T00:00:00Z',
+    featuredMedia: { preview: { image: { url: 'https://operator:secret@cdn.shopify.com/featured.jpg' } } },
+    media: {
+      nodes: [{ id: 'gid://shopify/MediaImage/302', preview: { image: { url: 'https://cdn.shopify.com/safe.jpg' } } }],
+      pageInfo: { hasNextPage: true, endCursor: 'more-media' },
+    },
+    variants: { nodes: [{ id: 'gid://shopify/ProductVariant/303', price: '19.99', inventoryPolicy: 'CONTINUE' }],
+      pageInfo: { hasNextPage: false } },
+  }
+  const mapped = mapShopifyProducts([raw], USD)
+  assert.equal(mapped.products.length, 1)
+  assert.equal(mapped.products[0].image, 'https://cdn.shopify.com/safe.jpg')
+  const unsafeOnly = { ...raw, media: { nodes: [], pageInfo: { hasNextPage: false } } }
+  assert.equal(mapShopifyProducts([unsafeOnly], USD).products[0].image, '',
+    'terminal imageless product is diagnostic, not a leaked credential URL')
+  const uninspected = { ...raw, media: { nodes: [], pageInfo: { hasNextPage: true, endCursor: 'more-media' } } }
+  const incomplete = mapShopifyProducts([uninspected], USD)
+  assert.equal(incomplete.products.length, 0)
+  assert.match(incomplete.skipped[0].reason, /image coverage unverified/)
+})
