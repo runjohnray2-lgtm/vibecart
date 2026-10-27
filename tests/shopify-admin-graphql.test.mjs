@@ -515,7 +515,7 @@ test('Admin media rejects malformed terminal nodes instead of reporting a missin
   const single = product(variants(1, 1, false, null), 1)
   for (const node of [null, 42, {}, { id: '' }, { id: 7 }]) {
     const source = createShopifyAdminCatalogSource(withCount(async document => {
-      assert.match(document, /VibeCartProducts\\(/)
+      assert.match(document, /VibeCartProducts\(/)
       return productEnvelope({
         ...single, featuredMedia: null,
         media: { nodes: [node], pageInfo: { hasNextPage: false, endCursor: null } },
@@ -526,7 +526,7 @@ test('Admin media rejects malformed terminal nodes instead of reporting a missin
 
   // Video nodes can have no preview image; this is not malformed identity.
   const valid = createShopifyAdminCatalogSource(withCount(async document => {
-    assert.match(document, /VibeCartProducts\\(/)
+    assert.match(document, /VibeCartProducts\(/)
     return productEnvelope({
       ...single, featuredMedia: null,
       media: { nodes: [{ id: 'gid://shopify/Video/777', preview: null }],
