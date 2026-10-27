@@ -476,7 +476,8 @@ export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string,
         productId: p.shopify.productId,
         variantId: p.shopify.variantId,
         ...(p.sku ? { sku: p.sku } : {}),
-        inventoryPolicy: p.shopify.inventoryPolicy,
+        // Required and runtime-validated by assertSnapshotVariantMetadata above.
+        inventoryPolicy: p.shopify.inventoryPolicy!,
       })
     }
   }
