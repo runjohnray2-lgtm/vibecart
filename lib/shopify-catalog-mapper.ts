@@ -305,7 +305,14 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
         skip(productId, variantId, 'variant sku is not a string')
         continue
       }
-      const sku = typeof rawSku === 'string' && rawSku.trim() ? rawSku : undefined
+      // An explicitly empty Shopify SKU is optional, but a nonempty
+      // whitespace-only value is corrupted merchant identity. Do not silently
+      // turn it into an absent SKU while publishing a variant.
+      if (typeof rawSku === 'string' && rawSku.length > 0 && !rawSku.trim()) {
+        skip(productId, variantId, 'variant sku is whitespace-only')
+        continue
+      }
+      const sku = typeof rawSku === 'string' && rawSku.length > 0 ? rawSku : undefined
       if (sku && sku.length > LIMITS.sku) {
         skip(productId, variantId, 'variant sku is longer than ' + LIMITS.sku)
         continue
