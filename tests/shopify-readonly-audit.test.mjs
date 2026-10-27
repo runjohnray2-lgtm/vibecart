@@ -305,7 +305,7 @@ test('read-only audit flags missing Shopify images without exposing private cata
         nodes: [{
           id: 'gid://shopify/Product/300', title: 'SYNTHETIC IMAGELESS LIGHT',
           description: 'Synthetic only', status: 'ACTIVE', publishedAt: '2026-10-18T00:00:00Z',
-          featuredMedia: null, media: { nodes: [] },
+          featuredMedia: null, media: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
           variantsCount: { count: 2, precision: 'EXACT' },
           variants: { nodes: [{
             id: 'gid://shopify/ProductVariant/301', title: 'Red',
