@@ -357,3 +357,20 @@ test('imageless GraphQL media requires explicit terminal pagination evidence', (
   const rest = mapShopifyProducts([{ ...raw, media: [] }], USD)
   assert.equal(rest.products.length, 1, 'REST media arrays remain compatible')
 })
+
+test('nonempty whitespace-only SKU is rejected instead of silently losing merchant identity', () => {
+  const raw = {
+    id: 880, title: 'SYNTHETIC SKU identity',
+    variants: [
+      { id: 881, title: 'Empty allowed', sku: '', price: '5.00', inventoryPolicy: 'CONTINUE' },
+      { id: 882, title: 'Whitespace invalid', sku: ' \t ', price: '5.00', inventoryPolicy: 'CONTINUE' },
+      { id: 883, title: 'Meaningful spaces', sku: '  PART A  ', price: '5.00', inventoryPolicy: 'DENY' },
+    ],
+  }
+  const result = mapShopifyProducts([raw], USD)
+  assert.deepEqual(result.products.map(p => p.id), ['881', '883'])
+  assert.equal('sku' in result.products[0], false, 'explicitly empty SKU remains optional')
+  assert.equal(result.products[1].sku, '  PART A  ', 'merchant SKU bytes are preserved')
+  assert.deepEqual(result.skipped.map(s => s.variantId), ['882'])
+  assert.match(result.skipped[0].reason, /sku is whitespace-only/)
+})
