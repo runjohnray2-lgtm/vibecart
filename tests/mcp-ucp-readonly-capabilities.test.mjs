@@ -258,7 +258,7 @@ test('probe rejects composed or conditional schemas that conceal mandatory catal
       error: /Generic MCP unsafe or incompatible/ },
     { index: 4, name: 'search_catalog', target: tool => tool.inputSchema,
       key: 'patternProperties', value: { '^meta$': { required: ['secret'] } },
-      error: /meta\\/catalog schema/ },
+      error: /meta\/catalog schema/ },
     { index: 4, name: 'lookup_catalog', target: tool => tool.inputSchema.properties.catalog,
       key: 'unevaluatedProperties', value: { required: ['token'] },
       error: /catalog lookup schema/ },
