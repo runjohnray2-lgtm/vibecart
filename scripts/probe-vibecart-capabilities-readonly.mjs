@@ -225,6 +225,13 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
   function requireCatalogSchema(listed, name, required, protocol) {
     const tool = listed.find(entry => entry.name === name)
     if (!tool) throw new Error(protocol + ' MCP missing ' + name)
+    // UCP catalog tools may omit optional MCP safety annotations, but an
+    // explicit destructive or non-read-only declaration must not be reported
+    // as safe catalog capability evidence. Never invoke these tools here.
+    if (protocol === 'UCP' &&
+        (tool.annotations?.destructiveHint === true || tool.annotations?.readOnlyHint === false)) {
+      throw new Error('UCP MCP advertises unsafe catalog tool ' + name)
+    }
     const schema = tool.inputSchema
     if (schema?.type !== 'object' || !schema.properties ||
         !required.every(field => schema.required?.includes(field) && schema.properties[field])) {
