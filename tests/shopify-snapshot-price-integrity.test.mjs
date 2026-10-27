@@ -73,3 +73,37 @@ test('public feed permits missing images for diagnostics and normal HTTPS produc
     assert.equal(toCatalogFeed(restored).products[0].image, image)
   }
 })
+
+test('restored Shopify snapshot display fields must satisfy the public catalog contract', () => {
+  const base = applyProducts(createSnapshot('USD'), [raw]).snapshot
+  const original = toCatalogFeed(base)
+  const good = base.products.get('123')[0]
+  const invalid = [
+    ['name', '', /invalid Shopify snapshot name/],
+    ['name', '   ', /invalid Shopify snapshot name/],
+    ['name', null, /invalid Shopify snapshot name/],
+    ['name', 'x'.repeat(501), /invalid Shopify snapshot name/],
+    ['description', null, /invalid Shopify snapshot description/],
+    ['description', 42, /invalid Shopify snapshot description/],
+    ['description', 'x'.repeat(5001), /invalid Shopify snapshot description/],
+    ['variant', '', /invalid Shopify snapshot variant title/],
+    ['variant', '   ', /invalid Shopify snapshot variant title/],
+    ['variant', null, /invalid Shopify snapshot variant title/],
+    ['variant', 'x'.repeat(501), /invalid Shopify snapshot variant title/],
+  ]
+  for (const [field, value, expected] of invalid) {
+    const corrupted = {
+      ...base,
+      products: new Map([['123', [{ ...good, [field]: value }]]]),
+    }
+    assert.throws(() => toCatalogFeed(corrupted), expected, field)
+    assert.deepEqual(toCatalogFeed(base), original, 'last-good snapshot remains unchanged')
+  }
+  const accepted = {
+    ...base,
+    products: new Map([['123', [{
+      ...good, name: 'SYNTHETIC valid product', description: '', variant: 'Small',
+    }]]]),
+  }
+  assert.equal(toCatalogFeed(accepted).products[0].variant, 'Small')
+})
