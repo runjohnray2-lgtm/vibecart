@@ -250,7 +250,8 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
     const mediaFallback = asList(entry.media)
       .map(item => isObject(item) && isObject(item.preview) ? imageUrl(item.preview.image) : undefined)
       .find(url => url !== undefined)
-    const fallbackImage = mediaPreviewImage ?? mediaFallback ?? imageUrl(entry.featuredImage) ?? imageUrl(entry.image) ?? imageUrl(images[0])
+    const restImageFallback = images.map(imageUrl).find(url => url !== undefined)
+    const fallbackImage = mediaPreviewImage ?? mediaFallback ?? imageUrl(entry.featuredImage) ?? imageUrl(entry.image) ?? restImageFallback
     // The first Admin media page can contain only video/external-media items
     // while an image exists on a later page. Without a usable image and with
     // more media pages outstanding, do not claim the product is imageless or
