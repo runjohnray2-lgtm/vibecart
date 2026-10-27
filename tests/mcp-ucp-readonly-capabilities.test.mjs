@@ -179,6 +179,26 @@ test('probe rejects generic catalog tools that are not explicitly read-only', as
   assert.equal(s.requests.length, 5)
 })
 
+test('probe rejects UCP catalog tools explicitly declaring destructive or non-read-only behavior', async () => {
+  for (const { name, annotations } of [
+    { name: 'search_catalog', annotations: { readOnlyHint: false, destructiveHint: false } },
+    { name: 'lookup_catalog', annotations: { readOnlyHint: true, destructiveHint: true } },
+    { name: 'get_product', annotations: { destructiveHint: true } },
+  ]) {
+    const tools = [ucpTool('search_catalog'), ucpTool('lookup_catalog', 'ids'), ucpTool('get_product', 'id')]
+    tools.find(tool => tool.name === name).annotations = annotations
+    const s = stub({ 4: rpc(2, { tools }) })
+    await assert.rejects(
+      probeVibeCartCapabilitiesReadOnly({ baseUrl: origin, fetchImpl: s.fetchImpl }),
+      /UCP MCP advertises unsafe catalog tool/,
+      name + ' must not be certified as safe when annotations contradict read-only discovery',
+    )
+    assert.equal(s.requests.length, 5)
+    assert.ok(s.requests.every(request => !request.options.body ||
+      ['initialize', 'tools/list'].includes(JSON.parse(request.options.body).method)))
+  }
+})
+
 test('probe rejects catalog discovery that demands additional required credentials or inputs', async () => {
   const invalid = [
     { index: 2, name: 'vibecart.list_products', mutate: tool => {
