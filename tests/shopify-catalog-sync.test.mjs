@@ -791,3 +791,43 @@ test('direct Shopify variantsCount rejects truncated or approximate families wit
     ...restLike, variants: original.variants.nodes,
   }]).upserted, 1)
 })
+
+test('restored snapshot SKU and policy validation rejects corrupt metadata before feed or server index', () => {
+  const source = gqlProduct(981, 'SYNTHETIC restored metadata', [[9811, 'Red', '  EXACT-SKU  ', '65.99']])
+  const trusted = applyProducts(createSnapshot('USD'), [source]).snapshot
+  const before = toCatalogFeed(trusted)
+  const [[familyKey, variants]] = [...trusted.products]
+  assert.equal(buildVariantIndex(trusted).get(V(9811)).sku, '  EXACT-SKU  ',
+    'merchant SKU whitespace is significant and must survive the index')
+  assert.equal(buildVariantIndex(trusted).get(V(9811)).inventoryPolicy, 'CONTINUE')
+
+  const badCases = [
+    { patch: { sku: 42 }, error: /invalid Shopify snapshot sku/ },
+    { patch: { sku: '   ' }, error: /invalid Shopify snapshot sku/ },
+    { patch: { sku: 'X'.repeat(201) }, error: /invalid Shopify snapshot sku/ },
+    { patch: { shopify: { ...variants[0].shopify, inventoryPolicy: 'UNKNOWN' } },
+      error: /missing or invalid inventoryPolicy/ },
+    { patch: { shopify: { ...variants[0].shopify, inventoryPolicy: undefined } },
+      error: /missing or invalid inventoryPolicy/ },
+  ]
+  for (const { patch, error } of badCases) {
+    const corrupted = {
+      currencyCode: trusted.currencyCode,
+      products: new Map([[familyKey, [{ ...variants[0], ...patch }]]]),
+    }
+    assert.throws(() => toCatalogFeed(corrupted), error,
+      'a public feed must not certify restored variants with corrupt server-only metadata')
+    assert.throws(() => buildVariantIndex(corrupted), error,
+      'server-only order identity must not silently accept corrupt metadata')
+    assert.deepEqual(toCatalogFeed(trusted), before,
+      'a rejected reconstructed snapshot must not mutate last-known-good catalog')
+  }
+
+  const noSku = {
+    currencyCode: trusted.currencyCode,
+    products: new Map([[familyKey, [{ ...variants[0], sku: undefined }]]]),
+  }
+  assert.equal(toCatalogFeed(noSku).products.length, 1,
+    'Shopify permits variants without an SKU')
+  assert.equal(buildVariantIndex(noSku).get(V(9811)).sku, undefined)
+})
