@@ -217,6 +217,14 @@ async function auditShopifyCatalogReadOnlyInternal({ execute, expectedCurrencyCo
     }
     throw error
   }
+  // An audit can span many Shopify product/variant pages. If the shop's
+  // currency changes after the opening read, previously mapped integer-cent
+  // prices no longer describe one coherent merchant catalog. Recheck before
+  // reporting readiness; do not publish a mixed-currency snapshot.
+  const closingCurrency = await source.fetchShopCurrency()
+  if (closingCurrency !== currency) {
+    throw new Error('Shopify shop currency changed during catalog audit')
+  }
   const feed = toCatalogFeed(result.snapshot)
   // The trusted variant index already rejects unknown inventory policies, but
   // its error includes the real Shopify variant ID. Fail earlier with only an
