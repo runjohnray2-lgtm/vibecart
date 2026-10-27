@@ -114,7 +114,7 @@ function httpsUrl(value: unknown): string | undefined {
   if (!raw || raw.length > LIMITS.image) return undefined
   try {
     const url = new URL(raw)
-    return url.protocol === 'https:' ? url.toString() : undefined
+    return url.protocol === 'https:' && !url.username && !url.password ? url.toString() : undefined
   } catch {
     return undefined
   }
