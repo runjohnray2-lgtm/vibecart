@@ -382,6 +382,19 @@ function validSnapshotImage(image: unknown): image is string {
   }
 }
 
+/** Restored snapshots bypass the mapper; keep server-only SKU and Shopify policy trustworthy. */
+function assertSnapshotVariantMetadata(product: ShopifyCatalogProduct): void {
+  if (product.shopify.inventoryPolicy !== 'DENY' && product.shopify.inventoryPolicy !== 'CONTINUE') {
+    throw new Error('Shopify snapshot missing or invalid inventoryPolicy for catalog variant: ' + product.id)
+  }
+  // A merchant SKU is an exact identifier, not display text. Preserve meaningful
+  // whitespace, but reject corrupted non-string, blank or oversized values.
+  const sku = product.sku
+  if (sku !== undefined && (typeof sku !== 'string' || !sku.trim() || sku.length > 200)) {
+    throw new Error('invalid Shopify snapshot sku for catalog variant: ' + product.id)
+  }
+}
+
 /** Deterministic feed for VIBECART_CATALOG_URL: only fields the catalog parser accepts, sorted by id. */
 export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED_PRODUCTS): { products: VibeProduct[] } {
   const seen = new Set<string>()
@@ -390,6 +403,7 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
   for (const [familyKey, variants] of snapshot.products) {
     for (const p of variants) {
       assertSnapshotProductOwnership(familyKey, p)
+      assertSnapshotVariantMetadata(p)
       if (seen.has(p.id)) throw new Error('duplicate catalog id in snapshot: ' + p.id)
       seen.add(p.id)
       const key = canonicalVariantKey(p.shopify.variantId)
@@ -447,6 +461,7 @@ export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string,
   for (const [familyKey, variants] of snapshot.products) {
     for (const p of variants) {
       assertSnapshotProductOwnership(familyKey, p)
+      assertSnapshotVariantMetadata(p)
       if (index.has(p.id)) throw new Error('duplicate Shopify variant id in snapshot: ' + p.id)
       const key = canonicalVariantKey(p.shopify.variantId)
       // A catalog id must identify the SAME real Shopify variant as the
@@ -457,9 +472,6 @@ export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string,
       }
       if (seenVariantKeys.has(key)) throw new Error('duplicate Shopify variant id in snapshot: ' + key)
       seenVariantKeys.add(key)
-      if (p.shopify.inventoryPolicy !== 'DENY' && p.shopify.inventoryPolicy !== 'CONTINUE') {
-        throw new Error('Shopify variant index missing or invalid inventoryPolicy for ' + p.id)
-      }
       index.set(p.id, {
         productId: p.shopify.productId,
         variantId: p.shopify.variantId,
