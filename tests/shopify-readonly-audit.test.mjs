@@ -209,7 +209,7 @@ test('read-only inventory observations count unpublished DENY/CONTINUE zero stoc
   assert.equal(result.zeroStockContinueVariants, 1)
   assert.equal(result.unknownInventoryQuantityVariants, 1, 'null inventory must not be treated as zero')
   assert.equal(result.sellabilityVerified, false)
-  assert.doesNotMatch(JSON.stringify(result), /PRIVATE DRAFT|ProductVariant|11\\.00|12\\.00|13\\.00/)
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE DRAFT|ProductVariant|11\.00|12\.00|13\.00/)
 })
 
 test('read-only audit rejects missing or invalid inventory policy without leaking variant identities', async () => {
