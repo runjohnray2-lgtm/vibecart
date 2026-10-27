@@ -255,7 +255,7 @@ test('read-only inventory audit rejects malformed draft policy or quantity witho
       auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' }),
       error => {
         assert.match(error.message, /Shopify audit (?:rejected a variant with missing or invalid inventory policy|incomplete or invalid; private merchant details suppressed)/)
-        assert.doesNotMatch(error.message, /PRIVATE|ProductVariant|911|98\\.76|DRAFT-SKU/)
+        assert.doesNotMatch(error.message, /PRIVATE|ProductVariant|911|98\.76|DRAFT-SKU/)
         return true
       },
       'unpublished malformed inventory evidence must not certify a complete audit',
