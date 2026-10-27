@@ -202,11 +202,19 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
     '$ref', '$dynamicRef', 'allOf', 'anyOf', 'oneOf', 'not',
     'if', 'then', 'else', 'dependentRequired', 'dependentSchemas',
     'dependencies', 'minProperties', 'maxProperties', 'propertyNames',
+    // These apply constraints to declared fields too, even when `required`
+    // looks compatible. A pattern can secretly demand a credential.
+    'patternProperties', 'unevaluatedProperties',
   ]
   const onlyRequires = (schema, allowed) =>
     schema && typeof schema === 'object' && !Array.isArray(schema) &&
+    schema.type === 'object' &&
+    schema.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties) &&
     !hiddenConstraints.some(key => Object.hasOwn(schema, key)) &&
-    (schema.required === undefined || Array.isArray(schema.required)) &&
+    (schema.required === undefined ||
+      (Array.isArray(schema.required) &&
+        schema.required.every(field => typeof field === 'string') &&
+        new Set(schema.required).size === schema.required.length)) &&
     (schema.required ?? []).every(field => allowed.includes(field))
   // Catalog discovery must support arbitrary merchant IDs and agent profile
   // URLs. An enum/const/pattern/format or composed constraint on an input
