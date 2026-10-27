@@ -407,8 +407,21 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
       if (!Number.isSafeInteger(p.priceCents) || p.priceCents < 0) {
         throw new Error('invalid Shopify snapshot priceCents for catalog variant: ' + p.id)
       }
-      // A restored snapshot can bypass the Shopify mapper. Never expose a
-      // non-HTTPS, oversized, credential-bearing or malformed image URL.
+      // Restored snapshots bypass the mapper. Reject malformed display fields
+      // before exposing a feed, rather than relying on a later remote parser
+      // to reject the entire merchant catalog.
+      if (typeof p.name !== 'string' || !p.name.trim() || p.name.trim().length > 500) {
+        throw new Error('invalid Shopify snapshot name for catalog variant: ' + p.id)
+      }
+      if (typeof p.description !== 'string' || p.description.length > 5000) {
+        throw new Error('invalid Shopify snapshot description for catalog variant: ' + p.id)
+      }
+      if (p.variant !== undefined &&
+          (typeof p.variant !== 'string' || !p.variant.trim() || p.variant.trim().length > 500)) {
+        throw new Error('invalid Shopify snapshot variant title for catalog variant: ' + p.id)
+      }
+      // A restored snapshot can also carry a non-HTTPS, oversized,
+      // credential-bearing or malformed image URL.
       if (!validSnapshotImage(p.image)) {
         throw new Error('invalid Shopify snapshot image for catalog variant: ' + p.id)
       }
