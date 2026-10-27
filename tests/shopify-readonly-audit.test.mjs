@@ -219,6 +219,50 @@ test('read-only inventory observations count unpublished DENY/CONTINUE zero stoc
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE DRAFT|ProductVariant|11\.00|12\.00|13\.00|14\.00|15\.00/)
 })
 
+test('read-only inventory audit rejects malformed draft policy or quantity without leaking data', async () => {
+  const invalid = [
+    { inventoryPolicy: 'UNKNOWN', inventoryQuantity: 0 },
+    { inventoryQuantity: 0 },
+    { inventoryPolicy: 'DENY', inventoryQuantity: '0' },
+    { inventoryPolicy: 'CONTINUE', inventoryQuantity: 0.5 },
+    { inventoryPolicy: 'DENY', inventoryQuantity: Number.MAX_SAFE_INTEGER + 1 },
+  ]
+  for (const fields of invalid) {
+    const execute = async document => {
+      if (document.includes('shop { currencyCode }')) {
+        return { data: { shop: { currencyCode: 'USD' } } }
+      }
+      if (document.includes('VibeCartProductsCount')) {
+        return { data: { productsCount: { count: 1, precision: 'EXACT' } } }
+      }
+      if (document.includes('VibeCartProducts(')) {
+        return { data: { products: {
+          nodes: [{
+            id: 'gid://shopify/Product/910', title: 'PRIVATE DRAFT POLICY FIXTURE',
+            status: 'DRAFT', publishedAt: null,
+            variantsCount: { count: 1, precision: 'EXACT' },
+            variants: { nodes: [{
+              id: 'gid://shopify/ProductVariant/911', title: 'Private draft',
+              sku: 'PRIVATE-DRAFT-SKU', price: '98.76', ...fields,
+            }], pageInfo: { hasNextPage: false, endCursor: null } },
+          }],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        } } }
+      }
+      throw new Error('unexpected query')
+    }
+    await assert.rejects(
+      auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' }),
+      error => {
+        assert.match(error.message, /Shopify audit (?:rejected a variant with missing or invalid inventory policy|incomplete or invalid; private merchant details suppressed)/)
+        assert.doesNotMatch(error.message, /PRIVATE|ProductVariant|911|98\\.76|DRAFT-SKU/)
+        return true
+      },
+      'unpublished malformed inventory evidence must not certify a complete audit',
+    )
+  }
+})
+
 test('read-only audit rejects missing or invalid inventory policy without leaking variant identities', async () => {
   for (const inventoryPolicy of [undefined, 'UNKNOWN']) {
     const privateVariantId = 'gid://shopify/ProductVariant/777'
