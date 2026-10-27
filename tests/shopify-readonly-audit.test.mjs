@@ -155,7 +155,7 @@ test('read-only audit refuses currency drift after a complete Shopify product wa
     auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' }),
     error => {
       assert.match(error.message, /Shopify audit incomplete or invalid; private merchant details suppressed/)
-      assert.doesNotMatch(error.message, /EUR|USD|ProductVariant|private/i)
+      assert.doesNotMatch(error.message, /EUR|USD|ProductVariant|gid:\/\/shopify\//i)
       return true
     },
     'a closing currency change must invalidate an otherwise exact product traversal',
