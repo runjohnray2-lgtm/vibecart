@@ -184,7 +184,7 @@ test('read-only inventory observations count unpublished DENY/CONTINUE zero stoc
           id: 'gid://shopify/Product/810', title: 'PRIVATE DRAFT INVENTORY FIXTURE',
           status: 'DRAFT', publishedAt: null,
           featuredMedia: { preview: { image: { url: 'https://cdn.shopify.com/synthetic.jpg' } } },
-          variantsCount: { count: 3, precision: 'EXACT' },
+          variantsCount: { count: 5, precision: 'EXACT' },
           variants: { nodes: [
             { id: 'gid://shopify/ProductVariant/811', price: '11.00',
               inventoryPolicy: 'DENY', inventoryQuantity: 0 },
@@ -192,6 +192,10 @@ test('read-only inventory observations count unpublished DENY/CONTINUE zero stoc
               inventoryPolicy: 'CONTINUE', inventoryQuantity: 0 },
             { id: 'gid://shopify/ProductVariant/813', price: '13.00',
               inventoryPolicy: 'DENY', inventoryQuantity: null },
+            { id: 'gid://shopify/ProductVariant/814', price: '14.00',
+              inventoryPolicy: 'DENY', inventoryQuantity: -2 },
+            { id: 'gid://shopify/ProductVariant/815', price: '15.00',
+              inventoryPolicy: 'CONTINUE', inventoryQuantity: -1 },
           ], pageInfo: { hasNextPage: false, endCursor: null } },
         }],
         pageInfo: { hasNextPage: false, endCursor: null },
@@ -203,13 +207,16 @@ test('read-only inventory observations count unpublished DENY/CONTINUE zero stoc
   assert.equal(result.traversalVerified, true)
   assert.equal(result.catalogReady, false, 'unpublished variants never enter the public catalog')
   assert.equal(result.catalogVariants, 0)
-  assert.equal(result.observedShopifyVariants, 3)
+  assert.equal(result.observedShopifyVariants, 5)
   assert.equal(result.inventoryObservationsIncludeUnpublished, true)
   assert.equal(result.zeroStockDenyVariants, 1)
   assert.equal(result.zeroStockContinueVariants, 1)
+  assert.equal(result.negativeStockDenyVariants, 1, 'oversold DENY inventory is not zero or positive stock')
+  assert.equal(result.negativeStockContinueVariants, 1, 'oversold CONTINUE may still be made to order')
+  assert.equal(result.nonPositiveStockDenyVariants, 2, 'both zero and negative DENY are non-positive')
   assert.equal(result.unknownInventoryQuantityVariants, 1, 'null inventory must not be treated as zero')
   assert.equal(result.sellabilityVerified, false)
-  assert.doesNotMatch(JSON.stringify(result), /PRIVATE DRAFT|ProductVariant|11\.00|12\.00|13\.00/)
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE DRAFT|ProductVariant|11\.00|12\.00|13\.00|14\\.00|15\\.00/)
 })
 
 test('read-only audit rejects missing or invalid inventory policy without leaking variant identities', async () => {
