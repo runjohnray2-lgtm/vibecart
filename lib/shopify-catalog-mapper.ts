@@ -256,9 +256,17 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
     // more media pages outstanding, do not claim the product is imageless or
     // certify a complete merchant catalog from a partial media inspection.
     // This is a whole-family rejection; a future media paginator can resolve it.
-    if (!fallbackImage && isObject(entry.media) &&
-        isObject(entry.media.pageInfo) && entry.media.pageInfo.hasNextPage === true) {
-      skip(productId, undefined, 'image coverage unverified: additional Shopify media pages not inspected')
+    // A malformed or missing GraphQL media pageInfo cannot establish that
+    // an imageless product was fully inspected. Do not report a definitive
+    // missing-image result from an unknown or nonterminal media connection.
+    // REST-style media arrays and products with a verified safe image remain
+    // compatible without requiring GraphQL pagination metadata.
+    const mediaConnection = isObject(entry.media) ? entry.media : undefined
+    const mediaPageInfo = mediaConnection?.pageInfo
+    if (!fallbackImage && mediaConnection &&
+        (!isObject(mediaPageInfo) || typeof mediaPageInfo.hasNextPage !== 'boolean' ||
+         mediaPageInfo.hasNextPage)) {
+      skip(productId, undefined, 'image coverage unverified: Shopify media pagination missing, invalid or incomplete')
       continue
     }
 
