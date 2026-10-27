@@ -107,12 +107,23 @@ export function createShopifyAdminCatalogSource(
       return parsed.protocol === 'https:' && !parsed.username && !parsed.password
     } catch { return false }
   }
+  // A structurally valid connection can still contain null or malformed media
+  // nodes. Treat those as unknown coverage, not evidence of an imageless product.
+  // Video/external-media previews may legitimately be null.
+  const validateMediaNodes = (nodes: unknown[]) => {
+    for (const node of nodes) {
+      if (!record(node) || typeof node.id !== 'string' || !node.id.trim()) {
+        throw new Error('Shopify media page contains invalid node identity')
+      }
+    }
+  }
   const hydrateMedia = async (raw: unknown): Promise<unknown> => {
     if (!record(raw) || !('media' in raw)) return raw
     // Validate even terminal media pages: a malformed/missing nodes array
     // must not be mistaken for verified absence of a product image.
     // Older offline fixtures without a media field remain supported.
     const first = connectionOf(raw.media, 'media')
+    validateMediaNodes(first.nodes)
     if (first.nodes.length > 5 || (first.pageInfo.hasNextPage && first.nodes.length === 0)) {
       throw new Error('Shopify initial media page size invalid')
     }
@@ -150,6 +161,7 @@ export function createShopifyAdminCatalogSource(
         throw new Error('Shopify product updated during media pagination')
       }
       page = connectionOf(data.product.media, 'media')
+      validateMediaNodes(page.nodes)
       if (page.nodes.length === 0 || page.nodes.length > 20) {
         throw new Error('Shopify continuation media page size invalid')
       }
