@@ -510,3 +510,58 @@ test('Admin rejects malformed terminal media connections before certifying missi
   assert.equal(result.skipped.length, 0)
   assert.equal(toCatalogFeed(result.snapshot).products[0].image, '')
 })
+
+test('Admin media rejects malformed terminal nodes instead of reporting a missing image', async () => {
+  const single = product(variants(1, 1, false, null), 1)
+  for (const node of [null, 42, {}, { id: '' }, { id: 7 }]) {
+    const source = createShopifyAdminCatalogSource(withCount(async document => {
+      assert.match(document, /VibeCartProducts\\(/)
+      return productEnvelope({
+        ...single, featuredMedia: null,
+        media: { nodes: [node], pageInfo: { hasNextPage: false, endCursor: null } },
+      })
+    }))
+    await assert.rejects(source.fetchPage(null), /media page contains invalid node identity/)
+  }
+
+  // Video nodes can have no preview image; this is not malformed identity.
+  const valid = createShopifyAdminCatalogSource(withCount(async document => {
+    assert.match(document, /VibeCartProducts\\(/)
+    return productEnvelope({
+      ...single, featuredMedia: null,
+      media: { nodes: [{ id: 'gid://shopify/Video/777', preview: null }],
+        pageInfo: { hasNextPage: false, endCursor: null } },
+    })
+  }))
+  const page = await valid.fetchPage(null)
+  assert.equal(page.products.length, 1)
+  assert.equal(page.products[0].media.nodes.length, 1)
+})
+
+test('Admin media rejects malformed continuation nodes even alongside a safe image', async () => {
+  const initial = {
+    ...product(variants(1, 1, false, null), 1),
+    updatedAt: '2026-10-18T00:00:00Z',
+    featuredMedia: null,
+    media: { nodes: [{ id: 'gid://shopify/Video/501', preview: null }],
+      pageInfo: { hasNextPage: true, endCursor: 'next-media' } },
+  }
+  let continuationCalls = 0
+  const source = createShopifyAdminCatalogSource(withCount(async document => {
+    if (document.includes('VibeCartProducts(')) return productEnvelope(initial)
+    if (document.includes('VibeCartProductMedia(')) {
+      continuationCalls++
+      return { data: { product: {
+        id: PRODUCT, updatedAt: initial.updatedAt,
+        media: { nodes: [
+          null,
+          { id: 'gid://shopify/MediaImage/502',
+            preview: { image: { url: 'https://cdn.shopify.com/safe.jpg' } } },
+        ], pageInfo: { hasNextPage: false, endCursor: null } },
+      } } }
+    }
+    throw new Error('unexpected read-only GraphQL operation')
+  }))
+  await assert.rejects(source.fetchPage(null), /media page contains invalid node identity/)
+  assert.equal(continuationCalls, 1)
+})
