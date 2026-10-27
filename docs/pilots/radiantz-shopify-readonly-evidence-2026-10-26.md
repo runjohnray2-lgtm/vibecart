@@ -33,9 +33,22 @@ On worker draft PR #119 at `b42dff503360ce4fe9529ef772d485dc7d8e0045`, [GitHub A
 
 ## Remaining gates and coordination
 
-- No full 44-product hydrated Admin audit or independently verified final VibeCart feed was run. Exact IDs, SKU mapping, prices, fitment and fresh checkout sellability still require end-to-end verification. Image presence was checked across all reported product media pages, but image quality and per-variant mapping remain unverified.
+- A subsequent full 44-product/970-variant read-only connector traversal is recorded below. It does not execute the repository's standalone operator audit or certify a final VibeCart feed. Fitment, image quality, sales-channel publication and fresh checkout sellability remain unverified.
 - No external agent read, MCP/UCP product fetch, cart, Stripe TEST transaction, Neon order, staging deployment, database write, or merchant mutation occurred.
 - #108's distinct zero-incremental-cost staging database, Preview-only Stripe TEST credentials, and tenant isolation/security proof remain unverified. Do not run write-capable staging tests until all gates pass.
 - Keep #119 draft and stacked on #104 -> #103; #106 closed unmerged and #107 is based on #104. Work-owned #121 must selectively reconcile the Shopify-owned changes and rerun integrated CI. No automatic merges or deployments.
 
 **Evidence limitations:** Shopify read-only connector execution and aggregate observations only. No secret-bearing output or raw Admin data has been committed.
+
+## Full 44-product, 970-variant read-only traversal — 2026-10-26 21:23 PDT
+
+**New evidence, same connected Radiantz shop (USD):** Executed the repository's schema-correct `VibeCartProducts`, `VibeCartProductVariants` and unfiltered `VibeCartProductsCount` operations through the connected Shopify Admin **read-only** query tool. Schema was inspected before constructing operations. The Shopify validation helper returned **"validation skipped"**; the actual queries executed successfully, but this does not prove compatibility with the standalone script's pinned Admin API version.
+
+- **44 products**, independently EXACT before and after the traversal; **9 product pages** (5 per page) with unique product IDs and terminal cursor. **39 ACTIVE / 921 variants**, **5 DRAFT / 49 variants**; **970 total variants** hydrated with **970 unique variant IDs**. All 44 product-family counts were EXACT and matched hydrated rows.
+- Four families above 100 variants (**150, 225, 189, 174**) required **5 continuation variant requests** beyond the first 100 per family. On each continuation, independent EXACT variant counts and `updatedAt` remained unchanged; no duplicate variant IDs or missing rows. **16 read-only requests** for the count/product/variant traversal (2 counts + 9 product pages + 5 variant continuations).
+- Across all 970 observed variants: **769 DENY** and **201 CONTINUE** inventory policies, **0 invalid policies**, **0 invalid decimal prices**, **0 missing/invalid SKUs**, **0 duplicate IDs**, and **0 invalid display fields** under the offline mapper's basic length/type checks. These are data-quality observations, **not live checkout price or availability verification**.
+- **756 DENY variants** and **127 CONTINUE variants** reported zero on-hand inventory. A DENY/zero variant must **never** be treated as checkout-authorized; CONTINUE/zero may be made to order but requires Codex's fresh sellability checks. Counts include both ACTIVE and DRAFT products and must not be used as a public sellable-variant count.
+- A separate independent **one-page, 44-product read-only image-coverage query** found **36 of 39 ACTIVE families with an image**, **3 ACTIVE families missing images**, and **0 nonterminal media connections**. Four DRAFT families also lacked images. No image content, private identifiers or raw catalog rows were retained in this evidence.
+- All ACTIVE products had non-null `publishedAt`; this does not independently verify every publication/sales channel. Exact prices, SKU identities and product IDs were checked transiently for integrity but intentionally **not written to public GitHub**.
+
+**Acceptance boundary:** This is stronger **live Shopify read-only catalog data-quality/pagination evidence**, not a deployed Shopify→VibeCart feed, verified fitment, MCP/UCP agent fetch, server-priced cart, isolated Neon order, Stripe TEST payment, replay test, or second-merchant onboarding. No Shopify mutations, database writes, checkout, payments, deployments or spending. Issue #108's staging isolation/credentials/cost gates still block write-capable acceptance.
