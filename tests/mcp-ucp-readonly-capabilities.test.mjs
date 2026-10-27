@@ -262,6 +262,17 @@ test('probe rejects composed or conditional schemas that conceal mandatory catal
     { index: 4, name: 'lookup_catalog', target: tool => tool.inputSchema.properties.catalog,
       key: 'unevaluatedProperties', value: { required: ['token'] },
       error: /catalog lookup schema/ },
+    // Whole-object const/enum restrict a catalog request even when
+    // required/properties appear compatible with arbitrary agent inputs.
+    { index: 2, name: 'vibecart.list_products', target: tool => tool.inputSchema,
+      key: 'const', value: { secret: 'only-this' }, error: /Generic MCP unsafe or incompatible/ },
+    { index: 4, name: 'search_catalog', target: tool => tool.inputSchema.properties.catalog,
+      key: 'const', value: { query: 'fixed-query' }, error: /catalog search schema/ },
+    { index: 4, name: 'lookup_catalog', target: tool => tool.inputSchema.properties.meta,
+      key: 'enum', value: [{ 'ucp-agent': { profile: 'https://only-agent.example' } }],
+      error: /meta\\/catalog schema/ },
+    { index: 4, name: 'get_product', target: tool => tool.inputSchema.properties.meta.properties['ucp-agent'],
+      key: 'const', value: { profile: 'https://only-agent.example' }, error: /meta\\/catalog schema/ },
     // Malformed JSON Schema objects must not certify a public catalog.
     { index: 2, name: 'vibecart.list_products', target: tool => tool.inputSchema,
       key: 'properties', value: [], error: /Generic MCP unsafe or incompatible/ },
