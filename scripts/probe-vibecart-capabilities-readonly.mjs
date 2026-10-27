@@ -272,7 +272,9 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
             !Array.isArray(catalog.required) || !catalog.required.includes(key) ||
             field?.type !== (key === 'ids' ? 'array' : 'string') ||
             (key === 'ids' && (!acceptsCatalogString(field.items) ||
-              !Number.isSafeInteger(field.minItems) || field.minItems < 1 ||
+              // A lookup must accept a single ID; minItems: 2+ silently
+              // rules out the smallest valid catalog lookup request.
+              field.minItems !== 1 ||
               (field.maxItems !== undefined &&
                 (!Number.isSafeInteger(field.maxItems) || field.maxItems < 1)) ||
               ['$ref', '$dynamicRef', 'allOf', 'anyOf', 'oneOf', 'not',
