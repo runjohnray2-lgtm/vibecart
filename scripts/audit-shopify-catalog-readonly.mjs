@@ -173,9 +173,20 @@ async function auditShopifyCatalogReadOnlyInternal({ execute, expectedCurrencyCo
       const nodes = product?.variants?.nodes
       if (!Array.isArray(nodes)) throw new Error('Shopify audit expected hydrated variant nodes')
       for (const variant of nodes) {
-        observedInventory.variants++
+        // The audit includes unpublished variants. Validate their inventory
+        // policy too: the public mapper intentionally skips drafts, so its
+        // policy checks cannot establish all-status inventory completeness.
+        if (variant?.inventoryPolicy !== 'DENY' && variant?.inventoryPolicy !== 'CONTINUE') {
+          throw new Error('Shopify audit rejected a variant with missing or invalid inventory policy')
+        }
         const quantity = variant?.inventoryQuantity
-        if (!Number.isSafeInteger(quantity)) {
+        // Null/omitted inventory is unknown, not zero. A string, fraction or
+        // unsafe integer is malformed evidence, not an unknown stock count.
+        if (quantity !== null && quantity !== undefined && !Number.isSafeInteger(quantity)) {
+          throw new Error('Shopify audit rejected malformed inventory quantity')
+        }
+        observedInventory.variants++
+        if (quantity === null || quantity === undefined) {
           observedInventory.unknown++
         } else if (quantity === 0 && variant?.inventoryPolicy === 'DENY') {
           observedInventory.denyZero++
