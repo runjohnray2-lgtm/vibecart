@@ -102,7 +102,10 @@ export function createShopifyAdminCatalogSource(
     if (!record(node) || !record(node.preview) || !record(node.preview.image)) return false
     const url = node.preview.image.url
     if (typeof url !== 'string' || url.length > 2000) return false
-    try { return new URL(url).protocol === 'https:' } catch { return false }
+    try {
+      const parsed = new URL(url)
+      return parsed.protocol === 'https:' && !parsed.username && !parsed.password
+    } catch { return false }
   }
   const hydrateMedia = async (raw: unknown): Promise<unknown> => {
     if (!record(raw) || !record(raw.media) || !record(raw.media.pageInfo) ||
