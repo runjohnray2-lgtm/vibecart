@@ -481,7 +481,7 @@ test('Admin rejects malformed terminal media connections before certifying missi
     { pageInfo: terminal },
     { nodes: 'not-an-array', pageInfo: terminal },
     { nodes: [], pageInfo: { hasNextPage: 'false', endCursor: null } },
-    { nodes: Array.from({ length: 6 }, () => ({ preview: { image: null } })), pageInfo: terminal },
+    { nodes: Array.from({ length: 6 }, (_, i) => ({ id: 'gid://shopify/Video/' + (600 + i), preview: { image: null } })), pageInfo: terminal },
   ]
 
   for (const media of invalid) {
