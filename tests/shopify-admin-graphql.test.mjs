@@ -472,3 +472,41 @@ test('Admin media pagination ignores credential-bearing previews and retrieves l
   assert.equal(result.skipped.length, 0)
   assert.equal(toCatalogFeed(result.snapshot).products[0].image, 'https://cdn.shopify.com/safe-later.jpg')
 })
+
+test('Admin rejects malformed terminal media connections before certifying missing images', async () => {
+  const single = product(variants(1, 1, false, null), 1)
+  const terminal = { hasNextPage: false, endCursor: null }
+  const invalid = [
+    null,
+    { pageInfo: terminal },
+    { nodes: 'not-an-array', pageInfo: terminal },
+    { nodes: [], pageInfo: { hasNextPage: 'false', endCursor: null } },
+    { nodes: Array.from({ length: 6 }, () => ({ preview: { image: null } })), pageInfo: terminal },
+  ]
+
+  for (const media of invalid) {
+    const source = createShopifyAdminCatalogSource(withCount(async document => {
+      assert.match(document, /VibeCartProducts\(/)
+      return productEnvelope({ ...single, featuredMedia: null, media })
+    }))
+    await assert.rejects(source.fetchPage(null),
+      /invalid Shopify media connection|Shopify initial media page size invalid/,
+      'a malformed terminal media page must not be certified as imageless')
+  }
+
+  // A genuine empty terminal media connection is valid: absence is verified,
+  // and the missing image remains visible for AI-readiness diagnostics.
+  const source = createShopifyAdminCatalogSource(withCount(async document => {
+    assert.match(document, /VibeCartProducts\(/)
+    return productEnvelope({
+      ...single, featuredMedia: null,
+      media: { nodes: [], pageInfo: terminal },
+    })
+  }))
+  const result = await syncShopifyCatalog({
+    shopCurrencyCode: 'USD', expectedCurrencyCode: 'USD', fetchPage: source.fetchPage,
+  })
+  assert.equal(result.upserted, 1)
+  assert.equal(result.skipped.length, 0)
+  assert.equal(toCatalogFeed(result.snapshot).products[0].image, '')
+})
