@@ -108,15 +108,18 @@ export function createShopifyAdminCatalogSource(
     } catch { return false }
   }
   const hydrateMedia = async (raw: unknown): Promise<unknown> => {
-    if (!record(raw) || !record(raw.media) || !record(raw.media.pageInfo) ||
-        raw.media.pageInfo.hasNextPage !== true) return raw
+    if (!record(raw) || !('media' in raw)) return raw
+    // Validate even terminal media pages: a malformed/missing nodes array
+    // must not be mistaken for verified absence of a product image.
+    // Older offline fixtures without a media field remain supported.
+    const first = connectionOf(raw.media, 'media')
+    if (first.nodes.length > 5 || (first.pageInfo.hasNextPage && first.nodes.length === 0)) {
+      throw new Error('Shopify initial media page size invalid')
+    }
+    if (!first.pageInfo.hasNextPage) return raw
     // An image in featuredMedia or the first media page is sufficient for
     // image availability. Otherwise inspect every remaining page before
     // claiming that a product has no usable image.
-    const first = connectionOf(raw.media, 'media')
-    if (first.nodes.length > 5 || first.nodes.length === 0) {
-      throw new Error('Shopify initial media page size invalid')
-    }
     if (hasUsablePreview(raw.featuredMedia) || first.nodes.some(hasUsablePreview)) return raw
     if (typeof raw.id !== 'string' || !/^gid:\/\/shopify\/Product\/[1-9]\d*$/.test(raw.id)) {
       throw new Error('Shopify media pagination requires Product gid')
