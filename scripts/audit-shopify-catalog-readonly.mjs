@@ -166,7 +166,7 @@ async function auditShopifyCatalogReadOnlyInternal({ execute, expectedCurrencyCo
   // Inventory observations cover ALL hydrated Shopify variants, including
   // DRAFT/unpublished families excluded from the public VibeCart feed. Do not
   // confuse these read-only counts with live checkout authorization.
-  const observedInventory = { variants: 0, denyZero: 0, continueZero: 0, unknown: 0 }
+  const observedInventory = { variants: 0, denyZero: 0, continueZero: 0, denyNegative: 0, continueNegative: 0, unknown: 0 }
   const fetchPage = async cursor => {
     const page = await source.fetchPage(cursor)
     for (const product of page.products) {
@@ -181,6 +181,10 @@ async function auditShopifyCatalogReadOnlyInternal({ execute, expectedCurrencyCo
           observedInventory.denyZero++
         } else if (quantity === 0 && variant?.inventoryPolicy === 'CONTINUE') {
           observedInventory.continueZero++
+        } else if (quantity < 0 && variant?.inventoryPolicy === 'DENY') {
+          observedInventory.denyNegative++
+        } else if (quantity < 0 && variant?.inventoryPolicy === 'CONTINUE') {
+          observedInventory.continueNegative++
         }
       }
     }
@@ -272,6 +276,11 @@ async function auditShopifyCatalogReadOnlyInternal({ execute, expectedCurrencyCo
     inventoryObservationsIncludeUnpublished: true,
     zeroStockDenyVariants: observedInventory.denyZero,
     zeroStockContinueVariants: observedInventory.continueZero,
+    // Negative inventory can occur after overselling. It is not positive
+    // on-hand stock; preserve the policy distinction for made-to-order goods.
+    negativeStockDenyVariants: observedInventory.denyNegative,
+    negativeStockContinueVariants: observedInventory.continueNegative,
+    nonPositiveStockDenyVariants: observedInventory.denyZero + observedInventory.denyNegative,
     unknownInventoryQuantityVariants: observedInventory.unknown,
     denyPolicyVariants,
     continuePolicyVariants,
