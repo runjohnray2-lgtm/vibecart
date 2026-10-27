@@ -126,11 +126,43 @@ test('read-only audit traverses a real adapter contract and returns aggregates, 
   assert.equal(result.denyPolicyVariants, 0)
   assert.equal(result.continuePolicyVariants, 1)
   assert.equal(result.sellabilityVerified, false, 'a read-only audit cannot authorize checkout')
-  assert.equal(calls.length, 4, 'shop currency, opening count, product page and final count')
+  assert.equal(calls.length, 5, 'opening currency, opening count, product page, final count and closing currency')
+  assert.equal(calls.filter(c => c.document.includes('shop { currencyCode }')).length, 2)
   assert.equal(calls.filter(c => c.document.includes('VibeCartProductsCount')).length, 2)
   assert.ok(calls.every(c => c.document.trim().startsWith('query ')))
   assert.doesNotMatch(JSON.stringify(result), /SYN-101|SYNTHETIC test light|65\.99|ProductVariant/)
   assert.match(result.note, /MCP\/UCP.*NOT verified/)
+})
+
+test('read-only audit refuses currency drift after a complete Shopify product walk', async () => {
+  let currencyReads = 0
+  const operations = []
+  const execute = async document => {
+    operations.push(document)
+    if (document.includes('shop { currencyCode }')) {
+      currencyReads++
+      return { data: { shop: { currencyCode: currencyReads === 1 ? 'USD' : 'EUR' } } }
+    }
+    if (document.includes('VibeCartProductsCount')) {
+      return { data: { productsCount: { count: 0, precision: 'EXACT' } } }
+    }
+    if (document.includes('VibeCartProducts(')) {
+      return { data: { products: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } }
+    }
+    throw new Error('unexpected operation')
+  }
+  await assert.rejects(
+    auditShopifyCatalogReadOnly({ execute, expectedCurrencyCode: 'USD' }),
+    error => {
+      assert.match(error.message, /Shopify audit incomplete or invalid; private merchant details suppressed/)
+      assert.doesNotMatch(error.message, /EUR|USD|ProductVariant|private/i)
+      return true
+    },
+    'a closing currency change must invalidate an otherwise exact product traversal',
+  )
+  assert.equal(currencyReads, 2, 'both opening and closing shop currency must be read')
+  assert.equal(operations.filter(document => document.includes('VibeCartProductsCount')).length, 2)
+  assert.ok(operations.every(document => document.trim().startsWith('query ')))
 })
 
 test('read-only audit distinguishes zero-stock DENY from made-to-order CONTINUE without claiming sellability', async () => {
