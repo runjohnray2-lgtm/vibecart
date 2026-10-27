@@ -438,3 +438,37 @@ test('Admin media continuation rejects missing cursor, cross-product response an
       /media continuation cursor missing|media page product id mismatch|updated during media pagination/)
   }
 })
+
+
+test('Admin media pagination ignores credential-bearing previews and retrieves later safe image', async () => {
+  const initial = {
+    ...product(variants(1, 1, false, null), 1),
+    featuredMedia: { preview: { image: { url: 'https://operator:secret@cdn.shopify.com/featured.jpg' } } },
+    media: {
+      nodes: [{ id: 'gid://shopify/MediaImage/501',
+        preview: { image: { url: 'https://operator:secret@cdn.shopify.com/first.jpg' } } }],
+      pageInfo: { hasNextPage: true, endCursor: 'next-safe-media' },
+    },
+  }
+  let mediaCalls = 0
+  const source = createShopifyAdminCatalogSource(withCount(async (document, variables) => {
+    if (document.includes('VibeCartProducts(')) return productEnvelope(initial)
+    if (document.includes('VibeCartProductMedia(')) {
+      mediaCalls++
+      assert.equal(variables.cursor, 'next-safe-media')
+      return { data: { product: {
+        id: PRODUCT, updatedAt: initial.updatedAt,
+        media: { nodes: [{ id: 'gid://shopify/MediaImage/502',
+          preview: { image: { url: 'https://cdn.shopify.com/safe-later.jpg' } } }],
+          pageInfo: { hasNextPage: false, endCursor: null } },
+      } } }
+    }
+    throw new Error('unexpected read-only GraphQL operation')
+  }))
+  const result = await syncShopifyCatalog({
+    shopCurrencyCode: 'USD', expectedCurrencyCode: 'USD', fetchPage: source.fetchPage,
+  })
+  assert.equal(mediaCalls, 1, 'unsafe preview must not stop media continuation')
+  assert.equal(result.skipped.length, 0)
+  assert.equal(toCatalogFeed(result.snapshot).products[0].image, 'https://cdn.shopify.com/safe-later.jpg')
+})
