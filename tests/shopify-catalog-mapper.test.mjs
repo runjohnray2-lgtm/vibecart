@@ -323,3 +323,37 @@ test('credential-bearing Shopify media URLs are never exposed or mistaken for ve
   assert.equal(incomplete.products.length, 0)
   assert.match(incomplete.skipped[0].reason, /image coverage unverified/)
 })
+
+test('imageless GraphQL media requires explicit terminal pagination evidence', () => {
+  const raw = {
+    id: 'gid://shopify/Product/771', title: 'SYNTHETIC media completeness',
+    status: 'ACTIVE', publishedAt: '2026-10-26T00:00:00Z',
+    variants: { nodes: [{
+      id: 'gid://shopify/ProductVariant/772', price: '19.99',
+      inventoryPolicy: 'CONTINUE', inventoryQuantity: 0,
+    }], pageInfo: { hasNextPage: false } },
+    media: { nodes: [] },
+  }
+  for (const pageInfo of [undefined, {}, { hasNextPage: 'false' }, { hasNextPage: null },
+    { hasNextPage: true, endCursor: 'more' }]) {
+    const media = { nodes: [], ...(pageInfo === undefined ? {} : { pageInfo }) }
+    const result = mapShopifyProducts([{ ...raw, media }], USD)
+    assert.equal(result.products.length, 0, 'unknown media coverage must omit the entire family')
+    assert.equal(result.skipped.length, 1)
+    assert.match(result.skipped[0].reason, /image coverage unverified/)
+  }
+  const terminal = mapShopifyProducts([{ ...raw, media: {
+    nodes: [], pageInfo: { hasNextPage: false, endCursor: null },
+  } }], USD)
+  assert.equal(terminal.products.length, 1)
+  assert.equal(terminal.products[0].image, '', 'terminal imageless product remains diagnosable')
+  assert.equal(terminal.products[0].priceCents, 1999)
+  assert.equal(terminal.products[0].shopify.inventoryPolicy, 'CONTINUE')
+  const featured = mapShopifyProducts([{ ...raw,
+    featuredMedia: { preview: { image: { url: 'https://cdn.shopify.com/safe.png' } } },
+  }], USD)
+  assert.equal(featured.products.length, 1, 'a verified image needs no additional media pages')
+  assert.equal(featured.products[0].image, 'https://cdn.shopify.com/safe.png')
+  const rest = mapShopifyProducts([{ ...raw, media: [] }], USD)
+  assert.equal(rest.products.length, 1, 'REST media arrays remain compatible')
+})
