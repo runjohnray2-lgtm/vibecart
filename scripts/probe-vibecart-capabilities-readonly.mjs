@@ -200,6 +200,9 @@ export async function probeVibeCartCapabilitiesReadOnly({ baseUrl, fetchImpl = f
   // schema adds such constraints. Fail closed rather than certify it.
   const hiddenConstraints = [
     '$ref', '$dynamicRef', 'allOf', 'anyOf', 'oneOf', 'not',
+    // A whole-object const/enum can silently restrict an otherwise valid
+    // catalog request to one fixed product/query/agent profile.
+    'const', 'enum',
     'if', 'then', 'else', 'dependentRequired', 'dependentSchemas',
     'dependencies', 'minProperties', 'maxProperties', 'propertyNames',
     // These apply constraints to declared fields too, even when `required`
