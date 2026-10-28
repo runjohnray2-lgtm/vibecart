@@ -136,7 +136,7 @@ test('restored Shopify snapshot currency must be supported and canonical before 
   const base = applyProducts(createSnapshot('USD'), [raw]).snapshot
   const trustedFeed = toCatalogFeed(base)
   const trustedIndex = buildVariantIndex(base)
-  const invalidCurrencies = [undefined, null, '', 'usd', ' USD ', 'US D', 'JPY', 'KWD', 42]
+  const invalidCurrencies = [undefined, null, '', 'usd', ' USD ', 'US D', 'ZZZ', 'ABC', 'XTS', 'JPY', 'KWD', 42]
   for (const currencyCode of invalidCurrencies) {
     const corrupted = { ...base, currencyCode }
     assert.throws(() => toCatalogFeed(corrupted), /currencyCode|currency .*not supported/,
