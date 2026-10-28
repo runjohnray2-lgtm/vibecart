@@ -481,6 +481,12 @@ export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string,
   const seenVariantKeys = new Set<string>()
   for (const [familyKey, variants] of snapshot.products) {
     for (const p of variants) {
+      // The public catalog feed refuses more than MAX_FEED_PRODUCTS variants.
+      // A restored snapshot must not build a larger server-only lookup that
+      // cannot correspond to any valid public feed or exhausts memory.
+      if (index.size >= MAX_FEED_PRODUCTS) {
+        throw new Error('Shopify variant index exceeds ' + MAX_FEED_PRODUCTS + ' products')
+      }
       assertSnapshotProductOwnership(familyKey, p)
       assertSnapshotVariantMetadata(p)
       // The server-only lookup must not retain a variant the public feed would
