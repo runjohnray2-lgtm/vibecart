@@ -207,3 +207,27 @@ test('server-only variant index obeys the public 10,000-variant cap for restored
     'the server-only lookup must not accept more variants than the public feed can expose')
   assert.equal(buildVariantIndex(base).size, 1, 'the rejected oversized snapshot leaves trusted data intact')
 })
+
+test('restored Shopify snapshots reject empty or malformed product families without silent omissions', () => {
+  const base = applyProducts(createSnapshot('USD'), [raw]).snapshot
+  const trustedFeed = toCatalogFeed(base)
+  const trustedIndex = buildVariantIndex(base)
+  assert.equal(trustedFeed.products.length, 1)
+  assert.equal(trustedIndex.size, 1)
+
+  // A restored map entry means Shopify had a product family. Silently
+  // skipping it would make both the public feed and internal index appear
+  // complete even though its entire variant list has disappeared.
+  for (const variants of [[], null, {}, 'corrupted']) {
+    const restored = {
+      ...base,
+      products: new Map([['123', base.products.get('123')], ['999', variants]]),
+    }
+    assert.throws(() => toCatalogFeed(restored), /Shopify snapshot family has no valid variants/,
+      'public feed must reject an incomplete restored family')
+    assert.throws(() => buildVariantIndex(restored), /Shopify snapshot family has no valid variants/,
+      'server-side index must reject the same incomplete restored family')
+    assert.deepEqual(toCatalogFeed(base), trustedFeed, 'last-good feed remains intact')
+    assert.deepEqual(buildVariantIndex(base), trustedIndex, 'last-good index remains intact')
+  }
+})
