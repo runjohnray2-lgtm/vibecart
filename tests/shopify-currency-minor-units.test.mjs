@@ -18,7 +18,11 @@ test('Shopify mapper rejects valid currencies whose ICU minor-unit scale is not 
     if (!Intl.supportedValuesOf('currency').includes(code)) continue
     const digits = new Intl.NumberFormat('en', { style: 'currency', currency: code })
       .resolvedOptions().maximumFractionDigits
-    assert.notEqual(digits, 2, code + ' must not be treated as a two-decimal currency')
+    // ICU/CLDR revisions can disagree on the minor-unit scale for some
+    // currencies (for example RSD differs between Node 20 CI and Node 22).
+    // Test only currencies this runtime identifies as non-two-decimal;
+    // do not assert that every candidate has the same scale on every Node.
+    if (digits === 2) continue
     assert.throws(() => normalizeCurrency(code), /two minor-unit digits/, code)
     checked++
   }
