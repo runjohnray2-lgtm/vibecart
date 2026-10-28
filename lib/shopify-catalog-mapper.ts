@@ -76,7 +76,14 @@ export function normalizeCurrency(code: unknown): string {
   if (!Intl.supportedValuesOf('currency').includes(normalized)) {
     throw new Error('currency ' + normalized + ' is not a supported ISO 4217 currency')
   }
-  if (NON_TWO_DECIMAL_CURRENCIES.has(normalized)) {
+  // A hand-maintained exception list misses some valid zero-minor-unit codes
+  // (for example AFN, ALL, ISK and MMK). Using them with priceCents would
+  // mislabel whole-unit prices as cents. Check Node ICU's actual ISO 4217
+  // minor-unit metadata as well as the conservative legacy exclusions.
+  const minorUnits = new Intl.NumberFormat('en', {
+    style: 'currency', currency: normalized,
+  }).resolvedOptions().maximumFractionDigits
+  if (minorUnits !== 2 || NON_TWO_DECIMAL_CURRENCIES.has(normalized)) {
     throw new Error('currency ' + normalized + ' does not use two minor-unit digits and is not supported')
   }
   return normalized
