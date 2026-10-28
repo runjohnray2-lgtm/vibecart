@@ -284,6 +284,9 @@ test('unfiltered two-page product traversal proves exact count and preserves bot
   const source = createShopifyAdminCatalogSource(withCount(async (document, variables) => {
     calls.push(variables.cursor)
     assert.match(document, /VibeCartProducts\(/)
+    assert.match(document, /products\(first: 5, after: \$cursor, query: \$query, sortKey: ID\)/,
+      'each page must pin Shopify product cursor order to ID')
+    assert.equal(variables.query, null, 'full-catalog traversal must be unfiltered')
     if (variables.cursor === null) return { data: { products: {
       nodes: [first], pageInfo: { hasNextPage: true, endCursor: 'page-two' },
     } } }
