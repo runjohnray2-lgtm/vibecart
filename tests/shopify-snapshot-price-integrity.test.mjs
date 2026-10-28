@@ -131,3 +131,21 @@ test('restored Shopify snapshot display fields must satisfy the public catalog c
   }
   assert.equal(toCatalogFeed(accepted).products[0].variant, 'Small')
 })
+
+test('restored Shopify snapshot currency must be supported and canonical before feed or index exposure', () => {
+  const base = applyProducts(createSnapshot('USD'), [raw]).snapshot
+  const trustedFeed = toCatalogFeed(base)
+  const trustedIndex = buildVariantIndex(base)
+  const invalidCurrencies = [undefined, null, '', 'usd', ' USD ', 'US D', 'JPY', 'KWD', 42]
+  for (const currencyCode of invalidCurrencies) {
+    const corrupted = { ...base, currencyCode }
+    assert.throws(() => toCatalogFeed(corrupted), /currencyCode|currency .*not supported/,
+      'public catalog must reject invalid restored currency: ' + String(currencyCode))
+    assert.throws(() => buildVariantIndex(corrupted), /currencyCode|currency .*not supported/,
+      'server-side variant index must reject invalid restored currency: ' + String(currencyCode))
+    assert.deepEqual(toCatalogFeed(base), trustedFeed, 'last-good feed must remain unchanged')
+    assert.deepEqual(buildVariantIndex(base), trustedIndex, 'last-good index must remain unchanged')
+  }
+  assert.equal(toCatalogFeed(base).products[0].priceCents, 1999)
+  assert.equal(buildVariantIndex(base).get('456').inventoryPolicy, 'DENY')
+})
