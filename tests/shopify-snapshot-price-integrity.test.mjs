@@ -7,7 +7,7 @@ const modules = await loadTsModules([
   'lib/shopify-catalog-mapper.ts',
   'lib/shopify-catalog-sync.ts',
 ])
-const { applyProducts, buildVariantIndex, createSnapshot, toCatalogFeed } = modules['shopify-catalog-sync']
+const { applyProducts, buildVariantIndex, createSnapshot, toCatalogFeed, syncShopifyCatalog } = modules['shopify-catalog-sync']
 
 const raw = {
   id: 123,
@@ -230,4 +230,42 @@ test('restored Shopify snapshots reject empty or malformed product families with
     assert.deepEqual(toCatalogFeed(base), trustedFeed, 'last-good feed remains intact')
     assert.deepEqual(buildVariantIndex(base), trustedIndex, 'last-good index remains intact')
   }
+})
+
+
+test('incremental sync rejects a corrupt restored base before invoking Shopify transport', async () => {
+  const trusted = applyProducts(createSnapshot('USD'), [raw]).snapshot
+  const originalFeed = toCatalogFeed(trusted)
+  const product = trusted.products.get('123')[0]
+  const cases = [
+    { ...trusted, products: new Map([['123', [{ ...product, priceCents: -1 }]]]) },
+    { ...trusted, products: new Map([['123', []]]) },
+    { ...trusted, products: new Map([['123', [{ ...product, shopify: { ...product.shopify, inventoryPolicy: 'UNKNOWN' } }]]]) },
+  ]
+  for (const corrupted of cases) {
+    let calls = 0
+    await assert.rejects(() => syncShopifyCatalog({
+      shopCurrencyCode: 'USD',
+      expectedCurrencyCode: 'USD',
+      base: corrupted,
+      fetchPage: async () => {
+        calls += 1
+        return { products: [], pageInfo: { hasNextPage: false, endCursor: null } }
+      },
+    }), /invalid Shopify snapshot priceCents|family has no valid variants|invalid inventoryPolicy/)
+    assert.equal(calls, 0, 'corrupt base must fail before any Shopify request')
+    assert.deepEqual(toCatalogFeed(trusted), originalFeed, 'trusted base must remain unchanged')
+  }
+  let healthyCalls = 0
+  const accepted = await syncShopifyCatalog({
+    shopCurrencyCode: 'USD',
+    expectedCurrencyCode: 'USD',
+    base: trusted,
+    fetchPage: async () => {
+      healthyCalls += 1
+      return { products: [], pageInfo: { hasNextPage: false, endCursor: null } }
+    },
+  })
+  assert.equal(healthyCalls, 1, 'valid base must still permit incremental reads')
+  assert.deepEqual(toCatalogFeed(accepted.snapshot), originalFeed)
 })
