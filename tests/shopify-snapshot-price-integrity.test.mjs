@@ -149,3 +149,41 @@ test('restored Shopify snapshot currency must be supported and canonical before 
   assert.equal(toCatalogFeed(base).products[0].priceCents, 1999)
   assert.equal(buildVariantIndex(base).get('456').inventoryPolicy, 'DENY')
 })
+
+test('server-only variant index rejects restored display fields excluded by the public feed', () => {
+  const base = applyProducts(createSnapshot('USD'), [raw]).snapshot
+  const good = base.products.get('123')[0]
+  const trustedIndex = buildVariantIndex(base)
+  const trustedFeed = toCatalogFeed(base)
+  const invalid = [
+    ['name', '', /invalid Shopify snapshot name/],
+    ['name', null, /invalid Shopify snapshot name/],
+    ['name', 'x'.repeat(501), /invalid Shopify snapshot name/],
+    ['description', 7, /invalid Shopify snapshot description/],
+    ['description', 'x'.repeat(5001), /invalid Shopify snapshot description/],
+    ['variant', '   ', /invalid Shopify snapshot variant title/],
+    ['variant', 'x'.repeat(501), /invalid Shopify snapshot variant title/],
+    ['image', 'http://cdn.shopify.com/unsafe.jpg', /invalid Shopify snapshot image/],
+    ['image', 'https://operator:private@cdn.shopify.com/unsafe.jpg', /invalid Shopify snapshot image/],
+    ['image', null, /invalid Shopify snapshot image/],
+  ]
+  for (const [field, value, expected] of invalid) {
+    const corrupted = {
+      ...base,
+      products: new Map([['123', [{ ...good, [field]: value }]]]),
+    }
+    assert.throws(() => toCatalogFeed(corrupted), expected, field + ' feed')
+    assert.throws(() => buildVariantIndex(corrupted), expected, field + ' index')
+    assert.deepEqual(buildVariantIndex(base), trustedIndex, 'last-good index must be unchanged')
+    assert.deepEqual(toCatalogFeed(base), trustedFeed, 'last-good feed must be unchanged')
+  }
+  const valid = {
+    ...base,
+    products: new Map([['123', [{
+      ...good, name: 'SYNTHETIC updated', description: '', variant: 'Small',
+      image: 'https://cdn.shopify.com/synthetic.jpg',
+    }]]]),
+  }
+  assert.equal(buildVariantIndex(valid).get('456').variantId, '456')
+  assert.equal(toCatalogFeed(valid).products[0].variant, 'Small')
+})
