@@ -430,6 +430,13 @@ function assertSnapshotDisplayFields(p: ShopifyCatalogProduct): void {
   }
 }
 
+/** Restored snapshots must not silently omit an entire Shopify product family. */
+function assertSnapshotFamilyVariants(variants: unknown): void {
+  if (!Array.isArray(variants) || variants.length === 0) {
+    throw new Error('Shopify snapshot family has no valid variants')
+  }
+}
+
 /** Deterministic feed for VIBECART_CATALOG_URL: only fields the catalog parser accepts, sorted by id. */
 export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED_PRODUCTS): { products: VibeProduct[] } {
   assertSnapshotCurrency(snapshot)
@@ -442,6 +449,7 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
   const seenVariantKeys = new Set<string>()
   const products: VibeProduct[] = []
   for (const [familyKey, variants] of snapshot.products) {
+    assertSnapshotFamilyVariants(variants)
     for (const p of variants) {
       assertSnapshotProductOwnership(familyKey, p)
       assertSnapshotVariantMetadata(p)
@@ -480,6 +488,7 @@ export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string,
   const index = new Map<string, ShopifyVariantRef>()
   const seenVariantKeys = new Set<string>()
   for (const [familyKey, variants] of snapshot.products) {
+    assertSnapshotFamilyVariants(variants)
     for (const p of variants) {
       // The public catalog feed refuses more than MAX_FEED_PRODUCTS variants.
       // A restored snapshot must not build a larger server-only lookup that
