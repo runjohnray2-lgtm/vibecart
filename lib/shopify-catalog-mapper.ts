@@ -70,6 +70,12 @@ function text(value: unknown): string | undefined {
 export function normalizeCurrency(code: unknown): string {
   const normalized = typeof code === 'string' ? code.trim().toUpperCase() : ''
   if (!/^[A-Z]{3}$/.test(normalized)) throw new Error('currencyCode is required (ISO 4217 such as USD)')
+  // A three-letter shape alone does not establish an actual currency. Reject
+  // synthetic/unknown codes before they can label real merchant prices.
+  // Node 22's ICU currency registry is used for validation, not conversion.
+  if (!Intl.supportedValuesOf('currency').includes(normalized)) {
+    throw new Error('currency ' + normalized + ' is not a supported ISO 4217 currency')
+  }
   if (NON_TWO_DECIMAL_CURRENCIES.has(normalized)) {
     throw new Error('currency ' + normalized + ' does not use two minor-unit digits and is not supported')
   }
