@@ -382,6 +382,17 @@ function validSnapshotImage(image: unknown): image is string {
   }
 }
 
+/** A restored snapshot can bypass createSnapshot() and carry a different currency.
+ * Refuse to publish or index it rather than treating its cents as the merchant's.
+ * The currency is not returned in the public feed, so this check must happen here.
+ */
+function assertSnapshotCurrency(snapshot: ShopifyCatalogSnapshot): void {
+  const normalized = normalizeCurrency(snapshot.currencyCode)
+  if (normalized !== snapshot.currencyCode) {
+    throw new Error('invalid Shopify snapshot currencyCode: expected canonical uppercase currency')
+  }
+}
+
 /** Restored snapshots bypass the mapper; keep server-only SKU and Shopify policy trustworthy. */
 function assertSnapshotVariantMetadata(product: ShopifyCatalogProduct): void {
   // The server-only variant index can be built without generating the public
@@ -402,6 +413,7 @@ function assertSnapshotVariantMetadata(product: ShopifyCatalogProduct): void {
 
 /** Deterministic feed for VIBECART_CATALOG_URL: only fields the catalog parser accepts, sorted by id. */
 export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED_PRODUCTS): { products: VibeProduct[] } {
+  assertSnapshotCurrency(snapshot)
   // This is a public feed boundary. An invalid override must not bypass the
   // hard catalog size cap (Infinity/NaN previously disabled the comparison).
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_FEED_PRODUCTS) {
@@ -462,6 +474,7 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
 
 /** Server-only lookup keyed by Shopify variant id. Retains identity, SKU and policy lost in the public feed.\n * A cached policy is NOT checkout authorization: Codex must independently recheck live sellability. */
 export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string, ShopifyVariantRef> {
+  assertSnapshotCurrency(snapshot)
   const index = new Map<string, ShopifyVariantRef>()
   const seenVariantKeys = new Set<string>()
   for (const [familyKey, variants] of snapshot.products) {
