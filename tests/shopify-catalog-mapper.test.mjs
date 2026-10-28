@@ -399,3 +399,14 @@ test('REST image fallback skips unsafe earlier images without overriding a valid
   assert.ok(unsafeOnly.products.every(p => p.image === ''),
     'unsafe-only REST images must not be exposed as trusted URLs')
 })
+
+test('unknown three-letter codes cannot label trusted Shopify catalog prices', () => {
+  for (const invalid of ['ZZZ', 'ABC', 'XTS']) {
+    assert.throws(() => normalizeCurrency(invalid), /not a supported ISO 4217 currency/)
+    assert.throws(() => mapShopifyProducts([], { currencyCode: invalid }), /not a supported ISO 4217 currency/)
+  }
+  for (const valid of ['USD', 'EUR', 'CAD', 'GBP', 'AUD']) {
+    assert.equal(normalizeCurrency(valid.toLowerCase()), valid)
+  }
+  assert.throws(() => normalizeCurrency('JPY'), /two minor-unit digits/)
+})
