@@ -384,6 +384,11 @@ function validSnapshotImage(image: unknown): image is string {
 
 /** Restored snapshots bypass the mapper; keep server-only SKU and Shopify policy trustworthy. */
 function assertSnapshotVariantMetadata(product: ShopifyCatalogProduct): void {
+  // The server-only variant index can be built without generating the public
+  // feed. A restored snapshot with corrupted cents must not pass that boundary.
+  if (!Number.isSafeInteger(product.priceCents) || product.priceCents < 0) {
+    throw new Error('invalid Shopify snapshot priceCents for catalog variant: ' + product.id)
+  }
   if (product.shopify.inventoryPolicy !== 'DENY' && product.shopify.inventoryPolicy !== 'CONTINUE') {
     throw new Error('Shopify snapshot missing or invalid inventoryPolicy for catalog variant: ' + product.id)
   }
@@ -420,12 +425,6 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
       }
       if (seenVariantKeys.has(key)) throw new Error('duplicate Shopify variant id in snapshot: ' + key)
       seenVariantKeys.add(key)
-      // Reconstructed snapshots are not necessarily mapper-validated. Never
-      // expose a fractional, negative, non-finite or unsafe-integer merchant
-      // price to AI agents, even if the variant identity itself is valid.
-      if (!Number.isSafeInteger(p.priceCents) || p.priceCents < 0) {
-        throw new Error('invalid Shopify snapshot priceCents for catalog variant: ' + p.id)
-      }
       // Restored snapshots bypass the mapper. Reject malformed display fields
       // before exposing a feed, rather than relying on a later remote parser
       // to reject the entire merchant catalog.
