@@ -7,7 +7,7 @@ const modules = await loadTsModules([
   'lib/shopify-catalog-mapper.ts',
   'lib/shopify-catalog-sync.ts',
 ])
-const { applyProducts, createSnapshot, toCatalogFeed } = modules['shopify-catalog-sync']
+const { applyProducts, buildVariantIndex, createSnapshot, toCatalogFeed } = modules['shopify-catalog-sync']
 
 const raw = {
   id: 123,
@@ -30,6 +30,30 @@ test('public feed rejects reconstructed snapshot prices that cannot represent ex
     }
     assert.throws(() => toCatalogFeed(malformed), /invalid Shopify snapshot priceCents/, String(bad))
     assert.deepEqual(toCatalogFeed(base), trusted, 'bad reconstructed snapshot must not mutate last-good data')
+  }
+})
+
+test('server-only Shopify variant index rejects corrupted restored cents without changing trusted data', () => {
+  const base = applyProducts(createSnapshot('USD'), [raw]).snapshot
+  const trustedIndex = buildVariantIndex(base)
+  assert.equal(trustedIndex.get('456').variantId, '456')
+
+  for (const bad of [-1, 1.5, NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1, '1999', undefined, null]) {
+    const malformed = {
+      ...base,
+      products: new Map([['123', [{ ...base.products.get('123')[0], priceCents: bad }]]]),
+    }
+    assert.throws(() => buildVariantIndex(malformed), /invalid Shopify snapshot priceCents/,
+      'server-side identity index must not trust malformed merchant prices')
+    assert.equal(buildVariantIndex(base).get('456').variantId, '456',
+      'rejected restored snapshot must leave last-good identity index intact')
+  }
+  for (const valid of [0, 1, 1999, Number.MAX_SAFE_INTEGER]) {
+    const snapshot = {
+      ...base,
+      products: new Map([['123', [{ ...base.products.get('123')[0], priceCents: valid }]]]),
+    }
+    assert.equal(buildVariantIndex(snapshot).get('456').variantId, '456')
   }
 })
 
