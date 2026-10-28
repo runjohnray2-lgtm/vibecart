@@ -382,9 +382,9 @@ function validSnapshotImage(image: unknown): image is string {
   }
 }
 
-/** A restored snapshot can bypass createSnapshot() and carry a different currency.
- * Refuse to publish or index it rather than treating its cents as the merchant's.
- * The currency is not returned in the public feed, so this check must happen here.
+/** Restored snapshots bypass createSnapshot(): reject unsupported, malformed or
+ * noncanonical currency metadata at both feed and server-only index boundaries.
+ * This cannot prove that a valid currency matches the original price source.
  */
 function assertSnapshotCurrency(snapshot: ShopifyCatalogSnapshot): void {
   const normalized = normalizeCurrency(snapshot.currencyCode)
