@@ -139,9 +139,9 @@ test('restored Shopify snapshot currency must be supported and canonical before 
   const invalidCurrencies = [undefined, null, '', 'usd', ' USD ', 'US D', 'ZZZ', 'ABC', 'XTS', 'JPY', 'KWD', 42]
   for (const currencyCode of invalidCurrencies) {
     const corrupted = { ...base, currencyCode }
-    assert.throws(() => toCatalogFeed(corrupted), /currencyCode|currency .*not supported/,
+    assert.throws(() => toCatalogFeed(corrupted), /currencyCode|currency .*not (?:a )?supported/,
       'public catalog must reject invalid restored currency: ' + String(currencyCode))
-    assert.throws(() => buildVariantIndex(corrupted), /currencyCode|currency .*not supported/,
+    assert.throws(() => buildVariantIndex(corrupted), /currencyCode|currency .*not (?:a )?supported/,
       'server-side variant index must reject invalid restored currency: ' + String(currencyCode))
     assert.deepEqual(toCatalogFeed(base), trustedFeed, 'last-good feed must remain unchanged')
     assert.deepEqual(buildVariantIndex(base), trustedIndex, 'last-good index must remain unchanged')
