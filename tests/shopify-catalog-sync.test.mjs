@@ -60,6 +60,33 @@ test('full sync follows cursors across pages and builds a deterministic feed', a
   assert.equal('variant' in beta, false)
 })
 
+test('public Shopify feed enforces a finite hard cap and aborts before reading later corrupted families', async () => {
+  const { result } = await fullSync()
+  assert.equal(toCatalogFeed(result.snapshot, 4).products.length, 4)
+
+  for (const invalid of [0, -1, 1.5, NaN, Infinity, 10_001, null, '4']) {
+    assert.throws(() => toCatalogFeed(result.snapshot, invalid),
+      /invalid Shopify catalog feed limit/,
+      'invalid caller limits must not disable the 10,000-variant hard cap')
+  }
+  assert.throws(() => toCatalogFeed(result.snapshot, 3),
+    /catalog would exceed 3 products/)
+
+  // A malformed family AFTER the cap must never be inspected. The prior
+  // implementation validated/allocated the entire snapshot before checking
+  // the cap, so it failed with an unrelated identity error instead.
+  const firstVariant = [...result.snapshot.products.values()][0][0]
+  const oversized = {
+    currencyCode: result.snapshot.currencyCode,
+    products: new Map([...result.snapshot.products, ['9999', [firstVariant]]]),
+  }
+  assert.throws(() => toCatalogFeed(oversized, 3),
+    /catalog would exceed 3 products/,
+    'reject the oversized feed before touching the later corrupt family')
+  assert.equal(toCatalogFeed(result.snapshot).products.length, 4,
+    'rejected feed attempts must not modify the last known-good snapshot')
+})
+
 test('feed carries only catalog-contract fields; identifiers stay in the server-side index', async () => {
   const { result } = await fullSync()
   const feed = toCatalogFeed(result.snapshot)
