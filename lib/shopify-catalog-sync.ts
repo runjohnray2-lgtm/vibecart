@@ -30,12 +30,12 @@ export const MAX_FEED_PRODUCTS = 10_000
 export const SHOPIFY_SHOP_CURRENCY_QUERY = 'query { shop { currencyCode } }'
 
 // Shopify rejects single Admin GraphQL queries above 1,000 requested cost points.
-// Nesting 100 variants beneath 100 products can exceed that limit before any
+// Explicit ID ordering stabilizes cursor traversal independent of Shopify's\n// default sort behavior; independent EXACT counts still guard omissions.\n// Nesting 100 variants beneath 100 products can exceed that limit before any
 // data is returned. Keep the first product page small; hydrate all remaining
 // variants and products with the existing cursor-based pagination. The exact
 // requested cost must still be checked against the live shop's API response.
 export const SHOPIFY_PRODUCTS_QUERY = `query VibeCartProducts($cursor: String, $query: String) {
-  products(first: 5, after: $cursor, query: $query) {
+  products(first: 5, after: $cursor, query: $query, sortKey: ID) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
