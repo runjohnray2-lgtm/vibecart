@@ -413,6 +413,23 @@ function assertSnapshotVariantMetadata(product: ShopifyCatalogProduct): void {
   }
 }
 
+/** A restored server-side index must never accept variants the public feed would reject. */
+function assertSnapshotDisplayFields(p: ShopifyCatalogProduct): void {
+  if (typeof p.name !== 'string' || !p.name.trim() || p.name.trim().length > 500) {
+    throw new Error('invalid Shopify snapshot name for catalog variant: ' + p.id)
+  }
+  if (typeof p.description !== 'string' || p.description.length > 5000) {
+    throw new Error('invalid Shopify snapshot description for catalog variant: ' + p.id)
+  }
+  if (p.variant !== undefined &&
+      (typeof p.variant !== 'string' || !p.variant.trim() || p.variant.trim().length > 500)) {
+    throw new Error('invalid Shopify snapshot variant title for catalog variant: ' + p.id)
+  }
+  if (!validSnapshotImage(p.image)) {
+    throw new Error('invalid Shopify snapshot image for catalog variant: ' + p.id)
+  }
+}
+
 /** Deterministic feed for VIBECART_CATALOG_URL: only fields the catalog parser accepts, sorted by id. */
 export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED_PRODUCTS): { products: VibeProduct[] } {
   assertSnapshotCurrency(snapshot)
@@ -439,24 +456,7 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
       }
       if (seenVariantKeys.has(key)) throw new Error('duplicate Shopify variant id in snapshot: ' + key)
       seenVariantKeys.add(key)
-      // Restored snapshots bypass the mapper. Reject malformed display fields
-      // before exposing a feed, rather than relying on a later remote parser
-      // to reject the entire merchant catalog.
-      if (typeof p.name !== 'string' || !p.name.trim() || p.name.trim().length > 500) {
-        throw new Error('invalid Shopify snapshot name for catalog variant: ' + p.id)
-      }
-      if (typeof p.description !== 'string' || p.description.length > 5000) {
-        throw new Error('invalid Shopify snapshot description for catalog variant: ' + p.id)
-      }
-      if (p.variant !== undefined &&
-          (typeof p.variant !== 'string' || !p.variant.trim() || p.variant.trim().length > 500)) {
-        throw new Error('invalid Shopify snapshot variant title for catalog variant: ' + p.id)
-      }
-      // A restored snapshot can also carry a non-HTTPS, oversized,
-      // credential-bearing or malformed image URL.
-      if (!validSnapshotImage(p.image)) {
-        throw new Error('invalid Shopify snapshot image for catalog variant: ' + p.id)
-      }
+      assertSnapshotDisplayFields(p)
       products.push({
         id: p.id,
         name: p.name,
@@ -483,6 +483,9 @@ export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string,
     for (const p of variants) {
       assertSnapshotProductOwnership(familyKey, p)
       assertSnapshotVariantMetadata(p)
+      // The server-only lookup must not retain a variant the public feed would
+      // reject (malformed title, description, variant label or image URL).
+      assertSnapshotDisplayFields(p)
       if (index.has(p.id)) throw new Error('duplicate Shopify variant id in snapshot: ' + p.id)
       const key = canonicalVariantKey(p.shopify.variantId)
       // A catalog id must identify the SAME real Shopify variant as the
