@@ -187,3 +187,23 @@ test('server-only variant index rejects restored display fields excluded by the 
   assert.equal(buildVariantIndex(valid).get('456').variantId, '456')
   assert.equal(toCatalogFeed(valid).products[0].variant, 'Small')
 })
+
+
+test('server-only variant index obeys the public 10,000-variant cap for restored snapshots', () => {
+  const base = applyProducts(createSnapshot('USD'), [raw]).snapshot
+  const template = base.products.get('123')[0]
+  const variants = Array.from({ length: 10_001 }, (_, offset) => {
+    const variantId = String(20000 + offset)
+    return {
+      ...template,
+      id: variantId,
+      shopify: { ...template.shopify, variantId },
+    }
+  })
+  const snapshot = { ...base, products: new Map([['123', variants]]) }
+  assert.equal(buildVariantIndex({ ...snapshot, products: new Map([['123', variants.slice(0, 10_000)]]) }).size, 10_000)
+  assert.throws(() => toCatalogFeed(snapshot), /catalog would exceed 10000 products/)
+  assert.throws(() => buildVariantIndex(snapshot), /Shopify variant index exceeds 10000 products/,
+    'the server-only lookup must not accept more variants than the public feed can expose')
+  assert.equal(buildVariantIndex(base).size, 1, 'the rejected oversized snapshot leaves trusted data intact')
+})
