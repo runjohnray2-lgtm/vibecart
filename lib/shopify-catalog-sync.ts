@@ -397,6 +397,11 @@ function assertSnapshotVariantMetadata(product: ShopifyCatalogProduct): void {
 
 /** Deterministic feed for VIBECART_CATALOG_URL: only fields the catalog parser accepts, sorted by id. */
 export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED_PRODUCTS): { products: VibeProduct[] } {
+  // This is a public feed boundary. An invalid override must not bypass the
+  // hard catalog size cap (Infinity/NaN previously disabled the comparison).
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_FEED_PRODUCTS) {
+    throw new Error('invalid Shopify catalog feed limit')
+  }
   const seen = new Set<string>()
   const seenVariantKeys = new Set<string>()
   const products: VibeProduct[] = []
@@ -447,9 +452,11 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
         image: p.image,
         ...(p.variant !== undefined ? { variant: p.variant } : {}),
       })
+      // Stop immediately at the cap, before walking or allocating any further
+      // untrusted snapshot entries. The caller retains its prior good feed.
+      if (products.length > limit) throw new Error('catalog would exceed ' + limit + ' products')
     }
   }
-  if (products.length > limit) throw new Error('catalog would exceed ' + limit + ' products')
   products.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
   return { products }
 }
