@@ -556,6 +556,11 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
   if (!Number.isSafeInteger(maxPages) || maxPages < 1 || maxPages > 200) {
     throw new Error('invalid Shopify product pagination limits')
   }
+  // A restored base can bypass mapper validation. Reject corrupted cached
+  // prices, variant identities, inventory policies or missing families BEFORE
+  // calling the injected Shopify transport, not after a potentially metered
+  // page traversal. Never silently heal a corrupt base with partial updates.
+  if (options.base) buildVariantIndex(options.base)
   let snapshot = options.base ?? createSnapshot(shopCurrency)
   const seenCursors = new Set<string>()
   const seenProductKeys = new Set<string>()
