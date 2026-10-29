@@ -140,3 +140,36 @@ test('unknown and oversold quantities remain distinct from zero; no public stock
   assert.equal('inventoryQuantity' in index.get(variantId(7083)), false)
   assert.doesNotMatch(JSON.stringify(toCatalogFeed(result.snapshot)), /inventoryQuantity|inventoryPolicy/)
 })
+
+test('conflicting REST and GraphQL inventory policies reject the entire family without changing last-good feed', () => {
+  const base = applyProducts(createSnapshot('USD'), [family(709, ['DENY', 'CONTINUE'])]).snapshot
+  const before = structuredClone(toCatalogFeed(base))
+  for (const [graph, rest] of [
+    ['DENY', 'CONTINUE'],
+    ['CONTINUE', 'DENY'],
+    ['DENY', null],
+    [null, 'DENY'],
+  ]) {
+    const raw = family(709, ['DENY', 'CONTINUE'])
+    raw.variants.nodes[0].inventoryPolicy = graph
+    raw.variants.nodes[0].inventory_policy = rest
+    const result = applyProducts(base, [raw])
+    assert.equal(result.upserted, 0)
+    assert.equal(result.removed, 1)
+    assert.equal(result.snapshot.products.has('709'), false)
+    assert.match(result.skipped.map(item => item.reason).join('; '), /conflicting Shopify inventory policies/)
+    assert.match(result.skipped.map(item => item.reason).join('; '), /entire family omitted/)
+    assert.deepEqual(toCatalogFeed(base), before)
+  }
+  for (const [graph, rest, expected] of [
+    ['deny', 'DENY', 'DENY'],
+    ['CONTINUE', 'continue', 'CONTINUE'],
+  ]) {
+    const raw = family(709, ['DENY', 'CONTINUE'])
+    raw.variants.nodes[0].inventoryPolicy = graph
+    raw.variants.nodes[0].inventory_policy = rest
+    const result = applyProducts(createSnapshot('USD'), [raw])
+    assert.equal(result.skipped.length, 0)
+    assert.equal(buildVariantIndex(result.snapshot).get(variantId(7091)).inventoryPolicy, expected)
+  }
+})
