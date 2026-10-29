@@ -51,7 +51,7 @@ export const SHOPIFY_PRODUCTS_QUERY = `query VibeCartProducts($cursor: String, $
       variantsCount { count precision }
       variants(first: 100) {
         pageInfo { hasNextPage endCursor }
-        nodes { id title sku price inventoryPolicy inventoryQuantity }
+        nodes { id title sku price inventoryPolicy inventoryQuantity availableForSale inventoryItem { tracked } }
       }
     }
   }
@@ -63,7 +63,7 @@ export type ShopifyCatalogSnapshot = {
   products: ReadonlyMap<string, ShopifyCatalogProduct[]>
 }
 
-export type ShopifyVariantRef = { productId: string; variantId: string; sku?: string; inventoryPolicy: 'DENY' | 'CONTINUE'; inventoryQuantity?: number | null }
+export type ShopifyVariantRef = { productId: string; variantId: string; sku?: string; inventoryPolicy: 'DENY' | 'CONTINUE'; inventoryQuantity?: number | null; inventoryTracked?: boolean | null; availableForSale?: boolean }
 
 export type ShopifyApplyResult = {
   snapshot: ShopifyCatalogSnapshot
@@ -417,6 +417,16 @@ function assertSnapshotVariantMetadata(product: ShopifyCatalogProduct): void {
       (typeof quantity !== 'number' || !Number.isSafeInteger(quantity))) {
     throw new Error('invalid Shopify snapshot inventoryQuantity for catalog variant: ' + product.id)
   }
+  // Cached tracking and availableForSale are diagnostics, not a checkout grant.
+  // Missing means unknown, and explicit null inventory tracking stays unknown.
+  const tracked = product.shopify.inventoryTracked
+  if (tracked !== undefined && tracked !== null && typeof tracked !== 'boolean') {
+    throw new Error('invalid Shopify snapshot inventoryTracked for catalog variant: ' + product.id)
+  }
+  const available = product.shopify.availableForSale
+  if (available !== undefined && typeof available !== 'boolean') {
+    throw new Error('invalid Shopify snapshot availableForSale for catalog variant: ' + product.id)
+  }
   // A merchant SKU is an exact identifier, not display text. Preserve meaningful
   // whitespace, but reject corrupted non-string, blank or oversized values.
   const sku = product.sku
@@ -530,6 +540,8 @@ export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string,
         // Required and runtime-validated by assertSnapshotVariantMetadata above.
         inventoryPolicy: p.shopify.inventoryPolicy!,
         ...(p.shopify.inventoryQuantity !== undefined ? { inventoryQuantity: p.shopify.inventoryQuantity } : {}),
+        ...(p.shopify.inventoryTracked !== undefined ? { inventoryTracked: p.shopify.inventoryTracked } : {}),
+        ...(p.shopify.availableForSale !== undefined ? { availableForSale: p.shopify.availableForSale } : {}),
       })
     }
   }

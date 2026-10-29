@@ -30,7 +30,7 @@ import type { VibeProduct } from '@/lib/products'
 
 export type ShopifyCatalogProduct = VibeProduct & {
   sku?: string
-  shopify: { productId: string; variantId: string; inventoryPolicy?: 'DENY' | 'CONTINUE'; inventoryQuantity?: number | null }
+  shopify: { productId: string; variantId: string; inventoryPolicy?: 'DENY' | 'CONTINUE'; inventoryQuantity?: number | null; inventoryTracked?: boolean | null; availableForSale?: boolean }
 }
 
 export type ShopifyMapSkip = { productId?: string; variantId?: string; reason: string }
@@ -358,6 +358,25 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
       }
       const inventoryQuantity = rawQuantity === null ? null : rawQuantity as number | undefined
 
+      // Shopify can offer a zero-quantity DENY variant when inventory tracking
+      // is disabled. Preserve tracking and availableForSale separately; neither
+      // cached observation authorizes checkout without a fresh merchant check.
+      const availabilityPresent = Object.prototype.hasOwnProperty.call(variant, 'availableForSale')
+      if (availabilityPresent && typeof variant.availableForSale !== 'boolean') {
+        skip(productId, variantId, 'availableForSale must be a boolean when supplied')
+        continue
+      }
+      const availableForSale = availabilityPresent ? variant.availableForSale as boolean : undefined
+      const inventoryItemPresent = Object.prototype.hasOwnProperty.call(variant, 'inventoryItem')
+      const inventoryItem = variant.inventoryItem
+      if (inventoryItemPresent && inventoryItem !== null &&
+          (!isObject(inventoryItem) || typeof inventoryItem.tracked !== 'boolean')) {
+        skip(productId, variantId, 'inventoryItem.tracked must be a boolean or inventoryItem null')
+        continue
+      }
+      const inventoryTracked = !inventoryItemPresent ? undefined
+        : inventoryItem === null ? null : (inventoryItem as Json).tracked as boolean
+
       seen.add(variantId)
       result.products.push({
         id: variantId,
@@ -368,7 +387,9 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
         ...(variantTitle ? { variant: variantTitle } : {}),
         ...(sku ? { sku } : {}),
         shopify: { productId, variantId, ...(inventoryPolicy ? { inventoryPolicy } : {}),
-          ...(inventoryQuantity !== undefined ? { inventoryQuantity } : {}) },
+          ...(inventoryQuantity !== undefined ? { inventoryQuantity } : {}),
+          ...(inventoryTracked !== undefined ? { inventoryTracked } : {}),
+          ...(availableForSale !== undefined ? { availableForSale } : {}) },
       })
     }
   }

@@ -6,7 +6,7 @@
 export const SHOPIFY_VARIANTS_QUERY =
   'query VibeCartProductVariants($productId: ID!, $cursor: String) { ' +
   'product(id: $productId) { id updatedAt variantsCount { count precision } variants(first: 100, after: $cursor) { ' +
-  'pageInfo { hasNextPage endCursor } nodes { id title sku price inventoryPolicy inventoryQuantity } ' +
+  'pageInfo { hasNextPage endCursor } nodes { id title sku price inventoryPolicy inventoryQuantity availableForSale inventoryItem { tracked } } ' +
   '} } }'
 
 type RecordValue = Record<string, unknown>
