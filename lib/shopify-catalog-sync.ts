@@ -536,6 +536,14 @@ export function toPilotCatalogFeed(
   let matched = 0
   for (const [familyKey, variants] of snapshot.products) {
     const selected = variants.filter(p => selectedKeys.has(canonicalVariantKey(p.id)))
+    // A protected pilot feed has no public availability field. Do not surface
+    // an explicitly unavailable Shopify variant as an ordinary agent candidate.
+    // This is a conservative snapshot exclusion, NOT checkout authorization:
+    // true/unknown still require a fresh live price, stock and fitment check.
+    // In particular, untracked DENY + zero can legitimately be available.
+    if (selected.some(p => p.shopify.availableForSale === false)) {
+      throw new Error('pilot selection includes a Shopify variant explicitly reported unavailable; refresh and reselect')
+    }
     if (selected.length) {
       selectedFamilies.set(familyKey, selected)
       matched += selected.length
