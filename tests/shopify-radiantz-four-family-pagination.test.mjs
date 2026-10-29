@@ -111,6 +111,7 @@ test('four large Radiantz-like families hydrate across product and variant curso
         variantId: id,
         sku: 'SYN-' + p + '-' + n,
         inventoryPolicy: n % 2 ? 'CONTINUE' : 'DENY',
+        inventoryQuantity: 0,
       })
     }
   }
