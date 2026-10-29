@@ -77,7 +77,7 @@ test('Admin GraphQL envelope hydrates 225 variants with exact IDs, prices, polic
   assert.equal(feed.find(p => p.id.endsWith('/225')).priceCents, 6599)
   const index = buildVariantIndex(result.snapshot)
   assert.deepEqual(index.get('gid://shopify/ProductVariant/225'), {
-    productId: PRODUCT, variantId: 'gid://shopify/ProductVariant/225', sku: 'SYN-225', inventoryPolicy: 'CONTINUE',
+    productId: PRODUCT, variantId: 'gid://shopify/ProductVariant/225', sku: 'SYN-225', inventoryPolicy: 'CONTINUE', inventoryQuantity: 0,
   })
   assert.equal(result.snapshot.products.get('10001')[1].shopify.inventoryPolicy, 'DENY')
   assert.deepEqual(calls.map(c => c.variables.cursor), [undefined, null, 'v100', 'v200'])
