@@ -24,12 +24,12 @@ import type { VibeProduct } from '@/lib/products'
  * - Inventory quantity NEVER excludes a variant. Made-to-order products legitimately
  *   report zero on hand. The actual Shopify inventory policy (DENY or CONTINUE) is
  *   carried through unchanged in shopify.inventoryPolicy for server-side use. The
- *   quantity itself is not copied.
+ *   quantity is retained only in server-side Shopify metadata as a diagnostic;\n *   it is not checkout authorization or a public catalog field.
  */
 
 export type ShopifyCatalogProduct = VibeProduct & {
   sku?: string
-  shopify: { productId: string; variantId: string; inventoryPolicy?: 'DENY' | 'CONTINUE' }
+  shopify: { productId: string; variantId: string; inventoryPolicy?: 'DENY' | 'CONTINUE'; inventoryQuantity?: number | null }
 }
 
 export type ShopifyMapSkip = { productId?: string; variantId?: string; reason: string }
@@ -339,6 +339,24 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
         result.warnings.push('variant ' + variantId + ' has unrecognized inventory policy ' + rawPolicy + ' and it was not carried through')
       }
 
+      // Admin GraphQL and REST both expose quantity, but it is a snapshot,
+      // not proof of sellability (tracking may be disabled and values can age).
+      // Preserve negative oversold values and explicit null/unknown; reject
+      // malformed or contradictory quantities rather than silently losing them.
+      const graphQuantityPresent = Object.prototype.hasOwnProperty.call(variant, 'inventoryQuantity')
+      const restQuantityPresent = Object.prototype.hasOwnProperty.call(variant, 'inventory_quantity')
+      if (graphQuantityPresent && restQuantityPresent && variant.inventoryQuantity !== variant.inventory_quantity) {
+        skip(productId, variantId, 'conflicting Shopify inventory quantities')
+        continue
+      }
+      const rawQuantity = graphQuantityPresent ? variant.inventoryQuantity : variant.inventory_quantity
+      if (rawQuantity !== undefined && rawQuantity !== null &&
+          (typeof rawQuantity !== 'number' || !Number.isSafeInteger(rawQuantity))) {
+        skip(productId, variantId, 'inventory quantity must be a safe integer or null')
+        continue
+      }
+      const inventoryQuantity = rawQuantity === null ? null : rawQuantity as number | undefined
+
       seen.add(variantId)
       result.products.push({
         id: variantId,
@@ -348,7 +366,7 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
         image: variantImage(variant, images) ?? fallbackImage ?? '',
         ...(variantTitle ? { variant: variantTitle } : {}),
         ...(sku ? { sku } : {}),
-        shopify: { productId, variantId, ...(inventoryPolicy ? { inventoryPolicy } : {}) },
+        shopify: { productId, variantId, ...(inventoryPolicy ? { inventoryPolicy } : {}),\n          ...(inventoryQuantity !== undefined ? { inventoryQuantity } : {}) },
       })
     }
   }
