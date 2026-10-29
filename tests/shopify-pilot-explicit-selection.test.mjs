@@ -151,3 +151,40 @@ test('restored Shopify identities must remain strings at feed and server-index b
   }
   assert.deepEqual(toCatalogFeed(trusted), originalFeed, 'rejected snapshots cannot mutate the trusted source')
 })
+
+
+test('protected pilot fails closed for nonpositive DENY stock unless tracking is verified off', () => {
+  const raw = gqlProduct(89, 'SYNTHETIC stock-policy selection', [
+    [891, 'Tracked DENY zero, availability unknown', 'SYN-891', '21.99'],
+    [892, 'Tracked DENY negative, contradictory available', 'SYN-892', '21.99'],
+    [893, 'Tracking unknown DENY zero', 'SYN-893', '21.99'],
+    [894, 'Untracked DENY zero', 'SYN-894', '21.99'],
+    [895, 'Tracked CONTINUE zero', 'SYN-895', '21.99'],
+    [896, 'Tracked DENY positive', 'SYN-896', '21.99'],
+  ])
+  const [zero, negative, unknown, untracked, continueZero, positive] = raw.variants.nodes
+  Object.assign(zero, { inventoryPolicy: 'DENY', inventoryQuantity: 0, inventoryItem: { tracked: true } })
+  delete zero.availableForSale
+  Object.assign(negative, { inventoryPolicy: 'DENY', inventoryQuantity: -1, inventoryItem: { tracked: true }, availableForSale: true })
+  Object.assign(unknown, { inventoryPolicy: 'DENY', inventoryQuantity: 0, inventoryItem: null })
+  delete unknown.availableForSale
+  Object.assign(untracked, { inventoryPolicy: 'DENY', inventoryQuantity: 0, inventoryItem: { tracked: false }, availableForSale: true })
+  Object.assign(continueZero, { inventoryPolicy: 'CONTINUE', inventoryQuantity: 0, inventoryItem: { tracked: true }, availableForSale: true })
+  Object.assign(positive, { inventoryPolicy: 'DENY', inventoryQuantity: 1, inventoryItem: { tracked: true }, availableForSale: true })
+
+  const applied = applyProducts(createSnapshot('USD'), [raw])
+  assert.equal(applied.skipped.length, 0)
+  const snapshot = applied.snapshot
+  for (const id of [V(891), V(892), V(893)]) {
+    assert.throws(
+      () => toPilotCatalogFeed(snapshot, [id]),
+      /nonpositive DENY inventory with tracking not verified off/,
+      'a nonpositive DENY variant must not be selected for a protected purchase pilot without proof tracking is off',
+    )
+  }
+  assert.deepEqual(
+    toPilotCatalogFeed(snapshot, [V(894), V(895), V(896)]).products.map(p => p.id),
+    [V(894), V(895), V(896)],
+    'untracked DENY, CONTINUE and positive tracked DENY remain available for further live checks',
+  )
+})
