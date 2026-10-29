@@ -360,7 +360,7 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
 
       // Shopify can offer a zero-quantity DENY variant when inventory tracking
       // is disabled. Preserve tracking and availableForSale separately; neither
-      // cached observation authorizes checkout without a fresh merchant check.
+      // cached observation authorizes an order without a fresh merchant check.
       const availabilityPresent = Object.prototype.hasOwnProperty.call(variant, 'availableForSale')
       if (availabilityPresent && typeof variant.availableForSale !== 'boolean') {
         skip(productId, variantId, 'availableForSale must be a boolean when supplied')
