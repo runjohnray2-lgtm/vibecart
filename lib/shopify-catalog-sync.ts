@@ -553,6 +553,17 @@ export function toPilotCatalogFeed(
     if (selected.some(p => p.shopify.availableForSale === false)) {
       throw new Error('pilot selection includes a Shopify variant explicitly reported unavailable; refresh and reselect')
     }
+    // DENY + nonpositive stock cannot be offered when tracking is on. An
+    // absent/null tracking observation is not evidence tracking is disabled.
+    // Reject contradictory availableForSale=true as well: this is an offline
+    // pilot selection gate, never a substitute for a fresh Shopify check.
+    if (selected.some(p => p.shopify.inventoryPolicy === 'DENY' &&
+        p.shopify.inventoryQuantity !== undefined &&
+        p.shopify.inventoryQuantity !== null &&
+        p.shopify.inventoryQuantity <= 0 &&
+        p.shopify.inventoryTracked !== false)) {
+      throw new Error('pilot selection includes nonpositive DENY inventory with tracking not verified off; refresh and reselect')
+    }
     if (selected.length) {
       selectedFamilies.set(familyKey, selected)
       matched += selected.length
