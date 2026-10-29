@@ -96,8 +96,8 @@ test('feed carries only catalog-contract fields; identifiers stay in the server-
   }
   const index = buildVariantIndex(result.snapshot)
   assert.equal(index.size, 4)
-  assert.deepEqual(index.get(V(11)), { productId: P(1), variantId: V(11), sku: 'A-S', inventoryPolicy: 'CONTINUE' })
-  assert.deepEqual(index.get(V(31)), { productId: P(3), variantId: V(31), sku: 'G-1', inventoryPolicy: 'CONTINUE' })
+  assert.deepEqual(index.get(V(11)), { productId: P(1), variantId: V(11), sku: 'A-S', inventoryPolicy: 'CONTINUE', inventoryQuantity: 5 })
+  assert.deepEqual(index.get(V(31)), { productId: P(3), variantId: V(31), sku: 'G-1', inventoryPolicy: 'CONTINUE', inventoryQuantity: 5 })
   assert.equal(index.get(V(41)), undefined)
   assert.equal(index.get('nope'), undefined)
 })
