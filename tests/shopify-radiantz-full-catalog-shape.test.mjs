@@ -138,6 +138,7 @@ test('full synthetic pilot shape retains exact published variant IDs, cents, SKU
         variantId,
         sku: 'SYN-' + id(family) + '-' + n,
         inventoryPolicy: n % 2 ? 'CONTINUE' : 'DENY',
+        inventoryQuantity: 0,
       })
     }
   }
