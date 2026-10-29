@@ -504,6 +504,49 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
   return { products }
 }
 
+/**
+ * Explicitly selects the owner-verified variants for the protected 1–20-entry
+ * Radiantz pilot feed. Never truncate the full catalog to the first 20: doing
+ * so can silently substitute an unapproved variant or omit the intended SKU.
+ *
+ * This is an OFFLINE projection only. It does not attest snapshot freshness,
+ * merchant identity, live sellability, fitment, or staging isolation. The
+ * integration owner must verify those independently before any TEST checkout.
+ */
+export function toPilotCatalogFeed(
+  snapshot: ShopifyCatalogSnapshot,
+  selectedVariantIds: readonly string[],
+): { products: VibeProduct[] } {
+  if (!Array.isArray(selectedVariantIds) || selectedVariantIds.length < 1 || selectedVariantIds.length > 20) {
+    throw new Error('pilot feed requires 1–20 explicitly selected Shopify variant ids')
+  }
+  const selectedKeys = new Set<string>()
+  for (const id of selectedVariantIds) {
+    if (typeof id !== 'string') throw new Error('invalid pilot Shopify variant id')
+    const key = canonicalVariantKey(id)
+    if (selectedKeys.has(key)) throw new Error('duplicate pilot Shopify variant selection')
+    selectedKeys.add(key)
+  }
+
+  // Validate the ENTIRE trusted snapshot before projecting a subset. Otherwise
+  // a corrupt unselected family could be silently hidden by the allowlist.
+  buildVariantIndex(snapshot)
+
+  const selectedFamilies = new Map<string, ShopifyCatalogProduct[]>()
+  let matched = 0
+  for (const [familyKey, variants] of snapshot.products) {
+    const selected = variants.filter(p => selectedKeys.has(canonicalVariantKey(p.id)))
+    if (selected.length) {
+      selectedFamilies.set(familyKey, selected)
+      matched += selected.length
+    }
+  }
+  if (matched !== selectedKeys.size) {
+    throw new Error('pilot selection contains a variant absent from the verified Shopify snapshot')
+  }
+  return toCatalogFeed({ currencyCode: snapshot.currencyCode, products: selectedFamilies }, 20)
+}
+
 /** Server-only lookup keyed by Shopify variant id. Retains identity, SKU and policy lost in the public feed.\n * A cached policy is NOT checkout authorization: Codex must independently recheck live sellability. */
 export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string, ShopifyVariantRef> {
   assertSnapshotCurrency(snapshot)
