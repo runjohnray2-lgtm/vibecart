@@ -24,7 +24,8 @@ import type { VibeProduct } from '@/lib/products'
  * - Inventory quantity NEVER excludes a variant. Made-to-order products legitimately
  *   report zero on hand. The actual Shopify inventory policy (DENY or CONTINUE) is
  *   carried through unchanged in shopify.inventoryPolicy for server-side use. The
- *   quantity is retained only in server-side Shopify metadata as a diagnostic;\n *   it is not checkout authorization or a public catalog field.
+ *   quantity is retained only in server-side Shopify metadata as a diagnostic;
+ *   it is not checkout authorization or a public catalog field.
  */
 
 export type ShopifyCatalogProduct = VibeProduct & {
@@ -366,7 +367,8 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
         image: variantImage(variant, images) ?? fallbackImage ?? '',
         ...(variantTitle ? { variant: variantTitle } : {}),
         ...(sku ? { sku } : {}),
-        shopify: { productId, variantId, ...(inventoryPolicy ? { inventoryPolicy } : {}),\n          ...(inventoryQuantity !== undefined ? { inventoryQuantity } : {}) },
+        shopify: { productId, variantId, ...(inventoryPolicy ? { inventoryPolicy } : {}),
+          ...(inventoryQuantity !== undefined ? { inventoryQuantity } : {}) },
       })
     }
   }
