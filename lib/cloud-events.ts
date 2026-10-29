@@ -1,6 +1,5 @@
-import Stripe from "stripe"
-import { buildNormalizedOrder, type NormalizedOrder } from "@/lib/orders"
-import { getCart } from "@/lib/cart-store"
+import type { NormalizedOrder } from "@/lib/orders"
+import type { StoredOrder } from "@/lib/order-store"
 
 const CLOUD_TIMEOUT_MS = 5_000
 
@@ -9,7 +8,14 @@ export interface CloudForwardResult {
   delivered: boolean
   retryable: boolean
   status?: number
-  reason?: "incomplete_config" | "invalid_url" | "order_normalization" | "timeout" | "network" | "cloud_rejected"
+  reason?: "incomplete_config" | "invalid_url" | "timeout" | "network" | "cloud_rejected"
+}
+
+export interface StoredCloudOrderEvent {
+  eventId: string
+  eventType: "checkout.session.completed" | "checkout.session.async_payment_succeeded"
+  eventCreatedAt: string
+  order: StoredOrder
 }
 
 interface CloudConfig {
@@ -33,22 +39,42 @@ function getCloudConfig(): CloudConfig | null | "invalid" {
   }
 }
 
-function metadataQuantity(session: Stripe.Checkout.Session): number | null {
-  const raw = session.metadata?.vibecart_quantity
-  if (!raw) return null
-  const parsed = Number(raw)
-  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 99 ? parsed : null
+export function cloudDeliveryRequested(): boolean {
+  return Boolean(
+    process.env.VIBECART_CLOUD_INGEST_URL?.trim()
+      || process.env.VIBECART_CLOUD_INGEST_KEY?.trim()
+  )
 }
 
-function eventCreatedAt(event: Stripe.Event): string {
-  return new Date(event.created * 1000).toISOString()
+function normalizedOrder(order: StoredOrder): NormalizedOrder {
+  return {
+    checkoutSessionId: order.checkoutSessionId,
+    cartId: order.cartId,
+    stripePaymentIntentId: order.stripePaymentIntentId,
+    customerEmail: order.customerEmail,
+    customerName: order.customerName,
+    customerPhone: order.customerPhone,
+    shipping: { ...order.shipping },
+    amountSubtotal: order.amountSubtotal,
+    amountShipping: order.amountShipping,
+    amountTax: order.amountTax,
+    amountTotal: order.amountTotal,
+    currency: order.currency,
+    paymentStatus: order.paymentStatus,
+    lines: order.lines.map(line => ({ ...line })),
+  }
 }
 
-export async function forwardVerifiedCheckoutEvent(
-  event: Stripe.Event,
-  session: Stripe.Checkout.Session,
-  stripe: Stripe
-): Promise<CloudForwardResult> {
+function primaryProductId(order: StoredOrder): string {
+  return order.lines.length === 1 ? order.lines[0]?.productId ?? "" : ""
+}
+
+function totalQuantity(order: StoredOrder): number | null {
+  const quantity = order.lines.reduce((sum, line) => sum + line.quantity, 0)
+  return Number.isSafeInteger(quantity) && quantity >= 1 && quantity <= 9_999 ? quantity : null
+}
+
+export async function forwardStoredOrderEvent(input: StoredCloudOrderEvent): Promise<CloudForwardResult> {
   const config = getCloudConfig()
   if (config === null) return { configured: false, delivered: false, retryable: false }
   if (config === "invalid") {
@@ -56,29 +82,7 @@ export async function forwardVerifiedCheckoutEvent(
     return { configured: true, delivered: false, retryable: true, reason: "incomplete_config" }
   }
 
-  let order: NormalizedOrder
-  try {
-    order = await buildNormalizedOrder(stripe, session)
-  } catch (error) {
-    console.warn(`[vibecart cloud] Could not normalize Checkout Session ${session.id}`, error)
-    return { configured: true, delivered: false, retryable: true, reason: "order_normalization" }
-  }
-
-  let merchantId = session.metadata?.vibecart_merchant_id?.trim() || "default"
-  let metadata: Record<string, string> = {}
-  if (order.cartId) {
-    try {
-      const cart = await getCart(order.cartId, merchantId)
-      if (cart) {
-        merchantId = cart.merchantId
-        metadata = cart.metadata
-      }
-    } catch (error) {
-      console.warn(`[vibecart cloud] Could not load cart metadata for ${order.cartId}`, error)
-      return { configured: true, delivered: false, retryable: true, reason: "order_normalization" }
-    }
-  }
-
+  const { eventId, eventType, eventCreatedAt, order } = input
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), CLOUD_TIMEOUT_MS)
 
@@ -91,26 +95,26 @@ export async function forwardVerifiedCheckoutEvent(
         "x-vibecart-key": config.key,
       },
       body: JSON.stringify({
-        eventId: event.id,
-        type: event.type,
+        eventId,
+        type: eventType,
         source: "vibecart-core",
-        checkoutSessionId: session.id,
-        customerEmail: session.customer_details?.email ?? session.customer_email ?? "",
-        amountTotal: session.amount_total,
-        currency: session.currency ?? "",
-        productId: session.metadata?.vibecart_product_id ?? "",
-        quantity: metadataQuantity(session),
-        merchantId,
-        metadata,
-        createdAt: eventCreatedAt(event),
-        order,
+        checkoutSessionId: order.checkoutSessionId,
+        customerEmail: order.customerEmail,
+        amountTotal: order.amountTotal,
+        currency: order.currency,
+        productId: primaryProductId(order),
+        quantity: totalQuantity(order),
+        merchantId: order.merchantId,
+        metadata: order.metadata,
+        createdAt: eventCreatedAt,
+        order: normalizedOrder(order),
       }),
       redirect: "error",
       signal: controller.signal,
     })
 
     if (!response.ok) {
-      console.warn(`[vibecart cloud] Ingest returned HTTP ${response.status} for Stripe event ${event.id}`)
+      console.warn(`[vibecart cloud] Ingest returned HTTP ${response.status} for Stripe event ${eventId}`)
       return {
         configured: true,
         delivered: false,
@@ -123,7 +127,7 @@ export async function forwardVerifiedCheckoutEvent(
     return { configured: true, delivered: true, retryable: false, status: response.status }
   } catch (error) {
     const timedOut = error instanceof Error && error.name === "AbortError"
-    console.warn(`[vibecart cloud] Ingest ${timedOut ? "timed out" : "failed"} for Stripe event ${event.id}`)
+    console.warn(`[vibecart cloud] Ingest ${timedOut ? "timed out" : "failed"} for Stripe event ${eventId}`)
     return {
       configured: true,
       delivered: false,

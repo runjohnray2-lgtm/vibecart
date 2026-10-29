@@ -23,7 +23,8 @@
     "create_checkout",
     "durable_multi_item_cart",
     "trusted_server_side_repricing",
-    "released_ucp_catalog_and_cart"
+    "released_ucp_catalog_and_cart",
+    "grounded_ai_salesperson"
   ],
   "payments": {
     "provider": "stripe",
@@ -41,7 +42,8 @@
     "inventory management is not a VibeCart platform service",
     "automatic shipping-rate calculation is not a VibeCart platform service",
     "returns/refunds lifecycle is not a complete VibeCart platform service",
-    "public UCP order lookup is advertised only when its Cloud and permalink dependencies are configured"
+    "public UCP order lookup is advertised only when its Cloud and permalink dependencies are configured",
+    "grounded AI salesperson commerce-write tools are exposed only when VIBECART_AI_SALESPERSON_ENABLED=true"
   ],
   "cart": {
     "durable": true,

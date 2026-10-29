@@ -1,4 +1,6 @@
+import { previewSafetyFailure } from "@/lib/preview-safety"
 import { NextResponse } from "next/server"
+import { stripeKeyMode } from "@/lib/stripe-mode"
 import { orderPermalinkConfigured } from "@/lib/order-permalink"
 import { hostedMerchantAuthConfigured, hostedModeEnabled } from "@/lib/merchant-auth"
 import { hsnCheckoutReadiness } from "@/lib/he-said-nothing-config"
@@ -12,11 +14,7 @@ function stripeCredentialInfo() {
     return { configured: false, mode: "none", credentialType: "none" }
   }
 
-  const mode = value.startsWith("sk_live_") || value.startsWith("rk_live_")
-    ? "live"
-    : value.startsWith("sk_test_") || value.startsWith("rk_test_")
-      ? "test"
-      : "unknown"
+  const mode = stripeKeyMode(value)
 
   const credentialType = value.startsWith("rk_")
     ? "restricted"
@@ -27,7 +25,15 @@ function stripeCredentialInfo() {
   return { configured: true, mode, credentialType }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  if (req && new URL(req.url).searchParams.get("staging-database") === "verify") {
+    const { verifyStagingDatabase } = await import("@/lib/staging-database-verification")
+    return verifyStagingDatabase(req)
+  }
+  if (req && new URL(req.url).searchParams.get("staging-database") === "form") {
+    const { stagingVerificationForm } = await import("@/lib/staging-database-verification")
+    return stagingVerificationForm()
+  }
   const hsn = hsnCheckoutReadiness()
   const stripe = stripeCredentialInfo()
   const catalogMode = catalogSourceMode()
@@ -36,6 +42,8 @@ export async function GET() {
     {
       service: "vibecart",
       ok: true,
+      readinessScope: "configuration-only",
+      stagingSafetyConfigured: process.env.VERCEL_ENV === "preview" ? previewSafetyFailure() === null : null,
       catalogMode,
       merchantName: configuredMerchantName(),
       referenceCatalog: catalogMode === "reference",
@@ -48,6 +56,8 @@ export async function GET() {
           : "reference-catalog-with-stripe-credential"
         : "no-stripe-credential",
       webhookConfigured: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+      durableOrderStoreConfigured: Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL),
+      cloudOutboxRetryEnabled: process.env.VIBECART_CLOUD_OUTBOX_CRON_ENABLED?.trim().toLowerCase() === "true",
       cloudConfigured: Boolean(
         process.env.VIBECART_CLOUD_INGEST_URL && process.env.VIBECART_CLOUD_INGEST_KEY
       ),
@@ -59,4 +69,10 @@ export async function GET() {
     },
     { headers: { "cache-control": "no-store" } }
   )
+}
+
+export async function POST(req: Request) {
+  if (new URL(req.url).searchParams.get("staging-database") !== "verify") return NextResponse.json({ error: "Not found" }, { status: 404 })
+  const { submitStagingVerification } = await import("@/lib/staging-database-verification")
+  return submitStagingVerification(req)
 }

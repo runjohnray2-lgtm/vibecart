@@ -1,0 +1,13 @@
+{
+  "git": {
+    "deploymentEnabled": {
+      "work/pilot-integration-review": false
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/cloud-outbox",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}

@@ -4,6 +4,12 @@ import type { NormalizedOrder, NormalizedOrderLine } from "@/lib/orders"
 
 export type FulfillmentStatus = "new" | "packing" | "shipped" | "cancelled" | "refunded"
 
+export interface CloudOutboxSeed {
+  eventId: string
+  eventType: "checkout.session.completed" | "checkout.session.async_payment_succeeded"
+  eventCreatedAt: string
+}
+
 export interface StoredOrder extends NormalizedOrder {
   id: string
   orderId: string
@@ -77,6 +83,11 @@ function orderId(checkoutSessionId: string): string {
   return `ord_${digest}`
 }
 
+function cloudOutboxId(checkoutSessionId: string): string {
+  const digest = createHash("sha256").update(`cloud:${checkoutSessionId}`, "utf8").digest("hex").slice(0, 24)
+  return `out_${digest}`
+}
+
 function mapLine(row: LineRow): NormalizedOrderLine {
   return {
     lineItemId: row.line_item_id,
@@ -147,55 +158,54 @@ export async function storeVerifiedOrder(input: {
   merchantId: string
   order: NormalizedOrder
   metadata: Record<string, string>
+  cloudOutbox?: CloudOutboxSeed
 }): Promise<StoredOrder> {
   const db = sql()
-  const { eventId, merchantId, order, metadata } = input
+  const { eventId, merchantId, order, metadata, cloudOutbox } = input
   const id = orderId(order.checkoutSessionId)
   const metadataJson = JSON.stringify(metadata)
-  const rows = await db`
-    INSERT INTO vibecart_orders (
-      id, merchant_id, event_id, checkout_session_id, cart_id, stripe_payment_intent_id,
-      customer_email, customer_name, customer_phone,
-      shipping_name, shipping_line1, shipping_line2, shipping_city, shipping_state,
-      shipping_postal_code, shipping_country, amount_subtotal, amount_shipping, amount_tax,
-      amount_total, currency, payment_status, fulfillment_status, metadata
-    ) VALUES (
-      ${id}, ${merchantId}, ${eventId}, ${order.checkoutSessionId}, ${order.cartId}, ${order.stripePaymentIntentId},
-      ${order.customerEmail}, ${order.customerName}, ${order.customerPhone},
-      ${order.shipping.name}, ${order.shipping.line1}, ${order.shipping.line2}, ${order.shipping.city}, ${order.shipping.state},
-      ${order.shipping.postalCode}, ${order.shipping.country}, ${order.amountSubtotal}, ${order.amountShipping}, ${order.amountTax},
-      ${order.amountTotal}, ${order.currency}, ${order.paymentStatus}, 'new', ${metadataJson}::jsonb
-    )
-    ON CONFLICT (checkout_session_id) DO UPDATE SET
-      payment_status = EXCLUDED.payment_status,
-      customer_email = EXCLUDED.customer_email,
-      customer_name = EXCLUDED.customer_name,
-      customer_phone = EXCLUDED.customer_phone,
-      shipping_name = EXCLUDED.shipping_name,
-      shipping_line1 = EXCLUDED.shipping_line1,
-      shipping_line2 = EXCLUDED.shipping_line2,
-      shipping_city = EXCLUDED.shipping_city,
-      shipping_state = EXCLUDED.shipping_state,
-      shipping_postal_code = EXCLUDED.shipping_postal_code,
-      shipping_country = EXCLUDED.shipping_country,
-      amount_subtotal = EXCLUDED.amount_subtotal,
-      amount_shipping = EXCLUDED.amount_shipping,
-      amount_tax = EXCLUDED.amount_tax,
-      amount_total = EXCLUDED.amount_total,
-      metadata = EXCLUDED.metadata,
-      updated_at = now()
-    RETURNING *
-  `
-  const stored = rows[0] as OrderRow | undefined
-  if (!stored) throw new Error("Durable order could not be stored")
 
-  for (const line of order.lines) {
-    await db`
+  const queries = [
+    db`
+      INSERT INTO vibecart_orders (
+        id, merchant_id, event_id, checkout_session_id, cart_id, stripe_payment_intent_id,
+        customer_email, customer_name, customer_phone,
+        shipping_name, shipping_line1, shipping_line2, shipping_city, shipping_state,
+        shipping_postal_code, shipping_country, amount_subtotal, amount_shipping, amount_tax,
+        amount_total, currency, payment_status, fulfillment_status, metadata
+      ) VALUES (
+        ${id}, ${merchantId}, ${eventId}, ${order.checkoutSessionId}, ${order.cartId}, ${order.stripePaymentIntentId},
+        ${order.customerEmail}, ${order.customerName}, ${order.customerPhone},
+        ${order.shipping.name}, ${order.shipping.line1}, ${order.shipping.line2}, ${order.shipping.city}, ${order.shipping.state},
+        ${order.shipping.postalCode}, ${order.shipping.country}, ${order.amountSubtotal}, ${order.amountShipping}, ${order.amountTax},
+        ${order.amountTotal}, ${order.currency}, ${order.paymentStatus}, 'new', ${metadataJson}::jsonb
+      )
+      ON CONFLICT (checkout_session_id) DO UPDATE SET
+        payment_status = EXCLUDED.payment_status,
+        customer_email = EXCLUDED.customer_email,
+        customer_name = EXCLUDED.customer_name,
+        customer_phone = EXCLUDED.customer_phone,
+        shipping_name = EXCLUDED.shipping_name,
+        shipping_line1 = EXCLUDED.shipping_line1,
+        shipping_line2 = EXCLUDED.shipping_line2,
+        shipping_city = EXCLUDED.shipping_city,
+        shipping_state = EXCLUDED.shipping_state,
+        shipping_postal_code = EXCLUDED.shipping_postal_code,
+        shipping_country = EXCLUDED.shipping_country,
+        amount_subtotal = EXCLUDED.amount_subtotal,
+        amount_shipping = EXCLUDED.amount_shipping,
+        amount_tax = EXCLUDED.amount_tax,
+        amount_total = EXCLUDED.amount_total,
+        metadata = EXCLUDED.metadata,
+        updated_at = now()
+      RETURNING *
+    `,
+    ...order.lines.map(line => db`
       INSERT INTO vibecart_order_lines (
         order_id, line_item_id, product_id, description, quantity, unit_amount,
         amount_subtotal, amount_discount, amount_tax, amount_total, currency
       ) VALUES (
-        ${stored.id}, ${line.lineItemId}, ${line.productId}, ${line.description}, ${line.quantity}, ${line.unitAmount},
+        ${id}, ${line.lineItemId}, ${line.productId}, ${line.description}, ${line.quantity}, ${line.unitAmount},
         ${line.amountSubtotal}, ${line.amountDiscount}, ${line.amountTax}, ${line.amountTotal}, ${line.currency}
       )
       ON CONFLICT (order_id, line_item_id) DO UPDATE SET
@@ -208,22 +218,39 @@ export async function storeVerifiedOrder(input: {
         amount_tax = EXCLUDED.amount_tax,
         amount_total = EXCLUDED.amount_total,
         currency = EXCLUDED.currency
-    `
-  }
-
-  await db`
-    INSERT INTO vibecart_order_events (id, order_id, event_type, to_status, source, details)
-    VALUES (${eventId}, ${stored.id}, 'payment_verified', 'new', 'stripe', ${JSON.stringify({ checkoutSessionId: order.checkoutSessionId })}::jsonb)
-    ON CONFLICT (id) DO NOTHING
-  `
+    `),
+    db`
+      INSERT INTO vibecart_order_events (id, order_id, event_type, to_status, source, details)
+      VALUES (${eventId}, ${id}, 'payment_verified', 'new', 'stripe', ${JSON.stringify({ checkoutSessionId: order.checkoutSessionId })}::jsonb)
+      ON CONFLICT (id) DO NOTHING
+    `,
+  ]
 
   if (order.cartId) {
-    await db`
+    queries.push(db`
       UPDATE vibecart_carts
       SET status = 'converted', checkout_session_id = ${order.checkoutSessionId}, updated_at = now()
-      WHERE id = ${order.cartId}
-    `
+      WHERE id = ${order.cartId} AND merchant_id = ${merchantId}
+    `)
   }
+
+  if (cloudOutbox) {
+    const outboxId = cloudOutboxId(order.checkoutSessionId)
+    queries.push(db`
+      INSERT INTO vibecart_cloud_outbox (
+        id, order_id, merchant_id, event_id, event_type, event_created_at,
+        status, attempt_count, next_attempt_at
+      ) VALUES (
+        ${outboxId}, ${id}, ${merchantId}, ${cloudOutbox.eventId}, ${cloudOutbox.eventType},
+        ${cloudOutbox.eventCreatedAt}, 'pending', 0, now()
+      )
+      ON CONFLICT (order_id) DO NOTHING
+    `)
+  }
+
+  const results = await db.transaction(queries)
+  const stored = results[0]?.[0] as OrderRow | undefined
+  if (!stored) throw new Error("Durable order could not be stored")
 
   return mapOrder(stored, await linesForOrder(stored.id))
 }
@@ -234,10 +261,11 @@ export async function getStoredOrder(id: string): Promise<StoredOrder | null> {
   return row ? mapOrder(row, await linesForOrder(row.id)) : null
 }
 
-export async function getStoredOrderByCheckoutSession(checkoutSessionId: string): Promise<StoredOrder | null> {
-  const rows = await sql()`
-    SELECT * FROM vibecart_orders WHERE checkout_session_id = ${checkoutSessionId} LIMIT 1
-  `
+export async function getStoredOrderByCheckoutSession(checkoutSessionId: string, merchantId?: string): Promise<StoredOrder | null> {
+  const db = sql()
+  const rows = merchantId === undefined
+    ? await db`SELECT * FROM vibecart_orders WHERE checkout_session_id = ${checkoutSessionId} LIMIT 1`
+    : await db`SELECT * FROM vibecart_orders WHERE checkout_session_id = ${checkoutSessionId} AND merchant_id = ${merchantId} LIMIT 1`
   const row = rows[0] as OrderRow | undefined
   return row ? mapOrder(row, await linesForOrder(row.id)) : null
 }

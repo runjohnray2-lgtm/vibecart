@@ -1,5 +1,8 @@
+import { assertSalesCompatibility } from "@/lib/sales-assistant"
 import { NextResponse } from "next/server"
+import { configuredMerchantId, hostedModeEnabled, merchantRequestAuthorized, cartRequestAuthorized, MerchantAuthConfigurationError } from "@/lib/merchant-auth"
 import Stripe from "stripe"
+import { stripeKeyMode } from "@/lib/stripe-mode"
 import { CatalogSourceError, getCatalogProduct } from "@/lib/catalog-source"
 import type { VibeProduct } from "@/lib/products"
 import { getCart, markCartConverted, type VibeCart } from "@/lib/cart-store"
@@ -120,7 +123,16 @@ function safeRedirectUrl(candidate: string | undefined, origin: string, fallback
 function cartMatchesCheckout(cart: VibeCart, resolved: { product: VibeProduct; quantity: number }[]): boolean {
   if (cart.items.length !== resolved.length) return false
   const expected = new Map(cart.items.map(item => [item.productId, item.quantity]))
-  return resolved.every(item => expected.get(item.product.id) === item.quantity)
+  return resolved.every(item => expected.get(item.product.id) === item.quantity && expected.delete(item.product.id))
+    && expected.size === 0
+}
+
+function cartQuoteMatches(cart: VibeCart, resolved: { product: VibeProduct; quantity: number }[]): boolean {
+  const quoted = new Map(cart.items.map(item => [item.productId, item]))
+  return cart.currency === "usd" && resolved.every(({ product, quantity }) => {
+    const line = quoted.get(product.id)
+    return line?.unitPriceCents === product.priceCents && line.lineTotalCents === product.priceCents * quantity
+  }) && cart.subtotalCents === resolved.reduce((sum, item) => sum + item.product.priceCents * item.quantity, 0)
 }
 
 function automaticTaxEnabled(): boolean {
@@ -134,6 +146,14 @@ export async function POST(req: Request) {
 
   try {
     const body = (await req.json()) as CheckoutRequestBody
+    const cartId = cartReference(body.cartId)
+    const merchantId = configuredMerchantId()
+    if (hostedModeEnabled() && !(cartId ? cartRequestAuthorized(req, cartId, merchantId) : merchantRequestAuthorized(req))) {
+      return err("UNAUTHORIZED", "Merchant or cart authorization is required.", 401)
+    }
+    const checkoutCart = cartId ? await getCart(cartId, merchantId) : null
+    if (cartId && !checkoutCart) return err("CART_NOT_FOUND", "Cart not found.", 404)
+    if (checkoutCart && checkoutCart.status !== "active") return err("CART_NOT_ACTIVE", `Cart is ${checkoutCart.status}.`, 409)
 
     if (!body.items || body.items.length === 0) {
       return err("NO_ITEMS", "No items provided", 400)
@@ -156,6 +176,9 @@ export async function POST(req: Request) {
       if (item.productId) {
         const catalogProduct = await getCatalogProduct(item.productId)
         if (catalogProduct) {
+          if (catalogProduct.availability === "out_of_stock") {
+            return err("PRODUCT_UNAVAILABLE", "A selected product is no longer available.", 409)
+          }
           resolved.push({ product: catalogProduct, quantity, trusted: true })
           continue
         }
@@ -187,6 +210,7 @@ export async function POST(req: Request) {
         }
         resolved.push({
           product: {
+            availability: "unknown",
             id: p.id,
             name: p.name,
             description: p.description ?? "",
@@ -207,8 +231,21 @@ export async function POST(req: Request) {
       )
     }
 
+    if (checkoutCart && !cartMatchesCheckout(checkoutCart, resolved)) {
+      return err("CART_MISMATCH", "Checkout items do not match the durable cart.", 409)
+    }
+    if (checkoutCart && !cartQuoteMatches(checkoutCart, resolved)) {
+      return err("CART_PRICE_CHANGED", "Catalog prices changed. Refresh the cart and review its new total before checkout.", 409)
+    }
+    if (checkoutCart?.metadata["vibecart.sales.source"] === "ai-salesperson") {
+      try {
+        const compatibility = JSON.parse(checkoutCart.metadata["vibecart.sales.compatibility"] ?? "{}")
+        for (const line of resolved) assertSalesCompatibility(line.product, compatibility)
+      } catch {
+        return err("SALES_COMPATIBILITY_CHANGED", "Product compatibility must be verified again before checkout.", 409)
+      }
+    }
     const origin = req.headers.get("origin") ?? new URL(req.url).origin
-    const cartId = cartReference(body.cartId)
     const containsHsnProduct = resolved.some(item => isHsnProductId(item.product.id))
     const isHsnCheckout = containsHsnProduct && resolved.every(item => isHsnProductId(item.product.id))
     if (containsHsnProduct && !isHsnCheckout) {
@@ -220,7 +257,7 @@ export async function POST(req: Request) {
     let hsnPremiumPackagingCents: number | null = null
     if (isHsnCheckout) {
       if (!cartId) return err("CART_REQUIRED", "He Said Nothing checkout requires a durable cart.", 400)
-      hsnCart = await getCart(cartId)
+      hsnCart = checkoutCart
       if (!hsnCart) return err("CART_NOT_FOUND", "Cart not found.", 404)
       if (hsnCart.status !== "active") return err("CART_NOT_ACTIVE", `Cart is ${hsnCart.status}.`, 409)
       if (!cartMatchesCheckout(hsnCart, resolved)) {
@@ -315,17 +352,20 @@ export async function POST(req: Request) {
         client_reference_id: cartId,
         metadata: {
           vibecart_cart_id: cartId,
-          vibecart_merchant_id: hsnCart?.merchantId ?? "default",
+          vibecart_merchant_id: merchantId,
           vibecart_store: isHsnCheckout ? "he-said-nothing" : "",
         },
         payment_intent_data: {
           metadata: {
             vibecart_cart_id: cartId,
-            vibecart_merchant_id: hsnCart?.merchantId ?? "default",
+            vibecart_merchant_id: merchantId,
             vibecart_store: isHsnCheckout ? "he-said-nothing" : "",
           },
         },
-      } : {}),
+      } : {
+        metadata: { vibecart_merchant_id: merchantId },
+        payment_intent_data: { metadata: { vibecart_merchant_id: merchantId } },
+      }),
       ...(isHsnCheckout ? {
         billing_address_collection: "auto" as const,
         customer_creation: "always" as const,
@@ -360,11 +400,15 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      mode: "live",
+      // Unknown key shapes are labeled live so a real-money session is never understated.
+      mode: stripeKeyMode(secretKey) === "test" ? "test" : "live",
       checkoutUrl: session.url,
       checkoutSessionId: session.id,
     })
   } catch (error) {
+    if (error instanceof MerchantAuthConfigurationError) {
+      return err("MERCHANT_AUTH_NOT_CONFIGURED", "Hosted merchant authentication is not configured.", 503)
+    }
     if (error instanceof CatalogSourceError) {
       console.error(`[vibecart checkout] ${error.code}`, error.message)
       return err(error.code, "Trusted merchant catalog is unavailable. Retry after the merchant catalog is healthy.", 503)
@@ -372,6 +416,9 @@ export async function POST(req: Request) {
     if (error && typeof error === "object") {
       const stripeError = error as { type?: unknown; code?: unknown; statusCode?: unknown }
       const type = typeof stripeError.type === "string" ? stripeError.type : ""
+      if (type === "StripeIdempotencyError") {
+        return err("CHECKOUT_RETRY_CONFLICT", "This cart already has a checkout with different parameters. Resume the original checkout or start a new cart.", 409)
+      }
       if (type === "StripeAuthenticationError") {
         console.error("[vibecart checkout] Stripe authentication failed")
         return err("STRIPE_AUTHENTICATION_FAILED", "The merchant Stripe credential is invalid or expired.", 503)

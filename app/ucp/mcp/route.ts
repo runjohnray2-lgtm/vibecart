@@ -105,7 +105,7 @@ function asUcpProduct(product: VibeProduct) {
       title: product.variant ?? product.name,
       description: { plain: product.description },
       price: { amount: product.priceCents, currency: "USD" },
-      availability: { available: true },
+      ...(product.availability === "unknown" ? {} : { availability: { available: product.availability !== "out_of_stock" } }),
       seller: { name: configuredMerchantName() },
       inputs: [{ id: product.id }],
     }],

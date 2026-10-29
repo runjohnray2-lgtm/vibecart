@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import Stripe from "stripe"
-import { forwardVerifiedCheckoutEvent } from "@/lib/cloud-events"
+import { attemptCloudOutboxForOrder } from "@/lib/cloud-outbox"
+import { persistVerifiedCheckoutEvent } from "@/lib/payment-durability"
 
 export const runtime = "nodejs"
 
@@ -33,30 +34,59 @@ export async function POST(req: Request) {
   try {
     if (!signature) throw new Error("Missing stripe-signature header")
     event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret)
-  } catch (error) {
-    console.warn("[vibecart webhook] Stripe signature verification failed", error)
+  } catch {
+    console.warn("[vibecart webhook] Stripe signature verification failed")
     return NextResponse.json({ success: false, error: "Signature verification failed." }, { status: 400 })
+  }
+
+  if (process.env.VERCEL_ENV === "preview" && event.livemode !== false) {
+    return NextResponse.json({ received: false, error: "Staging accepts test-mode events only." }, { status: 400 })
   }
 
   if (FORWARDABLE_EVENTS.has(event.type)) {
     const session = event.data.object as Stripe.Checkout.Session
 
     if (paymentReady(event, session)) {
-      const cloud = await forwardVerifiedCheckoutEvent(event, session, stripe)
-
-      if (cloud.configured && !cloud.delivered && cloud.retryable) {
-        // A non-2xx response asks Stripe to retry this exact event. Cloud uses
-        // Stripe's stable event.id for event idempotency and Checkout Session
-        // identity for order idempotency, so retries cannot intentionally
-        // create duplicate durable commerce records.
+      let orderId: string
+      try {
+        const order = await persistVerifiedCheckoutEvent(event, session, stripe)
+        orderId = order.id
+      } catch (error) {
+        console.error(
+          `[vibecart webhook] Verified payment event ${event.id} (session ${session.id}) was NOT durably stored; requesting Stripe retry`,
+          error instanceof Error ? error.message : "unknown"
+        )
         return NextResponse.json(
-          { received: false, retry: true, error: "Durable event delivery temporarily unavailable." },
+          {
+            received: false,
+            retry: true,
+            error: "Durable order persistence temporarily unavailable.",
+          },
           { status: 503 }
         )
       }
 
+      let cloudState = "not-requested"
+      try {
+        const cloud = await attemptCloudOutboxForOrder(orderId)
+        cloudState = cloud
+          ? cloud.delivered
+            ? "delivered"
+            : cloud.reason ?? "queued"
+          : "not-requested-or-not-due"
+      } catch (error) {
+        // Core order storage is authoritative. Cloud delivery is optional and
+        // retryable from the durable outbox, so a Cloud problem must not cause
+        // Stripe to replay an order that Core already persisted.
+        cloudState = "queued-after-error"
+        console.warn(
+          `[vibecart webhook] Core order ${orderId} stored but immediate Cloud delivery could not run`,
+          error instanceof Error ? error.message : "unknown"
+        )
+      }
+
       console.log(
-        `[vibecart webhook] Verified payment event ${event.id}: session=${session.id}, amount_total=${session.amount_total}, cloud=${cloud.delivered ? "delivered" : cloud.configured ? "not-delivered" : "not-configured"}`
+        `[vibecart webhook] Verified payment event ${event.id}: session=${session.id}, amount_total=${session.amount_total}, core_order=${orderId}, cloud=${cloudState}`
       )
     } else {
       console.log(`[vibecart webhook] Checkout ${session.id} completed before payment settled; waiting for payment-success event`)

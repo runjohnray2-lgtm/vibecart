@@ -2,11 +2,13 @@ import Link from "next/link"
 import { PRODUCTS } from "@/lib/products"
 import { VibeCartButton } from "@/components/vibe-cart-button"
 
+const cloudUrl = "https://vibecart-cloud-uupzkh.v2.appdeploy.ai/"
+
 const promises = [
   "Built for custom / headless stores",
   "Durable multi-item cart",
   "Merchant-owned Stripe account",
-  "MCP Registry + released UCP",
+  "Official MCP Registry + released UCP",
 ]
 
 const surfaces = [
@@ -45,7 +47,7 @@ export default function Home() {
 
           <div className="max-w-5xl space-y-5">
             <h1 className="text-5xl font-bold leading-[1.02] md:text-7xl">
-              Agent commerce for custom storefronts that already use Stripe.
+              Commerce infrastructure for AI-built apps and the agents that use them.
             </h1>
             <p className="max-w-3xl text-lg leading-8 text-neutral-400 md:text-xl">
               Add a trusted catalog, durable cart, and Stripe Checkout path for AI clients through MCP and UCP—without migrating the store or rebuilding commerce logic for every agent.
@@ -53,12 +55,12 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Link
-              href="/founding-merchant"
+            <a
+              href={cloudUrl}
               className="rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-neutral-950 transition hover:bg-emerald-400"
             >
-              Founding Merchant — $199 setup + $29/month
-            </Link>
+              Start VibeCart Cloud — $29/month
+            </a>
             <Link
               href="/start"
               className="rounded-lg border border-neutral-700 px-5 py-3 font-semibold text-neutral-100 transition hover:border-neutral-500"
@@ -161,11 +163,14 @@ export default function Home() {
               <p className="mt-4 text-3xl font-bold">$29<span className="text-base font-normal text-neutral-400"> / month</span></p>
             </div>
             <div className="flex flex-wrap gap-3">
-              <Link href="/founding-merchant" className="rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-neutral-950 hover:bg-emerald-400">
-                Start Founding Merchant setup
-              </Link>
+              <a href={cloudUrl} className="rounded-lg bg-emerald-500 px-5 py-3 font-semibold text-neutral-950 hover:bg-emerald-400">
+                Open Cloud workspace
+              </a>
               <Link href="/cloud" className="rounded-lg border border-emerald-500/50 px-5 py-3 font-semibold text-emerald-200 hover:bg-emerald-500/10">
                 Compare options
+              </Link>
+              <Link href="/founding-merchant" className="self-center text-sm font-semibold text-emerald-200 hover:text-white">
+                Founding Merchant setup →
               </Link>
             </div>
           </div>
