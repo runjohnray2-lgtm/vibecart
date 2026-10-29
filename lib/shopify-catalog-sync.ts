@@ -393,6 +393,13 @@ function assertSnapshotCurrency(snapshot: ShopifyCatalogSnapshot): void {
   if (normalized !== snapshot.currencyCode) {
     throw new Error('invalid Shopify snapshot currencyCode: expected canonical uppercase currency')
   }
+  // VibeCart's current cart and Stripe checkout charge USD unconditionally.
+  // A correctly parsed EUR/CAD/GBP amount is still unsafe to publish as USD.
+  // Keep non-USD mapping available for diagnostics, but block checkout feeds
+  // and server-side variant lookups until currency is end-to-end supported.
+  if (normalized !== 'USD') {
+    throw new Error('Shopify currency ' + normalized + ' is unsupported by USD-only VibeCart checkout')
+  }
 }
 
 /** Restored snapshots bypass the mapper; keep server-only SKU and Shopify policy trustworthy. */
@@ -533,6 +540,11 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
   const expectedCurrency = normalizeCurrency(options.expectedCurrencyCode)
   if (shopCurrency !== expectedCurrency) {
     throw new Error('shop currency ' + shopCurrency + ' does not match the merchant catalog currency ' + expectedCurrency)
+  }
+  // Fail before any Admin page fetch: the downstream VibeCart cart/Stripe
+  // contract currently hardcodes USD, regardless of Shopify's currency.
+  if (shopCurrency !== 'USD') {
+    throw new Error('Shopify currency ' + shopCurrency + ' is unsupported by USD-only VibeCart checkout')
   }
   if (options.base && options.base.currencyCode !== shopCurrency) {
     throw new Error('base snapshot currency ' + options.base.currencyCode + ' does not match ' + shopCurrency)
