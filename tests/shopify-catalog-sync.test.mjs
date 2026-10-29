@@ -90,7 +90,7 @@ test('public Shopify feed enforces a finite hard cap and aborts before reading l
 test('feed carries only catalog-contract fields; identifiers stay in the server-side index', async () => {
   const { result } = await fullSync()
   const feed = toCatalogFeed(result.snapshot)
-  const allowed = new Set(['id', 'name', 'description', 'priceCents', 'image', 'variant'])
+  const allowed = new Set(['id', 'name', 'description', 'priceCents', 'availability', 'image', 'variant'])
   for (const product of feed.products) {
     for (const key of Object.keys(product)) assert.ok(allowed.has(key), 'unexpected field ' + key)
   }

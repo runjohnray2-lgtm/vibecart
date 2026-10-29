@@ -304,7 +304,7 @@ test('output satisfies the catalog contract and carries no invented fields', () 
   const result = mapShopifyProducts(ALL, USD)
   assert.ok(result.products.length > 0)
   assertCatalogContract(result.products)
-  const allowed = new Set(['id', 'name', 'description', 'priceCents', 'image', 'variant', 'sku', 'shopify'])
+  const allowed = new Set(['id', 'name', 'description', 'priceCents', 'availability', 'image', 'variant', 'sku', 'shopify'])
   for (const product of result.products) {
     for (const key of Object.keys(product)) assert.ok(allowed.has(key), 'unexpected field ' + key)
   }

@@ -500,6 +500,7 @@ export function toCatalogFeed(snapshot: ShopifyCatalogSnapshot, limit = MAX_FEED
         name: p.name,
         description: p.description,
         priceCents: p.priceCents,
+        availability: 'unknown',
         image: p.image,
         ...(p.variant !== undefined ? { variant: p.variant } : {}),
       })
