@@ -24,12 +24,13 @@ import type { VibeProduct } from '@/lib/products'
  * - Inventory quantity NEVER excludes a variant. Made-to-order products legitimately
  *   report zero on hand. The actual Shopify inventory policy (DENY or CONTINUE) is
  *   carried through unchanged in shopify.inventoryPolicy for server-side use. The
- *   quantity itself is not copied.
+ *   quantity is retained only in server-side Shopify metadata as a diagnostic;
+ *   it is not checkout authorization or a public catalog field.
  */
 
 export type ShopifyCatalogProduct = VibeProduct & {
   sku?: string
-  shopify: { productId: string; variantId: string; inventoryPolicy?: 'DENY' | 'CONTINUE' }
+  shopify: { productId: string; variantId: string; inventoryPolicy?: 'DENY' | 'CONTINUE'; inventoryQuantity?: number | null; inventoryTracked?: boolean | null; availableForSale?: boolean }
 }
 
 export type ShopifyMapSkip = { productId?: string; variantId?: string; reason: string }
@@ -70,7 +71,20 @@ function text(value: unknown): string | undefined {
 export function normalizeCurrency(code: unknown): string {
   const normalized = typeof code === 'string' ? code.trim().toUpperCase() : ''
   if (!/^[A-Z]{3}$/.test(normalized)) throw new Error('currencyCode is required (ISO 4217 such as USD)')
-  if (NON_TWO_DECIMAL_CURRENCIES.has(normalized)) {
+  // A three-letter shape alone does not establish an actual currency. Reject
+  // synthetic/unknown codes before they can label real merchant prices.
+  // Node 22's ICU currency registry is used for validation, not conversion.
+  if (!Intl.supportedValuesOf('currency').includes(normalized)) {
+    throw new Error('currency ' + normalized + ' is not a supported ISO 4217 currency')
+  }
+  // A hand-maintained exception list misses some valid zero-minor-unit codes
+  // (for example AFN, ALL, ISK and MMK). Using them with priceCents would
+  // mislabel whole-unit prices as cents. Check Node ICU's actual ISO 4217
+  // minor-unit metadata as well as the conservative legacy exclusions.
+  const minorUnits = new Intl.NumberFormat('en', {
+    style: 'currency', currency: normalized,
+  }).resolvedOptions().maximumFractionDigits
+  if (minorUnits !== 2 || NON_TWO_DECIMAL_CURRENCIES.has(normalized)) {
     throw new Error('currency ' + normalized + ' does not use two minor-unit digits and is not supported')
   }
   return normalized
@@ -114,7 +128,7 @@ function httpsUrl(value: unknown): string | undefined {
   if (!raw || raw.length > LIMITS.image) return undefined
   try {
     const url = new URL(raw)
-    return url.protocol === 'https:' ? url.toString() : undefined
+    return url.protocol === 'https:' && !url.username && !url.password ? url.toString() : undefined
   } catch {
     return undefined
   }
@@ -154,15 +168,29 @@ function describe(product: Json): string {
 }
 
 function variantPriceCents(variant: Json, expectedCurrency: string): number {
-  const raw = variant.price ?? variant.priceV2
-  if (isObject(raw)) {
-    const currency = text(raw.currencyCode)
-    if (currency && currency.toUpperCase() !== expectedCurrency) {
-      throw new Error('price currency ' + currency + ' does not match expected ' + expectedCurrency)
+  const parse = (raw: unknown): number => {
+    if (isObject(raw)) {
+      const currency = text(raw.currencyCode)
+      // MoneyV2 prices must carry their own currency. Assuming the shop currency
+      // for an unlabelled Money object can silently misprice a merchant catalog.
+      if (!currency) throw new Error('price currencyCode is missing')
+      if (currency.toUpperCase() !== expectedCurrency) {
+        throw new Error('price currency ' + currency + ' does not match expected ' + expectedCurrency)
+      }
+      return priceToCents(raw.amount)
     }
-    return priceToCents(raw.amount)
+    return priceToCents(raw)
   }
-  return priceToCents(raw)
+  // Mixed REST/GraphQL snapshots can carry both representations. Never silently
+  // prefer one if the other disagrees: the chosen cents could be the wrong price.
+  if (variant.price != null && variant.priceV2 != null) {
+    const cents = parse(variant.price)
+    if (cents !== parse(variant.priceV2)) {
+      throw new Error('conflicting Shopify price and priceV2 amounts')
+    }
+    return cents
+  }
+  return parse(variant.price ?? variant.priceV2)
 }
 
 function productList(input: unknown): unknown[] {
@@ -210,9 +238,17 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
       continue
     }
     const connection = entry.variants
-    if (isObject(connection) && isObject(connection.pageInfo) && connection.pageInfo.hasNextPage === true) {
-      skip(productId, undefined, 'variant list is truncated (pageInfo.hasNextPage); fetch every variant before exposing this product')
-      continue
+    if (isObject(connection)) {
+      // A GraphQL connection must prove its variant list is complete.
+      // Legacy REST arrays are not connections and remain supported.
+      if (!isObject(connection.pageInfo) || typeof connection.pageInfo.hasNextPage !== 'boolean') {
+        skip(productId, undefined, 'variant pagination status unknown: pageInfo.hasNextPage missing or invalid')
+        continue
+      }
+      if (connection.pageInfo.hasNextPage) {
+        skip(productId, undefined, 'variant list is truncated (pageInfo.hasNextPage); fetch every variant before exposing this product')
+        continue
+      }
     }
     const variants = asList(entry.variants)
     if (variants.length === 0) {
@@ -222,7 +258,32 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
 
     const images = asList(entry.images)
     const description = describe(entry)
-    const fallbackImage = imageUrl(entry.featuredImage) ?? imageUrl(entry.image) ?? imageUrl(images[0])
+    const featuredMedia = isObject(entry.featuredMedia) ? entry.featuredMedia : undefined
+    const preview = featuredMedia && isObject(featuredMedia.preview) ? featuredMedia.preview : undefined
+    const mediaPreviewImage = preview ? imageUrl(preview.image) : undefined
+    const mediaFallback = asList(entry.media)
+      .map(item => isObject(item) && isObject(item.preview) ? imageUrl(item.preview.image) : undefined)
+      .find(url => url !== undefined)
+    const restImageFallback = images.map(imageUrl).find(url => url !== undefined)
+    const fallbackImage = mediaPreviewImage ?? mediaFallback ?? imageUrl(entry.featuredImage) ?? imageUrl(entry.image) ?? restImageFallback
+    // The first Admin media page can contain only video/external-media items
+    // while an image exists on a later page. Without a usable image and with
+    // more media pages outstanding, do not claim the product is imageless or
+    // certify a complete merchant catalog from a partial media inspection.
+    // This is a whole-family rejection; a future media paginator can resolve it.
+    // A malformed or missing GraphQL media pageInfo cannot establish that
+    // an imageless product was fully inspected. Do not report a definitive
+    // missing-image result from an unknown or nonterminal media connection.
+    // REST-style media arrays and products with a verified safe image remain
+    // compatible without requiring GraphQL pagination metadata.
+    const mediaConnection = isObject(entry.media) ? entry.media : undefined
+    const mediaPageInfo = mediaConnection?.pageInfo
+    if (!fallbackImage && mediaConnection &&
+        (!isObject(mediaPageInfo) || typeof mediaPageInfo.hasNextPage !== 'boolean' ||
+         mediaPageInfo.hasNextPage)) {
+      skip(productId, undefined, 'image coverage unverified: Shopify media pagination missing, invalid or incomplete')
+      continue
+    }
 
     for (const variant of variants) {
       if (!isObject(variant)) {
@@ -251,16 +312,82 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
         skip(productId, variantId, 'variant title is longer than ' + LIMITS.variant)
         continue
       }
-      const rawSku = text(variant.sku)
-      const sku = rawSku && rawSku.length <= LIMITS.sku ? rawSku : undefined
-      if (rawSku && !sku) result.warnings.push('variant ' + variantId + ' sku is longer than ' + LIMITS.sku + ' and was dropped')
+      // A SKU is a merchant identity, not display copy. Preserve its exact
+      // bytes (including meaningful spaces) or reject the variant; silently
+      // trimming/dropping an unsupported SKU breaks downstream order mapping.
+      const rawSku = variant.sku
+      if (rawSku !== undefined && rawSku !== null && typeof rawSku !== 'string') {
+        skip(productId, variantId, 'variant sku is not a string')
+        continue
+      }
+      // An explicitly empty Shopify SKU is optional, but a nonempty
+      // whitespace-only value is corrupted merchant identity. Do not silently
+      // turn it into an absent SKU while publishing a variant.
+      if (typeof rawSku === 'string' && rawSku.length > 0 && !rawSku.trim()) {
+        skip(productId, variantId, 'variant sku is whitespace-only')
+        continue
+      }
+      const sku = typeof rawSku === 'string' && rawSku.length > 0 ? rawSku : undefined
+      if (sku && sku.length > LIMITS.sku) {
+        skip(productId, variantId, 'variant sku is longer than ' + LIMITS.sku)
+        continue
+      }
 
+      // Mixed REST/GraphQL snapshots can carry both policy spellings. Reject
+      // contradictory values instead of trusting the preferred field: DENY
+      // versus CONTINUE changes whether Shopify permits overselling.
+      const graphPolicyPresent = Object.prototype.hasOwnProperty.call(variant, 'inventoryPolicy')
+      const restPolicyPresent = Object.prototype.hasOwnProperty.call(variant, 'inventory_policy')
+      const graphPolicy = text(variant.inventoryPolicy)?.toUpperCase()
+      const restPolicy = text(variant.inventory_policy)?.toUpperCase()
+      if (graphPolicyPresent && restPolicyPresent &&
+          (!graphPolicy || !restPolicy || graphPolicy !== restPolicy)) {
+        skip(productId, variantId, 'conflicting Shopify inventory policies')
+        continue
+      }
       const rawPolicy = text(variant.inventoryPolicy ?? variant.inventory_policy)
       const policyUpper = rawPolicy ? rawPolicy.toUpperCase() : undefined
       const inventoryPolicy = policyUpper === 'DENY' || policyUpper === 'CONTINUE' ? policyUpper : undefined
       if (rawPolicy && !inventoryPolicy) {
         result.warnings.push('variant ' + variantId + ' has unrecognized inventory policy ' + rawPolicy + ' and it was not carried through')
       }
+
+      // Admin GraphQL and REST both expose quantity, but it is a snapshot,
+      // not proof of sellability (tracking may be disabled and values can age).
+      // Preserve negative oversold values and explicit null/unknown; reject
+      // malformed or contradictory quantities rather than silently losing them.
+      const graphQuantityPresent = Object.prototype.hasOwnProperty.call(variant, 'inventoryQuantity')
+      const restQuantityPresent = Object.prototype.hasOwnProperty.call(variant, 'inventory_quantity')
+      if (graphQuantityPresent && restQuantityPresent && variant.inventoryQuantity !== variant.inventory_quantity) {
+        skip(productId, variantId, 'conflicting Shopify inventory quantities')
+        continue
+      }
+      const rawQuantity = graphQuantityPresent ? variant.inventoryQuantity : variant.inventory_quantity
+      if (rawQuantity !== undefined && rawQuantity !== null &&
+          (typeof rawQuantity !== 'number' || !Number.isSafeInteger(rawQuantity))) {
+        skip(productId, variantId, 'inventory quantity must be a safe integer or null')
+        continue
+      }
+      const inventoryQuantity = rawQuantity === null ? null : rawQuantity as number | undefined
+
+      // Shopify can offer a zero-quantity DENY variant when inventory tracking
+      // is disabled. Preserve tracking and availableForSale separately; neither
+      // cached observation authorizes an order without a fresh merchant check.
+      const availabilityPresent = Object.prototype.hasOwnProperty.call(variant, 'availableForSale')
+      if (availabilityPresent && typeof variant.availableForSale !== 'boolean') {
+        skip(productId, variantId, 'availableForSale must be a boolean when supplied')
+        continue
+      }
+      const availableForSale = availabilityPresent ? variant.availableForSale as boolean : undefined
+      const inventoryItemPresent = Object.prototype.hasOwnProperty.call(variant, 'inventoryItem')
+      const inventoryItem = variant.inventoryItem
+      if (inventoryItemPresent && inventoryItem !== null &&
+          (!isObject(inventoryItem) || typeof inventoryItem.tracked !== 'boolean')) {
+        skip(productId, variantId, 'inventoryItem.tracked must be a boolean or inventoryItem null')
+        continue
+      }
+      const inventoryTracked = !inventoryItemPresent ? undefined
+        : inventoryItem === null ? null : (inventoryItem as Json).tracked as boolean
 
       seen.add(variantId)
       result.products.push({
@@ -271,7 +398,10 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
         image: variantImage(variant, images) ?? fallbackImage ?? '',
         ...(variantTitle ? { variant: variantTitle } : {}),
         ...(sku ? { sku } : {}),
-        shopify: { productId, variantId, ...(inventoryPolicy ? { inventoryPolicy } : {}) },
+        shopify: { productId, variantId, ...(inventoryPolicy ? { inventoryPolicy } : {}),
+          ...(inventoryQuantity !== undefined ? { inventoryQuantity } : {}),
+          ...(inventoryTracked !== undefined ? { inventoryTracked } : {}),
+          ...(availableForSale !== undefined ? { availableForSale } : {}) },
       })
     }
   }
