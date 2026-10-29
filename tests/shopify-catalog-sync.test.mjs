@@ -60,20 +60,113 @@ test('full sync follows cursors across pages and builds a deterministic feed', a
   assert.equal('variant' in beta, false)
 })
 
+test('public Shopify feed enforces a finite hard cap and aborts before reading later corrupted families', async () => {
+  const { result } = await fullSync()
+  assert.equal(toCatalogFeed(result.snapshot, 4).products.length, 4)
+
+  for (const invalid of [0, -1, 1.5, NaN, Infinity, 10_001, null, '4']) {
+    assert.throws(() => toCatalogFeed(result.snapshot, invalid),
+      /invalid Shopify catalog feed limit/,
+      'invalid caller limits must not disable the 10,000-variant hard cap')
+  }
+  assert.throws(() => toCatalogFeed(result.snapshot, 3),
+    /catalog would exceed 3 products/)
+
+  // A malformed family AFTER the cap must never be inspected. The prior
+  // implementation validated/allocated the entire snapshot before checking
+  // the cap, so it failed with an unrelated identity error instead.
+  const firstVariant = [...result.snapshot.products.values()][0][0]
+  const oversized = {
+    currencyCode: result.snapshot.currencyCode,
+    products: new Map([...result.snapshot.products, ['9999', [firstVariant]]]),
+  }
+  assert.throws(() => toCatalogFeed(oversized, 3),
+    /catalog would exceed 3 products/,
+    'reject the oversized feed before touching the later corrupt family')
+  assert.equal(toCatalogFeed(result.snapshot).products.length, 4,
+    'rejected feed attempts must not modify the last known-good snapshot')
+})
+
 test('feed carries only catalog-contract fields; identifiers stay in the server-side index', async () => {
   const { result } = await fullSync()
   const feed = toCatalogFeed(result.snapshot)
-  const allowed = new Set(['id', 'name', 'description', 'priceCents', 'image', 'variant', 'availability'])
+  const allowed = new Set(['id', 'name', 'description', 'priceCents', 'image', 'variant'])
   for (const product of feed.products) {
-    assert.equal(product.availability, 'unknown', 'unverified availability stays blocked for sales')
     for (const key of Object.keys(product)) assert.ok(allowed.has(key), 'unexpected field ' + key)
   }
   const index = buildVariantIndex(result.snapshot)
   assert.equal(index.size, 4)
-  assert.deepEqual(index.get(V(11)), { productId: P(1), variantId: V(11), sku: 'A-S' })
-  assert.deepEqual(index.get(V(31)), { productId: P(3), variantId: V(31), sku: 'G-1' })
+  assert.deepEqual(index.get(V(11)), { productId: P(1), variantId: V(11), sku: 'A-S', inventoryPolicy: 'CONTINUE', inventoryQuantity: 5 })
+  assert.deepEqual(index.get(V(31)), { productId: P(3), variantId: V(31), sku: 'G-1', inventoryPolicy: 'CONTINUE', inventoryQuantity: 5 })
   assert.equal(index.get(V(41)), undefined)
   assert.equal(index.get('nope'), undefined)
+})
+
+test('trusted snapshot rejects catalog-to-Shopify variant identity mismatch before feed or order index', async () => {
+  const source = gqlProduct(903, 'SYNTHETIC identity', [[9031, 'Small', 'SKU-9031', '10.00']])
+  const trusted = applyProducts(createSnapshot('USD'), [source]).snapshot
+  const originalFeed = toCatalogFeed(trusted)
+  const [[key, variants]] = [...trusted.products]
+  const poisoned = new Map(trusted.products)
+  poisoned.set(key, [{
+    ...variants[0],
+    shopify: { ...variants[0].shopify, variantId: V(9032) },
+  }])
+  const corrupted = { currencyCode: trusted.currencyCode, products: poisoned }
+
+  assert.throws(() => toCatalogFeed(corrupted), /catalog id and variant id mismatch/)
+  assert.throws(() => buildVariantIndex(corrupted), /catalog id and variant id mismatch/)
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS, base: corrupted,
+    fetchPage: async () => ({ products: [], pageInfo: { hasNextPage: false, endCursor: null } }),
+  }), /catalog id and variant id mismatch/)
+  assert.deepEqual(toCatalogFeed(trusted), originalFeed, 'original trusted snapshot remains unchanged')
+
+  // Numeric REST and Admin GID forms are aliases of the SAME variant and are valid.
+  const aliases = new Map(trusted.products)
+  aliases.set(key, [{ ...variants[0], id: '9031' }])
+  const aliasSnapshot = { currencyCode: trusted.currencyCode, products: aliases }
+  assert.equal(toCatalogFeed(aliasSnapshot).products[0].id, '9031')
+  assert.equal(buildVariantIndex(aliasSnapshot).get('9031').variantId, V(9031))
+})
+
+test('snapshot rejects wrong Shopify product ownership in both public feed and server index', async () => {
+  const source = gqlProduct(905, 'SYNTHETIC ownership', [[9051, 'Red', 'SYN-9051', '10.00']])
+  const trusted = applyProducts(createSnapshot('USD'), [source]).snapshot
+  const before = toCatalogFeed(trusted)
+  const [[familyKey, variants]] = [...trusted.products]
+
+  for (const wrongProductId of [P(906), V(905), 'gid://shopify/Product/0905']) {
+    const corrupted = {
+      currencyCode: trusted.currencyCode,
+      products: new Map([[familyKey, [{
+        ...variants[0],
+        shopify: { ...variants[0].shopify, productId: wrongProductId },
+      }]]]),
+    }
+    assert.throws(() => toCatalogFeed(corrupted), /snapshot product id mismatch/)
+    assert.throws(() => buildVariantIndex(corrupted), /snapshot product id mismatch/)
+    await assert.rejects(() => syncShopifyCatalog({
+      ...OPTS, base: corrupted,
+      fetchPage: async () => ({ products: [], pageInfo: { hasNextPage: false, endCursor: null } }),
+    }), /snapshot product id mismatch/)
+  }
+
+  const miskeyed = { currencyCode: trusted.currencyCode, products: new Map([['906', variants]]) }
+  assert.throws(() => toCatalogFeed(miskeyed), /snapshot product id mismatch/)
+  assert.throws(() => buildVariantIndex(miskeyed), /snapshot product id mismatch/)
+
+  // A REST numeric Product id is the same Shopify identity as its Admin GID.
+  const alias = {
+    currencyCode: trusted.currencyCode,
+    products: new Map([[familyKey, [{
+      ...variants[0],
+      shopify: { ...variants[0].shopify, productId: '905' },
+    }]]]),
+  }
+  assert.deepEqual(toCatalogFeed(alias), before)
+  assert.equal(buildVariantIndex(alias).get(V(9051)).productId, '905')
+  assert.deepEqual(toCatalogFeed(trusted), before, 'last-known-good snapshot remains unchanged')
 })
 
 test('cross-product variant collision fails closed in index and atomic sync', async () => {
@@ -90,6 +183,33 @@ test('cross-product variant collision fails closed in index and atomic sync', as
   })
   await assert.rejects(() => syncShopifyCatalog({ ...OPTS, fetchPage, base }), /duplicate Shopify variant id in snapshot/)
   assert.equal(base.products.size, 0, 'failed sync must not mutate the previous snapshot')
+})
+
+test('REST and Admin GID aliases of one variant cannot appear as two catalog entries', async () => {
+  const first = gqlProduct(801, 'SYNTHETIC first', [[888, 'Red', 'FIRST', '65.99']])
+  const second = gqlProduct(802, 'SYNTHETIC second', [[888, 'Amber', 'SECOND', '70.00']])
+  const restAlias = {
+    ...second,
+    variants: {
+      ...second.variants,
+      nodes: second.variants.nodes.map(variant => ({ ...variant, id: '888' })),
+    },
+  }
+  const base = createSnapshot('USD')
+  const applied = applyProducts(base, [first, restAlias])
+  assert.equal(applied.upserted, 2, 'both representations pass the individual Shopify ID checks')
+  assert.throws(() => toCatalogFeed(applied.snapshot), /duplicate Shopify variant id in snapshot/)
+  assert.throws(() => buildVariantIndex(applied.snapshot), /duplicate Shopify variant id in snapshot/)
+
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS,
+    base,
+    fetchPage: async () => ({
+      products: [first, restAlias],
+      pageInfo: { hasNextPage: false, endCursor: null },
+    }),
+  }), /duplicate Shopify variant id in snapshot/)
+  assert.equal(base.products.size, 0, 'failed sync must not mutate the last known-good snapshot')
 })
 
 test('duplicate product identities within or across pages fail closed without changing the last good snapshot', async () => {
@@ -111,6 +231,27 @@ test('duplicate product identities within or across pages fail closed without ch
     await assert.rejects(() => syncShopifyCatalog({ ...OPTS, fetchPage, base }), /duplicate Shopify product id/)
     assert.deepEqual(toCatalogFeed(base), before, 'failed sync must leave last good snapshot untouched')
   }
+})
+
+test('direct applyProducts rejects duplicate Product REST/GID aliases without mutating the trusted snapshot', () => {
+  const base = applyProducts(createSnapshot('USD'), [
+    gqlProduct(600, 'SYNTHETIC trusted', [[6001, 'One', 'OLD', '12.34']]),
+  ]).snapshot
+  const before = toCatalogFeed(base)
+  const first = gqlProduct(601, 'SYNTHETIC first', [[6101, 'Red', 'FIRST', '65.99']])
+  const alias = gqlProduct(601, 'SYNTHETIC second', [[6102, 'Amber', 'SECOND', '70.00']], { id: 601 })
+
+  assert.throws(() => applyProducts(base, [first, alias]),
+    /duplicate Shopify product id in applyProducts batch/,
+    'a later REST alias must not silently overwrite the Admin GID family')
+  assert.throws(() => applyProducts(base, [alias, first]),
+    /duplicate Shopify product id in applyProducts batch/,
+    'duplicate detection must work in either order')
+  assert.deepEqual(toCatalogFeed(base), before, 'the previous trusted snapshot is immutable')
+
+  const distinct = applyProducts(base, [first, gqlProduct(602, 'SYNTHETIC other', [[6201, 'One', 'OK', '9.99']])])
+  assert.equal(distinct.upserted, 2, 'distinct products still upsert normally')
+  assert.equal(toCatalogFeed(distinct.snapshot).products.length, before.products.length + 2)
 })
 
 test('incremental sync upserts a changed product and drops its removed variants', async () => {
@@ -158,7 +299,7 @@ test('sync aborts on invalid product identity or incomplete pages without changi
   const { fetchPage } = pager([
     { products: [gqlProduct(1, 'Alpha', [[11, 'One', 'OK', '10.00']])],
       pageInfo: { hasNextPage: true, endCursor: 'next' } },
-    { products: [], pageInfo: { hasNextPage: true, endCursor: 'next' } },
+    { products: [gqlProduct(2, 'Beta', [[22, 'One', 'OK-2', '10.00']])], pageInfo: { hasNextPage: true, endCursor: 'next' } },
   ])
   await assert.rejects(() => syncShopifyCatalog({
     ...OPTS, base: initial.snapshot, fetchPage,
@@ -291,6 +432,183 @@ test('delete webhooks accept numeric ids and global ids', async () => {
   assert.equal(toCatalogFeed(result.snapshot).products.length, 4)
 })
 
+test('product delete webhooks ignore cross-resource and malformed ids with matching numeric suffixes', async () => {
+  const { result } = await fullSync()
+  const before = toCatalogFeed(result.snapshot)
+  const rejected = applyProductDeleted(result.snapshot, [
+    V(1), 'gid://shopify/Collection/2', 'gid://shopify/Product/3?other=1',
+    'gid://shopify/Product/03', '/Product/2', '3.0', -1,
+  ])
+  assert.equal(rejected.removed, 0, 'non-Product identities must never remove a real product')
+  assert.deepEqual(toCatalogFeed(rejected.snapshot), before)
+  const accepted = applyProductDeleted(rejected.snapshot, [P(3)])
+  assert.equal(accepted.removed, 1, 'valid Product GIDs must continue to delete')
+  assert.equal(toCatalogFeed(accepted.snapshot).products.length, before.products.length - 1)
+})
+
+test('sync refuses cross-resource or malformed product identities without replacing cached products', async () => {
+  const original = gqlProduct(1, 'SYNTHETIC original', [[11, 'One', 'GOOD', '10.00']])
+  const base = applyProducts(createSnapshot('USD'), [original]).snapshot
+  const before = toCatalogFeed(base)
+  const badIds = [
+    V(1), 'gid://shopify/Collection/1', 'gid://shopify/Product/1?other=1',
+    'gid://shopify/Product/01', '/Product/1', '1.0', '01', '0',
+  ]
+  for (const id of badIds) {
+    const impostor = { ...original, id, title: 'SYNTHETIC impostor' }
+    const direct = applyProducts(base, [impostor])
+    assert.equal(direct.upserted, 0, 'invalid product identity must not be cached: ' + id)
+    assert.deepEqual(toCatalogFeed(direct.snapshot), before)
+    await assert.rejects(() => syncShopifyCatalog({
+      ...OPTS, base,
+      fetchPage: async () => ({ products: [impostor], pageInfo: { hasNextPage: false, endCursor: null } }),
+    }), /invalid id/, 'sync must reject invalid product identity: ' + id)
+  }
+  const invalidPreferredGid = { ...original, admin_graphql_api_id: V(1) }
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS, base,
+    fetchPage: async () => ({ products: [invalidPreferredGid], pageInfo: { hasNextPage: false, endCursor: null } }),
+  }), /invalid id/)
+  const validNumeric = { ...original, id: '1' }
+  assert.equal(applyProducts(base, [validNumeric]).upserted, 1, 'valid REST numeric product id remains supported')
+  assert.deepEqual(toCatalogFeed(base), before, 'failed sync leaves the last good snapshot untouched')
+})
+
+test('direct sync omits a whole family with cross-resource or malformed Shopify variant ids', async () => {
+  const original = gqlProduct(931, 'SYNTHETIC trusted', [[9311, 'One', 'GOOD', '10.00']])
+  const base = applyProducts(createSnapshot('USD'), [original]).snapshot
+  const before = toCatalogFeed(base)
+  const valid = gqlProduct(931, 'SYNTHETIC updated', [
+    [9311, 'One', 'GOOD', '10.00'],
+    [9312, 'Two', 'SECOND', '12.00'],
+  ])
+  const invalidIds = [
+    P(9312), 'gid://shopify/Collection/9312',
+    'gid://shopify/ProductVariant/9312?inventory_item_id=2',
+    'gid://shopify/ProductVariant/09312',
+    '/ProductVariant/9312', '9312.0', '09312', '0',
+  ]
+
+  for (const id of invalidIds) {
+    const variants = valid.variants.nodes.map((variant, index) =>
+      index === 1 ? { ...variant, id } : variant)
+    const poisoned = { ...valid, variants: { ...valid.variants, nodes: variants } }
+    const applied = applyProducts(base, [poisoned])
+    assert.equal(applied.upserted, 0, 'invalid variant must not enter snapshot: ' + id)
+    assert.equal(applied.removed, 1, 'stale family must be removed: ' + id)
+    assert.deepEqual(toCatalogFeed(applied.snapshot).products, [])
+    assert.ok(applied.skipped.some(item =>
+      item.variantId === id && /invalid Shopify ProductVariant id; entire family omitted/.test(item.reason)))
+
+    const synced = await syncShopifyCatalog({
+      ...OPTS, base,
+      fetchPage: async () => ({
+        products: [poisoned], pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    })
+    assert.equal(synced.upserted, 0)
+    assert.deepEqual(toCatalogFeed(synced.snapshot).products, [])
+    assert.deepEqual(toCatalogFeed(base), before, 'last known-good snapshot stays unchanged')
+  }
+
+  const wrongPreferredId = {
+    ...valid,
+    variants: {
+      ...valid.variants,
+      nodes: valid.variants.nodes.map((variant, index) =>
+        index === 1 ? { ...variant, admin_graphql_api_id: P(9312) } : variant),
+    },
+  }
+  // A malformed preferred Admin GID paired with a valid variant id is now a
+  // conflicting dual identity, not a skippable single malformed id. Reject
+  // the whole batch atomically so a stale trusted price cannot be replaced.
+  assert.throws(() => applyProducts(base, [wrongPreferredId]),
+    /conflicting Shopify ProductVariant ids/,
+    'invalid preferred Admin GID must not fall back to another variant id')
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS, base,
+    fetchPage: async () => ({
+      products: [wrongPreferredId], pageInfo: { hasNextPage: false, endCursor: null },
+    }),
+  }), /conflicting Shopify ProductVariant ids/)
+  assert.deepEqual(toCatalogFeed(base), before,
+    'conflicting preferred Admin identity must not mutate last known-good snapshot')
+
+  const restVariant = {
+    ...valid,
+    variants: {
+      ...valid.variants,
+      nodes: valid.variants.nodes.map((variant, index) =>
+        index === 1 ? { ...variant, id: '9312' } : variant),
+    },
+  }
+  assert.equal(applyProducts(base, [restVariant]).upserted, 1,
+    'positive REST numeric variant ids remain supported')
+  assert.equal(applyProducts(base, [valid]).upserted, 1,
+    'valid ProductVariant GIDs remain supported')
+})
+
+test('conflicting REST and Admin identities fail atomically instead of mispricing another Shopify item', async () => {
+  const product = gqlProduct(941, 'SYNTHETIC trusted', [[9411, 'One', 'GOOD', '10.00']])
+  const base = applyProducts(createSnapshot('USD'), [product]).snapshot
+  const before = toCatalogFeed(base)
+  const dual = {
+    ...product, admin_graphql_api_id: P(941), id: 941,
+    variants: {
+      ...product.variants,
+      nodes: product.variants.nodes.map(variant => ({
+        ...variant, admin_graphql_api_id: V(9411), id: 9411,
+      })),
+    },
+  }
+  assert.equal(applyProducts(base, [dual]).upserted, 1, 'matching REST and GID representations remain valid')
+  const badProduct = { ...dual, id: 942 }
+  const badVariant = {
+    ...dual,
+    variants: { ...dual.variants, nodes: [{ ...dual.variants.nodes[0], id: 9412 }] },
+  }
+  for (const [raw, resource] of [[badProduct, 'Product'], [badVariant, 'ProductVariant']]) {
+    assert.throws(() => applyProducts(base, [raw]), new RegExp('conflicting Shopify ' + resource + ' ids'))
+    await assert.rejects(() => syncShopifyCatalog({
+      ...OPTS, base,
+      fetchPage: async () => ({ products: [raw], pageInfo: { hasNextPage: false, endCursor: null } }),
+    }), new RegExp('conflicting Shopify ' + resource + ' ids'))
+    assert.deepEqual(toCatalogFeed(base), before, 'rejected update cannot mutate the trusted snapshot')
+  }
+})
+
+test('unlabelled Shopify Money prices omit the entire family without corrupting the trusted snapshot', async () => {
+  const trusted = gqlProduct(992, 'SYNTHETIC trusted', [[9921, 'Red', 'RED', '10.00']])
+  const base = applyProducts(createSnapshot('USD'), [trusted]).snapshot
+  const before = toCatalogFeed(base)
+  const changed = gqlProduct(992, 'SYNTHETIC changed', [
+    [9921, 'Red', 'RED', '11.00'],
+    [9922, 'Amber', 'AMBER', '12.00'],
+  ])
+  const poisoned = {
+    ...changed,
+    variants: {
+      ...changed.variants,
+      nodes: changed.variants.nodes.map((variant, i) =>
+        i === 1 ? { ...variant, price: { amount: '12.00' } } : variant),
+    },
+  }
+  const direct = applyProducts(base, [poisoned])
+  assert.equal(direct.upserted, 0)
+  assert.equal(direct.removed, 1)
+  assert.equal(toCatalogFeed(direct.snapshot).products.length, 0)
+  assert.ok(direct.skipped.some(item => /price currencyCode is missing/.test(item.reason)))
+  assert.ok(direct.skipped.some(item => /entire family omitted/.test(item.reason)))
+  const synced = await syncShopifyCatalog({
+    ...OPTS, base,
+    fetchPage: async () => ({
+      products: [poisoned], pageInfo: { hasNextPage: false, endCursor: null },
+    }),
+  })
+  assert.equal(toCatalogFeed(synced.snapshot).products.length, 0)
+  assert.deepEqual(toCatalogFeed(base), before, 'last known-good snapshot must not be mutated')
+})
+
 test('currency must be verified, never assumed', async () => {
   const fetchPage = async () => page2
   await assert.rejects(() => syncShopifyCatalog({ shopCurrencyCode: 'EUR', expectedCurrencyCode: 'USD', fetchPage }), /does not match/)
@@ -319,12 +637,24 @@ test('product pagination limits reject invalid overrides before Shopify requests
 
 test('pagination guards: repeated cursor, page limit, invalid page, failed fetch', async () => {
   const loop = pager([
-    { products: [], pageInfo: { hasNextPage: true, endCursor: 'x' } },
-    { products: [], pageInfo: { hasNextPage: true, endCursor: 'x' } },
+    { products: [gqlProduct(1, 'Alpha', [[11, 'One', 'LOOP-1', '1.00']])], pageInfo: { hasNextPage: true, endCursor: 'x' } },
+    { products: [gqlProduct(2, 'Beta', [[21, 'One', 'LOOP-2', '1.00']])], pageInfo: { hasNextPage: true, endCursor: 'x' } },
   ])
   await assert.rejects(() => syncShopifyCatalog({ ...OPTS, fetchPage: loop.fetchPage }), /cursor did not advance/)
 
-  const endless = async cursor => ({ products: [], pageInfo: { hasNextPage: true, endCursor: String(cursor) + 'n' } })
+  await assert.rejects(() => syncShopifyCatalog({
+    ...OPTS,
+    fetchPage: async () => ({ products: [], pageInfo: { hasNextPage: true, endCursor: 'x' } }),
+  }), /empty Shopify product page with continuation/)
+
+  let nextId = 0
+  const endless = async cursor => {
+    nextId += 1
+    return {
+      products: [gqlProduct(nextId, 'Synthetic page', [[1000 + nextId, 'One', 'PAGE', '1.00']])],
+      pageInfo: { hasNextPage: true, endCursor: String(cursor) + 'n' },
+    }
+  }
   await assert.rejects(() => syncShopifyCatalog({ ...OPTS, fetchPage: endless, maxPages: 3 }), /exceeded maxPages/)
 
   await assert.rejects(() => syncShopifyCatalog({ ...OPTS, fetchPage: async () => ({ products: 'nope' }) }), /invalid page/)
@@ -396,4 +726,135 @@ test('sync module stays isolated: imports only a type and the mapper, no payment
   const code = withoutTsComments(syncSource)
   assert.doesNotMatch(code, /stripe|checkout|cart-store|neon|process\.env|fetch\(/i)
   assert.deepEqual(syncSource.match(/from '[^']+'/g), ["from '@/lib/products'", "from '@/lib/shopify-catalog-mapper'"])
+})
+
+test('Shopify SKUs remain exact and unsupported SKUs never silently enter a partial catalog family', async () => {
+  const trusted = gqlProduct(980, 'SYNTHETIC trusted', [[9801, 'One', '  SKU-9801  ', '10.00']])
+  const base = applyProducts(createSnapshot('USD'), [trusted]).snapshot
+  const before = toCatalogFeed(base)
+  assert.equal(buildVariantIndex(base).get(V(9801)).sku, '  SKU-9801  ',
+    'merchant SKU whitespace must not be silently trimmed')
+  assert.doesNotMatch(JSON.stringify(before), /SKU-9801/,
+    'the exact SKU belongs only in the server-side index')
+
+  const updated = gqlProduct(980, 'SYNTHETIC updated', [
+    [9801, 'One', 'GOOD', '11.00'],
+    [9802, 'Two', 'SECOND', '12.00'],
+  ])
+  for (const [badSku, expected] of [
+    ['X'.repeat(201), /variant sku is longer than 200/],
+    [42, /variant sku is not a string/],
+  ]) {
+    const poisoned = {
+      ...updated,
+      variants: {
+        ...updated.variants,
+        nodes: updated.variants.nodes.map((variant, i) =>
+          i === 1 ? { ...variant, sku: badSku } : variant),
+      },
+    }
+    const direct = applyProducts(base, [poisoned])
+    assert.equal(direct.upserted, 0, 'a rejected SKU must not publish valid siblings')
+    assert.equal(direct.removed, 1, 'stale product family must be removed from new snapshot')
+    assert.equal(toCatalogFeed(direct.snapshot).products.length, 0)
+    assert.ok(direct.skipped.some(item => expected.test(item.reason)))
+    assert.ok(direct.skipped.some(item => /entire family omitted/.test(item.reason)))
+
+    const synced = await syncShopifyCatalog({
+      ...OPTS, base,
+      fetchPage: async () => ({
+        products: [poisoned], pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    })
+    assert.equal(toCatalogFeed(synced.snapshot).products.length, 0)
+    assert.deepEqual(toCatalogFeed(base), before,
+      'invalid SKU must not mutate the last-known-good snapshot')
+  }
+})
+
+test('direct Shopify variantsCount rejects truncated or approximate families without corrupting the trusted snapshot', async () => {
+  const original = gqlProduct(760, 'SYNTHETIC complete', [[7601, 'One', 'SKU-7601', '19.99']])
+  const base = applyProducts(createSnapshot('USD'), [original]).snapshot
+  const before = toCatalogFeed(base)
+  const withCount = (count, precision = 'EXACT') => ({
+    ...original,
+    variantsCount: { count, precision },
+  })
+  const malformed = [
+    withCount(2),                 // A false terminal pageInfo cannot hide missing variants.
+    withCount(1, 'AT_LEAST'),     // An approximate count is not completeness proof.
+    withCount('1'),              // No string coercion.
+    withCount(-1),
+    { ...original, variantsCount: null },
+    { ...original, variantsCount: undefined },
+    // A false terminal GraphQL connection without an independent count must
+    // not silently publish an incomplete family.
+    (() => { const withoutCount = { ...original }; delete withoutCount.variantsCount; return withoutCount })(),
+  ]
+  for (const product of malformed) {
+    const applied = applyProducts(base, [product])
+    assert.equal(applied.removed, 1)
+    assert.equal(applied.upserted, 0)
+    assert.match(applied.skipped[0].reason, /exact variantsCount missing, approximate or mismatched/)
+    assert.deepEqual(toCatalogFeed(applied.snapshot).products, [])
+
+    const synced = await syncShopifyCatalog({
+      ...OPTS, base,
+      fetchPage: async () => ({
+        products: [product], pageInfo: { hasNextPage: false, endCursor: null },
+      }),
+    })
+    assert.deepEqual(toCatalogFeed(synced.snapshot).products, [])
+    assert.deepEqual(toCatalogFeed(base), before, 'failed family must not mutate last good snapshot')
+  }
+
+  const complete = applyProducts(base, [withCount(1)])
+  assert.equal(complete.upserted, 1)
+  assert.deepEqual(toCatalogFeed(complete.snapshot), before)
+  // Legacy REST arrays have no GraphQL pageInfo and remain supported.
+  const restLike = { ...original }
+  delete restLike.variantsCount
+  assert.equal(applyProducts(createSnapshot('USD'), [{
+    ...restLike, variants: original.variants.nodes,
+  }]).upserted, 1)
+})
+
+test('restored snapshot SKU and policy validation rejects corrupt metadata before feed or server index', () => {
+  const source = gqlProduct(981, 'SYNTHETIC restored metadata', [[9811, 'Red', '  EXACT-SKU  ', '65.99']])
+  const trusted = applyProducts(createSnapshot('USD'), [source]).snapshot
+  const before = toCatalogFeed(trusted)
+  const [[familyKey, variants]] = [...trusted.products]
+  assert.equal(buildVariantIndex(trusted).get(V(9811)).sku, '  EXACT-SKU  ',
+    'merchant SKU whitespace is significant and must survive the index')
+  assert.equal(buildVariantIndex(trusted).get(V(9811)).inventoryPolicy, 'CONTINUE')
+
+  const badCases = [
+    { patch: { sku: 42 }, error: /invalid Shopify snapshot sku/ },
+    { patch: { sku: '   ' }, error: /invalid Shopify snapshot sku/ },
+    { patch: { sku: 'X'.repeat(201) }, error: /invalid Shopify snapshot sku/ },
+    { patch: { shopify: { ...variants[0].shopify, inventoryPolicy: 'UNKNOWN' } },
+      error: /missing or invalid inventoryPolicy/ },
+    { patch: { shopify: { ...variants[0].shopify, inventoryPolicy: undefined } },
+      error: /missing or invalid inventoryPolicy/ },
+  ]
+  for (const { patch, error } of badCases) {
+    const corrupted = {
+      currencyCode: trusted.currencyCode,
+      products: new Map([[familyKey, [{ ...variants[0], ...patch }]]]),
+    }
+    assert.throws(() => toCatalogFeed(corrupted), error,
+      'a public feed must not certify restored variants with corrupt server-only metadata')
+    assert.throws(() => buildVariantIndex(corrupted), error,
+      'server-only order identity must not silently accept corrupt metadata')
+    assert.deepEqual(toCatalogFeed(trusted), before,
+      'a rejected reconstructed snapshot must not mutate last-known-good catalog')
+  }
+
+  const noSku = {
+    currencyCode: trusted.currencyCode,
+    products: new Map([[familyKey, [{ ...variants[0], sku: undefined }]]]),
+  }
+  assert.equal(toCatalogFeed(noSku).products.length, 1,
+    'Shopify permits variants without an SKU')
+  assert.equal(buildVariantIndex(noSku).get(V(9811)).sku, undefined)
 })

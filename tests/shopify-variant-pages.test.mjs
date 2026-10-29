@@ -198,3 +198,65 @@ test('rejects an empty nonterminal Shopify product page before exposing partial 
   }), options(async () => { throw new Error('unexpected variant fetch') }))
   assert.deepEqual((await emptyStore(null)).products, [])
 })
+
+
+test('fail closed if a >100-variant family count changes or becomes unverifiable during pagination', async () => {
+  const initial = { ...product(100), variantsCount: { count: 225, precision: 'EXACT' } }
+  for (const count of [224, 226, undefined, 225]) {
+    const fresh = count === undefined ? undefined : { count, precision: count === 225 ? 'AT_LEAST' : 'EXACT' }
+    let fetched = 0
+    await assert.rejects(hydrate(initial, options(async productId => {
+      fetched++
+      return {
+        productId,
+        variantsCount: fresh,
+        variants: { nodes: Array.from({ length: 100 }, (_, i) => V(i + 101)),
+          pageInfo: { hasNextPage: true, endCursor: 'c200' } },
+      }
+    })), /variant count changed or became unverifiable/)
+    assert.equal(fetched, 1, 'count drift must stop before requesting another page')
+  }
+  const complete = await hydrate(initial, options(async (productId, cursor) => ({
+    productId, variantsCount: { count: 225, precision: 'EXACT' },
+    variants: cursor === 'c100'
+      ? { nodes: Array.from({ length: 100 }, (_, i) => V(i + 101)), pageInfo: { hasNextPage: true, endCursor: 'c200' } }
+      : { nodes: Array.from({ length: 25 }, (_, i) => V(i + 201)), pageInfo: { hasNextPage: false, endCursor: null } },
+  })))
+  assert.equal(complete.variants.nodes.length, 225)
+})
+
+test('standalone hydration fails closed on approximate, truncated and overflowing exact counts', async () => {
+  const noFetch = options(async () => { throw new Error('unexpected continuation') })
+  for (const variantsCount of [
+    { count: 2, precision: 'AT_LEAST' },
+    { count: -1, precision: 'EXACT' },
+    { count: 2.5, precision: 'EXACT' },
+    null,
+  ]) {
+    await assert.rejects(
+      hydrate({ ...product(2, false), variantsCount }, noFetch),
+      /initial exact variantsCount missing or approximate/,
+    )
+  }
+  await assert.rejects(
+    hydrate({ ...product(2, false), variantsCount: { count: 3, precision: 'EXACT' } }, noFetch),
+    /hydrated variants incomplete: independent exact count mismatch/,
+  )
+  await assert.rejects(
+    hydrate({ ...product(2, false), variantsCount: { count: 1, precision: 'EXACT' } }, noFetch),
+    /hydrated variants exceed independent exact count/,
+  )
+  const initial = { ...product(100), variantsCount: { count: 150, precision: 'EXACT' } }
+  const continuation = count => options(async productId => ({
+    productId,
+    variantsCount: { count: 150, precision: 'EXACT' },
+    variants: {
+      nodes: Array.from({ length: count }, (_, i) => V(i + 101)),
+      pageInfo: { hasNextPage: false, endCursor: null },
+    },
+  }))
+  await assert.rejects(hydrate(initial, continuation(49)), /hydrated variants incomplete/)
+  await assert.rejects(hydrate(initial, continuation(51)), /hydrated variants exceed/)
+  const complete = await hydrate(initial, continuation(50))
+  assert.equal(complete.variants.nodes.length, 150)
+})

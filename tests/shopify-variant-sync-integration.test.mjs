@@ -27,6 +27,7 @@ const product = () => ({
   status: 'ACTIVE',
   publishedAt: '2026-10-18T00:00:00Z',
   featuredMedia: { preview: { image: { url: 'https://cdn.shopify.com/synthetic.jpg' } } },
+  variantsCount: { count: 225, precision: 'EXACT' },
   variants: {
     nodes: Array.from({ length: 100 }, (_, i) => variant(i + 1)),
     pageInfo: { hasNextPage: true, endCursor: 'after100' },
@@ -37,10 +38,12 @@ const nextPage = async (id, cursor) => {
   assert.equal(id, PRODUCT_ID)
   if (cursor === 'after100') return {
     productId: id,
+    variantsCount: { count: 225, precision: 'EXACT' },
     variants: { nodes: Array.from({ length: 100 }, (_, i) => variant(i + 101)), pageInfo: { hasNextPage: true, endCursor: 'after200' } },
   }
   if (cursor === 'after200') return {
     productId: id,
+    variantsCount: { count: 225, precision: 'EXACT' },
     variants: { nodes: Array.from({ length: 25 }, (_, i) => variant(i + 201)), pageInfo: { hasNextPage: false, endCursor: 'after225' } },
   }
   throw new Error('unexpected cursor')
@@ -64,7 +67,7 @@ test('real sync consumes all 225 hydrated variants and preserves Shopify IDs, ex
   for (const n of [1, 2, 100, 101, 200, 225]) {
     const id = `gid://shopify/ProductVariant/${n}`
     assert.equal(feed.products.find(p => p.id === id)?.priceCents, n % 2 ? 6599 : 7000)
-    assert.deepEqual(index.get(id), { productId: PRODUCT_ID, variantId: id, sku: `SYNTH-${n}` })
+    assert.deepEqual(index.get(id), { productId: PRODUCT_ID, variantId: id, sku: `SYNTH-${n}`, inventoryPolicy: n % 2 ? 'CONTINUE' : 'DENY', inventoryQuantity: 0 })
     const entry = result.snapshot.products.get('94001')?.find(p => p.id === id)
     assert.equal(entry?.shopify.inventoryPolicy, n % 2 ? 'CONTINUE' : 'DENY')
   }

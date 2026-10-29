@@ -34,7 +34,6 @@ test('REST multi-variant product keeps real ids, SKUs and exact cents', () => {
   assert.equal(small.variant, 'Small / Blue')
   assert.equal(small.sku, 'TJ-S-BL')
   assert.equal(small.priceCents, 12900)
-  assert.equal(small.availability, 'unknown', 'catalog mapping must not invent checkout sellability')
   assert.deepEqual(small.shopify, { productId: '7234567890123', variantId: '41000000000001' })
   assert.equal(small.description, 'Warm & light Packable')
   assert.equal(small.image, 'https://cdn.shopify.com/s/files/1/0001/jacket-blue-small.jpg')
@@ -131,6 +130,43 @@ test('a different shop currency is honored but embedded currencies are never con
   assert.equal(mapped.products[0].priceCents, 1000)
 })
 
+test('Money prices without a currencyCode fail closed instead of inheriting USD', () => {
+  const product = {
+    id: 991, title: 'SYNTHETIC currency check',
+    variants: [
+      { id: 9911, price: { amount: '10.00' } },
+      { id: 9912, priceV2: { amount: '11.00', currencyCode: ' ' } },
+      { id: 9913, priceV2: { amount: '12.00', currencyCode: 42 } },
+      { id: 9914, priceV2: { amount: '13.00', currencyCode: 'USD' } },
+      { id: 9915, price: '14.00' },
+    ],
+  }
+  const result = mapShopifyProducts([product], USD)
+  assert.deepEqual(result.products.map(p => p.id), ['9914', '9915'])
+  assert.deepEqual(result.products.map(p => p.priceCents), [1300, 1400])
+  assert.equal(result.skipped.length, 3)
+  for (const skipped of result.skipped) assert.match(skipped.reason, /price currencyCode is missing/)
+})
+
+test('conflicting dual Shopify price fields fail closed instead of silently choosing one', () => {
+  const product = {
+    id: 992, title: 'SYNTHETIC dual-price check',
+    variants: [
+      { id: 9921, price: '10.00', priceV2: { amount: '10.00', currencyCode: 'USD' } },
+      { id: 9922, price: '10.00', priceV2: { amount: '11.00', currencyCode: 'USD' } },
+      { id: 9923, price: '10.00', priceV2: { amount: '10.00', currencyCode: 'EUR' } },
+      { id: 9924, price: { amount: '9.50', currencyCode: 'USD' }, priceV2: { amount: '9.50', currencyCode: 'USD' } },
+      { id: 9925, price: '10.00', priceV2: { amount: '10.000', currencyCode: 'USD' } },
+    ],
+  }
+  const mapped = mapShopifyProducts([product], USD)
+  assert.deepEqual(mapped.products.map(p => p.id), ['9921', '9924', '9925'])
+  assert.deepEqual(mapped.products.map(p => p.priceCents), [1000, 950, 1000])
+  assert.equal(mapped.skipped.length, 2)
+  assert.match(mapped.skipped.find(p => p.variantId === '9922').reason, /conflicting Shopify price/)
+  assert.match(mapped.skipped.find(p => p.variantId === '9923').reason, /currency EUR does not match expected USD/)
+})
+
 test('currencyCode is required and must use two minor-unit digits', () => {
   assert.throws(() => mapShopifyProducts([], {}), /currencyCode is required/)
   assert.throws(() => mapShopifyProducts([]), /currencyCode is required/)
@@ -162,7 +198,7 @@ test('unpublished products are skipped unless explicitly included', () => {
   assert.equal(mapShopifyProducts([{ id: 1, title: 'No field', variants: [{ id: 2, price: '1.00' }] }], USD).products.length, 1)
 })
 
-test('zero quantity never excludes a variant; the Shopify inventory policy is preserved as reported', () => {
+test('zero and negative inventory quantities remain server-only diagnostics, not sellability decisions', () => {
   const product = {
     id: 1,
     title: 'Made to order',
@@ -193,10 +229,29 @@ test('zero quantity never excludes a variant; the Shopify inventory policy is pr
   })
   assert.equal(result.warnings.length, 1)
   assert.match(result.warnings[0], /WEIRD/)
+  assert.deepEqual(result.products.map(p => p.shopify.inventoryQuantity),
+    [0, -2, 0, 0, undefined, 3, undefined, undefined])
   for (const p of result.products) {
-    assert.equal('inventoryQuantity' in p, false, 'quantity must not be copied')
-    assert.equal('inventoryQuantity' in p.shopify, false, 'quantity must not be copied')
+    assert.equal('inventoryQuantity' in p, false, 'quantity must never appear as a public product field')
   }
+})
+
+test('invalid and contradictory inventory quantities are rejected; null remains explicitly unknown', () => {
+  const variants = [
+    { id: 1, price: '1.00', inventoryPolicy: 'DENY', inventoryQuantity: null },
+    { id: 2, price: '1.00', inventoryPolicy: 'DENY', inventoryQuantity: 0, inventory_quantity: 1 },
+    { id: 3, price: '1.00', inventoryPolicy: 'CONTINUE', inventoryQuantity: '0' },
+    { id: 4, price: '1.00', inventoryPolicy: 'CONTINUE', inventoryQuantity: 0.5 },
+    { id: 5, price: '1.00', inventoryPolicy: 'CONTINUE', inventoryQuantity: Number.MAX_SAFE_INTEGER + 1 },
+    { id: 6, price: '1.00', inventoryPolicy: 'CONTINUE' },
+  ]
+  const result = mapShopifyProducts([{ id: 10, title: 'Synthetic inventory', variants }], USD)
+  assert.deepEqual(result.products.map(p => p.id), ['1', '6'])
+  assert.equal(result.products[0].shopify.inventoryQuantity, null)
+  assert.equal('inventoryQuantity' in result.products[1].shopify, false)
+  assert.deepEqual(result.skipped.map(s => s.variantId), ['2', '3', '4', '5'])
+  assert.match(result.skipped[0].reason, /conflicting Shopify inventory quantities/)
+  for (const skipped of result.skipped.slice(1)) assert.match(skipped.reason, /safe integer or null/)
 })
 
 test('products with a truncated variant list are skipped whole', () => {
@@ -249,7 +304,7 @@ test('output satisfies the catalog contract and carries no invented fields', () 
   const result = mapShopifyProducts(ALL, USD)
   assert.ok(result.products.length > 0)
   assertCatalogContract(result.products)
-  const allowed = new Set(['id', 'name', 'description', 'priceCents', 'image', 'variant', 'sku', 'shopify', 'availability'])
+  const allowed = new Set(['id', 'name', 'description', 'priceCents', 'image', 'variant', 'sku', 'shopify'])
   for (const product of result.products) {
     for (const key of Object.keys(product)) assert.ok(allowed.has(key), 'unexpected field ' + key)
   }
@@ -261,4 +316,116 @@ test('mapper stays isolated from payments, database, env and routes', () => {
   assert.doesNotMatch(code, /stripe|checkout|cart-store|neon|process\.env|fetch\(/i)
   const imports = source.match(/^import .*$/gm) ?? []
   assert.deepEqual(imports, ["import type { VibeProduct } from '@/lib/products'"])
+})
+
+
+test('credential-bearing Shopify media URLs are never exposed or mistaken for verified images', () => {
+  const raw = {
+    id: 'gid://shopify/Product/301', title: 'SYNTHETIC safe media',
+    status: 'ACTIVE', publishedAt: '2026-10-26T00:00:00Z',
+    featuredMedia: { preview: { image: { url: 'https://operator:secret@cdn.shopify.com/featured.jpg' } } },
+    media: {
+      nodes: [{ id: 'gid://shopify/MediaImage/302', preview: { image: { url: 'https://cdn.shopify.com/safe.jpg' } } }],
+      pageInfo: { hasNextPage: true, endCursor: 'more-media' },
+    },
+    variants: { nodes: [{ id: 'gid://shopify/ProductVariant/303', price: '19.99', inventoryPolicy: 'CONTINUE' }],
+      pageInfo: { hasNextPage: false } },
+  }
+  const mapped = mapShopifyProducts([raw], USD)
+  assert.equal(mapped.products.length, 1)
+  assert.equal(mapped.products[0].image, 'https://cdn.shopify.com/safe.jpg')
+  const unsafeOnly = { ...raw, media: { nodes: [], pageInfo: { hasNextPage: false } } }
+  assert.equal(mapShopifyProducts([unsafeOnly], USD).products[0].image, '',
+    'terminal imageless product is diagnostic, not a leaked credential URL')
+  const uninspected = { ...raw, media: { nodes: [], pageInfo: { hasNextPage: true, endCursor: 'more-media' } } }
+  const incomplete = mapShopifyProducts([uninspected], USD)
+  assert.equal(incomplete.products.length, 0)
+  assert.match(incomplete.skipped[0].reason, /image coverage unverified/)
+})
+
+test('imageless GraphQL media requires explicit terminal pagination evidence', () => {
+  const raw = {
+    id: 'gid://shopify/Product/771', title: 'SYNTHETIC media completeness',
+    status: 'ACTIVE', publishedAt: '2026-10-26T00:00:00Z',
+    variants: { nodes: [{
+      id: 'gid://shopify/ProductVariant/772', price: '19.99',
+      inventoryPolicy: 'CONTINUE', inventoryQuantity: 0,
+    }], pageInfo: { hasNextPage: false } },
+    media: { nodes: [] },
+  }
+  for (const pageInfo of [undefined, {}, { hasNextPage: 'false' }, { hasNextPage: null },
+    { hasNextPage: true, endCursor: 'more' }]) {
+    const media = { nodes: [], ...(pageInfo === undefined ? {} : { pageInfo }) }
+    const result = mapShopifyProducts([{ ...raw, media }], USD)
+    assert.equal(result.products.length, 0, 'unknown media coverage must omit the entire family')
+    assert.equal(result.skipped.length, 1)
+    assert.match(result.skipped[0].reason, /image coverage unverified/)
+  }
+  const terminal = mapShopifyProducts([{ ...raw, media: {
+    nodes: [], pageInfo: { hasNextPage: false, endCursor: null },
+  } }], USD)
+  assert.equal(terminal.products.length, 1)
+  assert.equal(terminal.products[0].image, '', 'terminal imageless product remains diagnosable')
+  assert.equal(terminal.products[0].priceCents, 1999)
+  assert.equal(terminal.products[0].shopify.inventoryPolicy, 'CONTINUE')
+  const featured = mapShopifyProducts([{ ...raw,
+    featuredMedia: { preview: { image: { url: 'https://cdn.shopify.com/safe.png' } } },
+  }], USD)
+  assert.equal(featured.products.length, 1, 'a verified image needs no additional media pages')
+  assert.equal(featured.products[0].image, 'https://cdn.shopify.com/safe.png')
+  const rest = mapShopifyProducts([{ ...raw, media: [] }], USD)
+  assert.equal(rest.products.length, 1, 'REST media arrays remain compatible')
+})
+
+test('nonempty whitespace-only SKU is rejected instead of silently losing merchant identity', () => {
+  const raw = {
+    id: 880, title: 'SYNTHETIC SKU identity',
+    variants: [
+      { id: 881, title: 'Empty allowed', sku: '', price: '5.00', inventoryPolicy: 'CONTINUE' },
+      { id: 882, title: 'Whitespace invalid', sku: ' \t ', price: '5.00', inventoryPolicy: 'CONTINUE' },
+      { id: 883, title: 'Meaningful spaces', sku: '  PART A  ', price: '5.00', inventoryPolicy: 'DENY' },
+    ],
+  }
+  const result = mapShopifyProducts([raw], USD)
+  assert.deepEqual(result.products.map(p => p.id), ['881', '883'])
+  assert.equal('sku' in result.products[0], false, 'explicitly empty SKU remains optional')
+  assert.equal(result.products[1].sku, '  PART A  ', 'merchant SKU bytes are preserved')
+  assert.deepEqual(result.skipped.map(s => s.variantId), ['882'])
+  assert.match(result.skipped[0].reason, /sku is whitespace-only/)
+})
+
+test('REST image fallback skips unsafe earlier images without overriding a valid variant-specific image', () => {
+  const raw = {
+    ...fixtures.restMultiVariant,
+    images: [
+      { id: 1, src: 'http://cdn.shopify.com/unsafe-http.jpg' },
+      { id: 2, src: 'https://operator:secret@cdn.shopify.com/unsafe-credentials.jpg' },
+      { id: 4, src: 'https://cdn.shopify.com/safe-fallback.jpg' },
+      { id: 3, src: 'https://cdn.shopify.com/safe-variant.jpg' },
+    ],
+  }
+  const result = mapShopifyProducts([raw], USD)
+  assert.equal(result.skipped.length, 0)
+  assert.equal(result.products.length, 3)
+  assert.equal(byId(result, '41000000000001').image, 'https://cdn.shopify.com/safe-variant.jpg',
+    'a variant-specific valid image must take precedence over the product fallback')
+  assert.equal(byId(result, '41000000000002').image, 'https://cdn.shopify.com/safe-fallback.jpg',
+    'a safe later REST image must be used when the first images are unsafe')
+  assert.equal(byId(result, '41000000000003').image, 'https://cdn.shopify.com/safe-fallback.jpg')
+
+  const unsafeOnly = mapShopifyProducts([{ ...raw, images: raw.images.slice(0, 2) }], USD)
+  assert.equal(unsafeOnly.products.length, 3)
+  assert.ok(unsafeOnly.products.every(p => p.image === ''),
+    'unsafe-only REST images must not be exposed as trusted URLs')
+})
+
+test('unknown three-letter codes cannot label trusted Shopify catalog prices', () => {
+  for (const invalid of ['ZZZ', 'ABC', 'XTS']) {
+    assert.throws(() => normalizeCurrency(invalid), /not a supported ISO 4217 currency/)
+    assert.throws(() => mapShopifyProducts([], { currencyCode: invalid }), /not a supported ISO 4217 currency/)
+  }
+  for (const valid of ['USD', 'EUR', 'CAD', 'GBP', 'AUD']) {
+    assert.equal(normalizeCurrency(valid.toLowerCase()), valid)
+  }
+  assert.throws(() => normalizeCurrency('JPY'), /two minor-unit digits/)
 })

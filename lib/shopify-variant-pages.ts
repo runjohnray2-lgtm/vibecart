@@ -5,8 +5,8 @@
  */
 export const SHOPIFY_VARIANTS_QUERY =
   'query VibeCartProductVariants($productId: ID!, $cursor: String) { ' +
-  'product(id: $productId) { id variants(first: 100, after: $cursor) { ' +
-  'pageInfo { hasNextPage endCursor } nodes { id title sku price inventoryPolicy inventoryQuantity } ' +
+  'product(id: $productId) { id updatedAt variantsCount { count precision } variants(first: 100, after: $cursor) { ' +
+  'pageInfo { hasNextPage endCursor } nodes { id title sku price inventoryPolicy inventoryQuantity availableForSale inventoryItem { tracked } } ' +
   '} } }'
 
 type RecordValue = Record<string, unknown>
@@ -18,6 +18,10 @@ export type ShopifyVariantConnection = {
 export type ShopifyVariantPage = {
   productId: string
   variants: ShopifyVariantConnection
+  /** Fresh exact count returned by Admin on every continuation request. */
+  variantsCount?: { count: number; precision: string }
+  /** Product update timestamp reported alongside this continuation page. */
+  productUpdatedAt?: string | null
 }
 export type ShopifyRawProductsPage = {
   products: unknown[]
@@ -27,6 +31,8 @@ export type VariantPageOptions = {
   fetchVariantPage: (productId: string, cursor: string) => Promise<ShopifyVariantPage>
   maxVariantPages?: number
   maxVariantsPerProduct?: number
+  /** Admin snapshots must provide a version marker before a multi-page variant walk. */
+  requireVersionForContinuation?: boolean
 }
 function isRecord(value: unknown): value is RecordValue {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -60,6 +66,27 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
   }
   const productId = raw.id
   const initial = unpackConnection(raw.variants)
+  // Shopify includes updatedAt on the initial product query. When available,
+  // it detects same-count edits to the product while variant pages are read.
+  // This is additional drift evidence, not a transactional snapshot.
+  const originalUpdatedAt = typeof raw.updatedAt === 'string' && raw.updatedAt.trim()
+    ? raw.updatedAt : null
+  // A multi-page Admin walk without an initial version marker can mix
+  // variants from different revisions even when the EXACT count is unchanged.
+  // Keep the generic offline helper backwards compatible unless the trusted
+  // Admin adapter explicitly requires this snapshot-consistency evidence.
+  if (options.requireVersionForContinuation && initial.hasNextPage && originalUpdatedAt === null) {
+    throw new Error('Shopify variant pagination requires product updatedAt')
+  }
+  // Standalone hydration must reject an explicitly supplied approximate or
+  // malformed count, even without the Admin source's independent guard.
+  if (raw.variantsCount !== undefined &&
+      (!isRecord(raw.variantsCount) || raw.variantsCount.precision !== 'EXACT' ||
+       typeof raw.variantsCount.count !== 'number' ||
+       !Number.isSafeInteger(raw.variantsCount.count) || raw.variantsCount.count < 0)) {
+    throw new Error('Shopify initial exact variantsCount missing or approximate')
+  }
+  const originalCount = isRecord(raw.variantsCount) ? raw.variantsCount.count as number : null
   // Admin GraphQL requests at most 100 variants per page. A zero-item
   // nonterminal page or an oversized page cannot prove complete traversal.
   if (initial.nodes.length > 100 || (initial.nodes.length === 0 && initial.hasNextPage)) {
@@ -87,6 +114,9 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
       seen.add(id)
       all.push(node)
       if (all.length > maxVariants) throw new Error('Shopify variant count exceeds limit for ' + productId)
+      if (originalCount !== null && all.length > originalCount) {
+        throw new Error('Shopify hydrated variants exceed independent exact count')
+      }
     }
   }
   append(initial.nodes)
@@ -100,11 +130,29 @@ export async function hydrateShopifyProductVariants(raw: unknown, options: Varia
     cursors.add(cursor)
     const next = await options.fetchVariantPage(productId, cursor)
     if (!next || next.productId !== productId) throw new Error('Shopify variant page product id mismatch for ' + productId)
+    // A product's variants can change while the >100-variant family is being
+    // fetched. Comparing only the original count with the accumulated rows
+    // can silently accept a stale or mixed catalog. Require fresh EXACT count
+    // evidence from each continuation whenever the original count is known.
+    if (originalCount !== null) {
+      const fresh = next.variantsCount
+      if (!fresh || fresh.precision !== 'EXACT' || !Number.isSafeInteger(fresh.count) ||
+          fresh.count !== originalCount) {
+        throw new Error('Shopify variant count changed or became unverifiable during pagination for ' + productId)
+      }
+    }
+    if (originalUpdatedAt !== null && next.productUpdatedAt !== originalUpdatedAt) {
+      throw new Error('Shopify product updatedAt changed or became unverifiable during variant pagination for ' + productId)
+    }
     page = unpackConnection(next.variants)
     if (page.nodes.length > 100) throw new Error('Shopify continuation variant page exceeds first: 100 for ' + productId)
     if (page.nodes.length === 0) throw new Error('empty Shopify continuation variant page for ' + productId)
     append(page.nodes)
     pages++
+  }
+  // A terminal cursor alone cannot prove a complete family.
+  if (originalCount !== null && all.length !== originalCount) {
+    throw new Error('Shopify hydrated variants incomplete: independent exact count mismatch')
   }
   return { ...raw, variants: { nodes: all, pageInfo: { hasNextPage: false, endCursor: page.endCursor } } }
 }
