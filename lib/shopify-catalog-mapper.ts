@@ -333,6 +333,18 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
         continue
       }
 
+      // Mixed REST/GraphQL snapshots can carry both policy spellings. Reject
+      // contradictory values instead of trusting the preferred field: DENY
+      // versus CONTINUE changes whether Shopify permits overselling.
+      const graphPolicyPresent = Object.prototype.hasOwnProperty.call(variant, 'inventoryPolicy')
+      const restPolicyPresent = Object.prototype.hasOwnProperty.call(variant, 'inventory_policy')
+      const graphPolicy = text(variant.inventoryPolicy)?.toUpperCase()
+      const restPolicy = text(variant.inventory_policy)?.toUpperCase()
+      if (graphPolicyPresent && restPolicyPresent &&
+          (!graphPolicy || !restPolicy || graphPolicy !== restPolicy)) {
+        skip(productId, variantId, 'conflicting Shopify inventory policies')
+        continue
+      }
       const rawPolicy = text(variant.inventoryPolicy ?? variant.inventory_policy)
       const policyUpper = rawPolicy ? rawPolicy.toUpperCase() : undefined
       const inventoryPolicy = policyUpper === 'DENY' || policyUpper === 'CONTINUE' ? policyUpper : undefined
