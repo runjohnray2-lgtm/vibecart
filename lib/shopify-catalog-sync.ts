@@ -14,8 +14,8 @@ import { mapShopifyProducts, normalizeCurrency, shopifyId, type ShopifyCatalogPr
  * - Publication must be positively verified: a product whose publishedAt is not returned at
  *   all is not exposed (reason: publication status unknown).
  * - Inventory quantity never removes a product or variant. Made-to-order products report
- *   zero on hand. The Shopify inventory policy is kept on each snapshot entry
- *   (shopify.inventoryPolicy) and is not interpreted here.
+ *   zero on hand. Shopify policy and observed quantity remain server-only
+ *   diagnostics, not checkout authorization; Codex must recheck live sellability.
  * - Live use is gated on merchant auth and tenant isolation (#56) and on real
  *   credentials. Do not expose a tenant-unscoped endpoint built on this.
  *
@@ -63,7 +63,7 @@ export type ShopifyCatalogSnapshot = {
   products: ReadonlyMap<string, ShopifyCatalogProduct[]>
 }
 
-export type ShopifyVariantRef = { productId: string; variantId: string; sku?: string; inventoryPolicy: 'DENY' | 'CONTINUE' }
+export type ShopifyVariantRef = { productId: string; variantId: string; sku?: string; inventoryPolicy: 'DENY' | 'CONTINUE'; inventoryQuantity?: number | null }
 
 export type ShopifyApplyResult = {
   snapshot: ShopifyCatalogSnapshot
@@ -412,6 +412,11 @@ function assertSnapshotVariantMetadata(product: ShopifyCatalogProduct): void {
   if (product.shopify.inventoryPolicy !== 'DENY' && product.shopify.inventoryPolicy !== 'CONTINUE') {
     throw new Error('Shopify snapshot missing or invalid inventoryPolicy for catalog variant: ' + product.id)
   }
+  const quantity = product.shopify.inventoryQuantity
+  if (quantity !== undefined && quantity !== null &&
+      (typeof quantity !== 'number' || !Number.isSafeInteger(quantity))) {
+    throw new Error('invalid Shopify snapshot inventoryQuantity for catalog variant: ' + product.id)
+  }
   // A merchant SKU is an exact identifier, not display text. Preserve meaningful
   // whitespace, but reject corrupted non-string, blank or oversized values.
   const sku = product.sku
@@ -524,6 +529,7 @@ export function buildVariantIndex(snapshot: ShopifyCatalogSnapshot): Map<string,
         ...(p.sku ? { sku: p.sku } : {}),
         // Required and runtime-validated by assertSnapshotVariantMetadata above.
         inventoryPolicy: p.shopify.inventoryPolicy!,
+        ...(p.shopify.inventoryQuantity !== undefined ? { inventoryQuantity: p.shopify.inventoryQuantity } : {}),
       })
     }
   }
