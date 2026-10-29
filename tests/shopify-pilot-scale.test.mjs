@@ -131,7 +131,7 @@ test('44-product/970-variant synthetic Admin walk preserves exact prices, SKUs a
       const ref = index.get(raw.id)
       assert.deepEqual(ref, {
         productId: family.id, variantId: raw.id, sku: raw.sku,
-        inventoryPolicy: raw.inventoryPolicy,
+        inventoryPolicy: raw.inventoryPolicy, inventoryQuantity: 0,
       })
       if (raw.inventoryPolicy === 'CONTINUE') continueCount++
       else denyCount++
