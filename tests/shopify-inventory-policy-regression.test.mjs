@@ -31,12 +31,15 @@ test('direct sync preserves verified CONTINUE and DENY policies at zero stock wi
   assert.equal(result.skipped.length, 0)
   const variants = result.snapshot.products.get('701')
   assert.deepEqual(variants.map(p => p.shopify.inventoryPolicy), ['CONTINUE', 'DENY'])
+  assert.deepEqual(variants.map(p => p.shopify.inventoryQuantity), [0, 0])
   assert.deepEqual(variants.map(p => p.shopify.productId), [productId(701), productId(701)])
   assert.deepEqual(variants.map(p => p.shopify.variantId), [variantId(7011), variantId(7012)])
   assert.deepEqual(toCatalogFeed(result.snapshot).products.map(p => p.priceCents), [6599, 6599])
   const index = buildVariantIndex(result.snapshot)
   assert.deepEqual([...index.values()].map(ref => ref.inventoryPolicy), ['CONTINUE', 'DENY'])
   assert.equal(index.get(variantId(7012)).inventoryPolicy, 'DENY')
+  assert.equal(index.get(variantId(7012)).inventoryQuantity, 0)
+  assert.equal(index.get(variantId(7011)).inventoryQuantity, 0)
   assert.equal(JSON.stringify(toCatalogFeed(result.snapshot)).includes('inventoryQuantity'), false)
   assert.equal(JSON.stringify(toCatalogFeed(result.snapshot)).includes('inventoryPolicy'), false)
 })
@@ -99,4 +102,41 @@ test('whitespace-only merchant SKU rejects an entire Shopify family and preserve
   assert.match(result.skipped.map(s => s.reason).join('; '), /sku is whitespace-only/)
   assert.match(result.skipped.map(s => s.reason).join('; '), /entire family omitted/)
   assert.deepEqual(toCatalogFeed(base), before)
+})
+
+
+test('corrupt observed quantity rejects the entire family and restored index; last-good feed is unchanged', () => {
+  const base = applyProducts(createSnapshot('USD'), [family(707, ['CONTINUE', 'DENY'])]).snapshot
+  const before = structuredClone(toCatalogFeed(base))
+  for (const invalid of ['0', 0.5, Number.MAX_SAFE_INTEGER + 1, Infinity]) {
+    const corrupted = family(707, ['CONTINUE', 'DENY'])
+    corrupted.variants.nodes[1].inventoryQuantity = invalid
+    const result = applyProducts(base, [corrupted])
+    assert.equal(result.upserted, 0)
+    assert.equal(result.removed, 1)
+    assert.equal(result.snapshot.products.has('707'), false)
+    assert.match(result.skipped.map(s => s.reason).join('; '), /safe integer or null/)
+    assert.match(result.skipped.map(s => s.reason).join('; '), /entire family omitted/)
+    const original = base.products.get('707')
+    const poisoned = { ...base, products: new Map([['707', original.map(p => ({
+      ...p, shopify: { ...p.shopify, inventoryQuantity: invalid },
+    }))]]) }
+    assert.throws(() => buildVariantIndex(poisoned), /invalid Shopify snapshot inventoryQuantity/)
+    assert.throws(() => toCatalogFeed(poisoned), /invalid Shopify snapshot inventoryQuantity/)
+    assert.deepEqual(toCatalogFeed(base), before)
+  }
+})
+
+test('unknown and oversold quantities remain distinct from zero; no public stock claim is made', () => {
+  const raw = family(708, ['DENY', 'CONTINUE', 'DENY'])
+  raw.variants.nodes[0].inventoryQuantity = null
+  raw.variants.nodes[1].inventoryQuantity = -3
+  delete raw.variants.nodes[2].inventoryQuantity
+  const result = applyProducts(createSnapshot('USD'), [raw])
+  assert.equal(result.skipped.length, 0)
+  const index = buildVariantIndex(result.snapshot)
+  assert.equal(index.get(variantId(7081)).inventoryQuantity, null)
+  assert.equal(index.get(variantId(7082)).inventoryQuantity, -3)
+  assert.equal('inventoryQuantity' in index.get(variantId(7083)), false)
+  assert.doesNotMatch(JSON.stringify(toCatalogFeed(result.snapshot)), /inventoryQuantity|inventoryPolicy/)
 })
