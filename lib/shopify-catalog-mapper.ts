@@ -395,6 +395,8 @@ export function mapShopifyProducts(input: unknown, options: ShopifyMapOptions): 
         name,
         description,
         priceCents,
+        // A Shopify snapshot cannot certify checkout sellability; fail closed.
+        availability: 'unknown',
         image: variantImage(variant, images) ?? fallbackImage ?? '',
         ...(variantTitle ? { variant: variantTitle } : {}),
         ...(sku ? { sku } : {}),
