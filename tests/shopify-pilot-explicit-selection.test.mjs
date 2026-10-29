@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { page1, page2 } from './fixtures/shopify-sync-pages.mjs'
+import { gqlProduct, page1, page2 } from './fixtures/shopify-sync-pages.mjs'
 import { assertCatalogContract, loadTsModules } from './helpers/shopify-test-utils.mjs'
 
 const modules = await loadTsModules([
@@ -77,4 +77,51 @@ test('pilot selection validates unselected families and currency before projecti
     /unsupported by USD-only/,
   )
   assert.deepEqual(toCatalogFeed(snapshot), before, 'failed pilot projection must preserve the trusted snapshot')
+})
+
+
+test('protected pilot rejects known-unavailable variants but preserves untracked zero DENY and zero CONTINUE', () => {
+  const raw = gqlProduct(88, 'SYNTHETIC pilot availability', [
+    [881, 'Untracked zero DENY', 'SYN-881', '21.99'],
+    [882, 'Tracked zero DENY', 'SYN-882', '21.99'],
+    [883, 'Tracked zero CONTINUE', 'SYN-883', '21.99'],
+    [884, 'Unavailable CONTINUE', 'SYN-884', '21.99'],
+  ])
+  Object.assign(raw.variants.nodes[0], {
+    inventoryPolicy: 'DENY', inventoryQuantity: 0,
+    inventoryItem: { tracked: false }, availableForSale: true,
+  })
+  Object.assign(raw.variants.nodes[1], {
+    inventoryPolicy: 'DENY', inventoryQuantity: 0,
+    inventoryItem: { tracked: true }, availableForSale: false,
+  })
+  Object.assign(raw.variants.nodes[2], {
+    inventoryPolicy: 'CONTINUE', inventoryQuantity: 0,
+    inventoryItem: { tracked: true }, availableForSale: true,
+  })
+  Object.assign(raw.variants.nodes[3], {
+    inventoryPolicy: 'CONTINUE', inventoryQuantity: 0,
+    inventoryItem: { tracked: true }, availableForSale: false,
+  })
+  const applied = applyProducts(createSnapshot('USD'), [raw])
+  assert.equal(applied.skipped.length, 0)
+  const snapshot = applied.snapshot
+  const before = toCatalogFeed(snapshot)
+  assert.deepEqual(
+    toPilotCatalogFeed(snapshot, [V(883), V(881)]).products.map(p => p.id),
+    [V(881), V(883)],
+    'a zero-stock DENY variant can remain available when tracking is disabled',
+  )
+  for (const id of [V(882), V(884)]) {
+    assert.throws(
+      () => toPilotCatalogFeed(snapshot, [id]),
+      /explicitly reported unavailable/,
+    )
+  }
+  assert.throws(
+    () => toPilotCatalogFeed(snapshot, [V(881), V(882)]),
+    /explicitly reported unavailable/,
+    'one known-unavailable selection must fail the whole protected pilot projection',
+  )
+  assert.deepEqual(toCatalogFeed(snapshot), before, 'failed pilot selection must not mutate the trusted source')
 })
