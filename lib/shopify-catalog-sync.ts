@@ -398,7 +398,7 @@ function assertSnapshotCurrency(snapshot: ShopifyCatalogSnapshot): void {
   // Keep non-USD mapping available for diagnostics, but block checkout feeds
   // and server-side variant lookups until currency is end-to-end supported.
   if (normalized !== 'USD') {
-    throw new Error('Shopify currency ' + normalized + ' is unsupported by USD-only VibeCart checkout')
+    throw new Error('Shopify currency ' + normalized + ' is unsupported by USD-only VibeCart payment currency')
   }
 }
 
@@ -544,7 +544,7 @@ export async function syncShopifyCatalog(options: ShopifySyncOptions): Promise<S
   // Fail before any Admin page fetch: the downstream VibeCart cart/Stripe
   // contract currently hardcodes USD, regardless of Shopify's currency.
   if (shopCurrency !== 'USD') {
-    throw new Error('Shopify currency ' + shopCurrency + ' is unsupported by USD-only VibeCart checkout')
+    throw new Error('Shopify currency ' + shopCurrency + ' is unsupported by USD-only VibeCart payment currency')
   }
   if (options.base && options.base.currencyCode !== shopCurrency) {
     throw new Error('base snapshot currency ' + options.base.currencyCode + ' does not match ' + shopCurrency)

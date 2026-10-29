@@ -18,7 +18,7 @@ test('non-USD Shopify prices cannot reach a USD-only feed or variant lookup', as
   const snapshot = applyProducts(createSnapshot('EUR'), [synthetic]).snapshot
   assert.equal(snapshot.products.size, 1, 'valid EUR Shopify data can still be mapped for diagnostics')
   for (const fn of [toCatalogFeed, buildVariantIndex]) {
-    assert.throws(() => fn(snapshot), /EUR.*USD-only VibeCart checkout/,
+    assert.throws(() => fn(snapshot), /EUR.*USD-only VibeCart payment currency/,
       'non-USD price must not be represented as a USD charge')
   }
   let fetches = 0
@@ -28,7 +28,7 @@ test('non-USD Shopify prices cannot reach a USD-only feed or variant lookup', as
       fetches++
       throw new Error('foreign-currency sync must be rejected before fetching Shopify')
     },
-  }), /EUR.*USD-only VibeCart checkout/)
+  }), /EUR.*USD-only VibeCart payment currency/)
   assert.equal(fetches, 0, 'reject unsupported currency before external Admin requests')
 })
 
