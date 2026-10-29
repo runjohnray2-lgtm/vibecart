@@ -35,9 +35,10 @@ test('protected pilot selects only explicit trusted variants, retaining exact id
   assert.deepEqual(pilot.products.map(p => p.priceCents), [1000, 725])
   assertCatalogContract(pilot.products)
   for (const product of pilot.products) {
+    assert.equal(product.availability, 'unknown', 'snapshot is not checkout authorization')
     assert.deepEqual(
       Object.keys(product).sort(),
-      ['description', 'id', 'image', 'name', 'priceCents', 'variant'].sort(),
+      ['availability', 'description', 'id', 'image', 'name', 'priceCents', 'variant'].sort(),
       'server-only Shopify SKU and inventory metadata must not leak to the agent feed',
     )
   }
