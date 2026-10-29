@@ -358,6 +358,9 @@ export function applyProductDeleted(
 
 /** A REST numeric id and its Admin ProductVariant GID are the same Shopify identity. */
 function canonicalVariantKey(id: string): string {
+  // Persisted snapshots are untrusted runtime data. RegExp.exec coerces numeric
+  // values to strings, which would let a non-string identity enter the server index.
+  if (typeof id !== 'string') throw new Error('invalid Shopify variant id in snapshot: expected string')
   const match = /^(?:([1-9]\d*)|gid:\/\/shopify\/ProductVariant\/([1-9]\d*))$/.exec(id)
   if (!match) throw new Error('invalid Shopify variant id in snapshot: ' + id)
   return match[1] ?? match[2]!
@@ -366,6 +369,11 @@ function canonicalVariantKey(id: string): string {
 /** A snapshot's family key must identify the same Shopify Product as every variant's owner. */
 function assertSnapshotProductOwnership(familyKey: string, product: ShopifyCatalogProduct): void {
   const id = product.shopify.productId
+  // Reject coerced numeric IDs in restored snapshots; identity must remain a
+  // string through the public catalog and merchant-scoped server lookup.
+  if (typeof id !== 'string') {
+    throw new Error('Shopify snapshot product id mismatch for catalog variant: ' + product.id)
+  }
   const match = /^(?:([1-9]\d*)|gid:\/\/shopify\/Product\/([1-9]\d*))$/.exec(id)
   if (!match || (match[1] ?? match[2]) !== familyKey) {
     throw new Error('Shopify snapshot product id mismatch for catalog variant: ' + product.id)
