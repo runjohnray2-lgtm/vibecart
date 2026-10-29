@@ -125,3 +125,29 @@ test('protected pilot rejects known-unavailable variants but preserves untracked
   )
   assert.deepEqual(toCatalogFeed(snapshot), before, 'failed pilot selection must not mutate the trusted source')
 })
+
+test('restored Shopify identities must remain strings at feed and server-index boundaries', () => {
+  const trusted = verifiedSyntheticSnapshot()
+  const [familyKey, variants] = [...trusted.products][0]
+  const originalFeed = toCatalogFeed(trusted)
+  for (const [field, invalid] of [
+    ['id', 11],
+    ['shopify.productId', 1],
+    ['shopify.variantId', 11],
+    ['id', null],
+    ['shopify.productId', null],
+    ['shopify.variantId', null],
+  ]) {
+    const bad = { ...variants[0], shopify: { ...variants[0].shopify } }
+    if (field === 'id') bad.id = invalid
+    else bad.shopify[field.split('.')[1]] = invalid
+    const families = new Map(trusted.products)
+    families.set(familyKey, [bad, ...variants.slice(1)])
+    const corrupted = { ...trusted, products: families }
+    const reason = /invalid Shopify variant id in snapshot|Shopify snapshot product id mismatch/
+    assert.throws(() => buildVariantIndex(corrupted), reason, field)
+    assert.throws(() => toCatalogFeed(corrupted), reason, field)
+    assert.throws(() => toPilotCatalogFeed(corrupted, [V(11)]), reason, field)
+  }
+  assert.deepEqual(toCatalogFeed(trusted), originalFeed, 'rejected snapshots cannot mutate the trusted source')
+})
